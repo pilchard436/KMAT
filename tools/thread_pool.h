@@ -54,6 +54,7 @@ int get_incr_thread_counter(int counter_index);
  *
  * @param thread_pool The thread pool structure to be joined.
  */
+void join_thread_pool(struct Thread_Pool thread_pool);
 
 
 /**

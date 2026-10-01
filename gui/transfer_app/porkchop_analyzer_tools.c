@@ -4,61 +4,24 @@
 
 
 
-void swap_arr(double *a, double *b) {
-	double temp = *a;
-	*a = *b;
-	*b = temp;
+static enum LastTransferType sort_last_transfer_type;
+
+static double porkchop_total_dv(struct PorkchopAnalyzerPoint point) {
+	double total_dv = point.data.dv_dep + point.data.dv_dsm;
+	if(sort_last_transfer_type == TF_CAPTURE) total_dv += point.data.dv_arr_cap;
+	if(sort_last_transfer_type == TF_CIRC) total_dv += point.data.dv_arr_circ;
+	return total_dv;
 }
 
-void swap_porkchop(struct PorkchopAnalyzerPoint *porkchop, int a_ind, int b_ind) {
-	struct PorkchopAnalyzerPoint temp;
-	temp = porkchop[a_ind];
-	porkchop[a_ind] = porkchop[b_ind];
-	porkchop[b_ind] = temp;
-}
-
-void swap(double arr[], int a_ind, int b_ind, struct PorkchopAnalyzerPoint *porkchop) {
-	swap_arr(&arr[a_ind], &arr[b_ind]);
-	swap_porkchop(porkchop, a_ind, b_ind);
-}
-
-int partition(double arr[], int low, int high, struct PorkchopAnalyzerPoint *porkchop) {
-	int pivot_index = (low + high) / 2;	// choosing pivot in middle reduces time for already sorted list dramatically
-	double pivot = arr[pivot_index];
-	int i = (low - 1);
-
-	// Move pivot to end of array
-	swap(arr, pivot_index, high, porkchop);
-
-	for (int j = low; j <= high - 1; j++) {
-		if (arr[j] < pivot) {
-			i++;
-			swap(arr, i, j, porkchop);
-		}
-	}
-	swap(arr, i+1, high, porkchop);
-	return (i + 1);
-}
-
-void quicksort_porkchop(double *arr, int low, int high, struct PorkchopAnalyzerPoint *pps) {
-	if (low < high) {
-		int pi = partition(arr, low, high, pps);
-
-		quicksort_porkchop(arr, low, pi - 1, pps);
-		quicksort_porkchop(arr, pi + 1, high, pps);
-	}
+static int compare_porkchop_points(const void *left, const void *right) {
+	double left_dv = porkchop_total_dv(*(const struct PorkchopAnalyzerPoint *)left);
+	double right_dv = porkchop_total_dv(*(const struct PorkchopAnalyzerPoint *)right);
+	return (left_dv > right_dv) - (left_dv < right_dv);
 }
 
 void sort_porkchop(struct PorkchopAnalyzerPoint *pp, int num_itins, enum LastTransferType last_transfer_type) {
-	double *dvs = (double*) malloc(num_itins*sizeof(double));
-	for(int i = 0; i < num_itins; i++)  {
-		dvs[i] = pp[i].data.dv_dep + pp[i].data.dv_dsm;
-		if(last_transfer_type == TF_CAPTURE) dvs[i] += pp[i].data.dv_arr_cap;
-		if(last_transfer_type == TF_CIRC) dvs[i] += pp[i].data.dv_arr_circ;
-	}
-
-	quicksort_porkchop(dvs, 0, num_itins - 1, pp);
-	free(dvs);
+	sort_last_transfer_type = last_transfer_type;
+	qsort(pp, num_itins, sizeof(struct PorkchopAnalyzerPoint), compare_porkchop_points);
 }
 
 void get_min_max_dep_arr_dur_range_from_mouse_rect(double *p_x0, double *p_x1, double *p_y0, double *p_y1, double min_x_val, double max_x_val, double min_y_val, double max_y_val, double screen_width, double screen_height, int dur0arrdate1) {

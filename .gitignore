@@ -67,3 +67,6 @@ dkms.conf
 
 # VSCode
 .vscode/
+
+# CMake build output
+/build/

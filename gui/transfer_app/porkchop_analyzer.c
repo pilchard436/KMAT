@@ -10,6 +10,7 @@
 #include <string.h>
 #include <locale.h>
 #include <math.h>
+#include <stdint.h>
 
 int pa_num_deps, pa_num_itins;
 struct ItinStep **pa_departures;
@@ -540,76 +541,88 @@ int compare_by_count(const void *a, const void *b) {
 	return (groupB->count - groupA->count);
 }
 
-struct PorkchopGroup * find_itin_group(struct ItinStep *arrival) {
-	struct ItinStep *ptr, *group_ptr;
-	for(int i = 0; i < pa_num_groups; i++) {
-		ptr = arrival;
-		group_ptr = pa_groups[i].sample_arrival_node;
-		while(group_ptr != NULL) {
-			if(ptr == NULL) break;
-			if(ptr->body != group_ptr->body) break;
-			else {
-				if(ptr->prev == NULL && group_ptr->prev == NULL) {
-					return &pa_groups[i];
-				}
-			}
-			group_ptr = group_ptr->prev;
-			ptr = ptr->prev;
-		}
+static size_t hash_itinerary_route(struct ItinStep *arrival) {
+	size_t hash = (size_t)1469598103934665603ULL;
+	for(struct ItinStep *step = arrival; step != NULL; step = step->prev) {
+		hash ^= (size_t)(uintptr_t)step->body;
+		hash *= (size_t)1099511628211ULL;
 	}
-	return NULL;
+	return hash;
+}
+
+static int itineraries_have_same_route(struct ItinStep *first, struct ItinStep *second) {
+	while(first != NULL && second != NULL) {
+		if(first->body != second->body) return 0;
+		if(first->prev == NULL || second->prev == NULL) return first->prev == NULL && second->prev == NULL;
+		first = first->prev;
+		second = second->prev;
+	}
+	return first == NULL && second == NULL;
 }
 
 void initialize_itinerary_groups() {
-	int max_num_groups = 8;
-	pa_groups = malloc(max_num_groups * sizeof(struct PorkchopGroup));
+	if(pa_num_itins <= 0) {
+		pa_num_groups = 0;
+		pa_groups = NULL;
+		return;
+	}
+
+	size_t group_table_size = (size_t)pa_num_itins * 2 + 1;
+	int *group_slots = calloc(group_table_size, sizeof(int));
+	pa_groups = calloc(pa_num_itins, sizeof(struct PorkchopGroup));
 	pa_num_groups = 0;
+	if(group_slots == NULL || pa_groups == NULL) {
+		free(group_slots);
+		free(pa_groups);
+		pa_groups = NULL;
+		return;
+	}
+
 	for(int i = 0; i < pa_num_itins; i++) {
-		struct ItinStep *ptr, *group_ptr;
-		int is_part_of_group = 0;
-		for(int j = 0; j < pa_num_groups; j++) {
-			ptr = pa_porkchop_points[i].data.arrival;
-			group_ptr = pa_groups[j].sample_arrival_node;
-			while(group_ptr != NULL) {
-				if(ptr == NULL) break;
-				if(ptr->body != group_ptr->body) break;
-				else {
-					if(ptr->prev == NULL && group_ptr->prev == NULL) {
-						is_part_of_group = 1; break;
-					}
-				}
-				group_ptr = group_ptr->prev;
-				ptr = ptr->prev;
-			}
-			if(is_part_of_group) {
-				pa_groups[j].count++;
+		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
+		size_t slot = hash_itinerary_route(arrival) % group_table_size;
+		while(group_slots[slot] != 0) {
+			int group_idx = group_slots[slot] - 1;
+			if(itineraries_have_same_route(arrival, pa_groups[group_idx].sample_arrival_node)) {
+				pa_groups[group_idx].count++;
 				break;
 			}
+			slot = (slot + 1) % group_table_size;
 		}
-		if(!is_part_of_group) {
-			if(pa_num_groups >= max_num_groups) {
-				max_num_groups *= 2;
-				struct PorkchopGroup *temp = realloc(pa_groups, max_num_groups * sizeof(struct PorkchopGroup));
-				if(temp != NULL) pa_groups = temp;
-				else {
-					printf("Problem reallocating Porkchop Groups!!!\n");
-					pa_num_groups--;
-				}
-			}
-			pa_groups[pa_num_groups].sample_arrival_node = pa_porkchop_points[i].data.arrival;
-			pa_groups[pa_num_groups].count = 1;
-			pa_groups[pa_num_groups].num_steps = 1;
-			pa_groups[pa_num_groups].show_group = 1;
-			pa_groups[pa_num_groups].has_itin_inside_filter = 1;
-			ptr = pa_porkchop_points[i].data.arrival;
-			while(ptr->prev != NULL) {ptr = ptr->prev; pa_groups[pa_num_groups].num_steps++;}
-			pa_num_groups++;
+		if(group_slots[slot] == 0) {
+			int group_idx = pa_num_groups++;
+			group_slots[slot] = group_idx + 1;
+			pa_groups[group_idx].sample_arrival_node = arrival;
+			pa_groups[group_idx].count = 1;
+			pa_groups[group_idx].num_steps = 1;
+			pa_groups[group_idx].show_group = 1;
+			pa_groups[group_idx].has_itin_inside_filter = 1;
+			for(struct ItinStep *step = arrival; step->prev != NULL; step = step->prev)
+				pa_groups[group_idx].num_steps++;
 		}
 	}
 
 	qsort(pa_groups, pa_num_groups, sizeof(struct PorkchopGroup), compare_by_count);
 
-	for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].group = find_itin_group(pa_porkchop_points[i].data.arrival);
+	memset(group_slots, 0, group_table_size * sizeof(int));
+	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
+		size_t slot = hash_itinerary_route(pa_groups[group_idx].sample_arrival_node) % group_table_size;
+		while(group_slots[slot] != 0) slot = (slot + 1) % group_table_size;
+		group_slots[slot] = group_idx + 1;
+	}
+	for(int i = 0; i < pa_num_itins; i++) {
+		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
+		size_t slot = hash_itinerary_route(arrival) % group_table_size;
+		while(group_slots[slot] != 0) {
+			int group_idx = group_slots[slot] - 1;
+			if(itineraries_have_same_route(arrival, pa_groups[group_idx].sample_arrival_node)) {
+				pa_porkchop_points[i].group = &pa_groups[group_idx];
+				break;
+			}
+			slot = (slot + 1) % group_table_size;
+		}
+	}
+	free(group_slots);
 
 	update_group_overview();
 }

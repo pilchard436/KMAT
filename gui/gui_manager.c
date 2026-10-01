@@ -2,6 +2,7 @@
 #include "info_win_manager.h"
 #include <gtk/gtk.h>
 #include <locale.h>
+#include <stdlib.h>
 #include "css_loader.h"
 #include "settings.h"
 #include "transfer_app/transfer_planner.h"
@@ -43,11 +44,11 @@ void activate_app(GtkApplication *app, gpointer gui_filepath);
 
 void start_gui(const char* gui_filepath) {
 	// init launcher from db for launch calc gui
-//	num_launcher = get_all_launch_vehicles_from_database(&all_launcher, &launcher_ids);
+	num_launcher = get_all_launch_vehicles_from_database(&all_launcher, &launcher_ids);
 	setlocale(LC_NUMERIC, "C");	// Glade somehow uses commas instead of points for decimals...
 
 	// init app
-	GtkApplication *app = gtk_application_new ("org.gtk.example", G_APPLICATION_FLAGS_NONE);
+	GtkApplication *app = gtk_application_new ("org.gtk.example", G_APPLICATION_DEFAULT_FLAGS);
 	g_signal_connect (app, "activate", G_CALLBACK (activate_app), (gpointer) gui_filepath);
 	g_application_run (G_APPLICATION (app), 0, NULL);
 	g_object_unref (app);
@@ -65,6 +66,12 @@ void start_gui(const char* gui_filepath) {
 	close_launch_parameter_analyzer();
 	// reset db gui
 	close_mission_db();
+	for(int i = 0; i < num_launcher; i++) free(all_launcher[i].stages);
+	free(all_launcher);
+	free(launcher_ids);
+	all_launcher = NULL;
+	launcher_ids = NULL;
+	num_launcher = 0;
 }
 
 void activate_app(GtkApplication *app, gpointer gui_filepath) {
@@ -87,7 +94,7 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	char css_path[MAX_PATH] = {0};
 	char cache_path[MAX_PATH] = {0};
 
-	resolve_win_relative_path("../GUI/theme/share/themes/Breeze-Dark/gtk-3.0/gtk.css", css_path);
+	resolve_win_relative_path("../GUI/theme/breeze-dark-win.css", css_path);
 	resolve_win_relative_path("../lib/gdk-pixbuf-2.0/2.10.0/loaders.cache", cache_path);
 
 	g_setenv("GDK_PIXBUF_MODULE_FILE", cache_path, TRUE);
@@ -105,11 +112,11 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	init_porkchop_analyzer(builder);
 	init_transfer_planner(builder);
 	// init launch calc page
-//	init_launch_analyzer(builder);
-//	init_capability_analyzer(builder);
-//	init_launch_parameter_analyzer(builder);
+	init_launch_analyzer(builder);
+	init_capability_analyzer(builder);
+	init_launch_parameter_analyzer(builder);
 	// init db page
-//	init_mission_db(builder);
+	init_mission_db(builder);
 	// init progress window
 	init_info_windows(builder);
 
@@ -373,31 +380,32 @@ void update_launcher_dropdown(GtkComboBox *cb_sel_launcher) {
 
 void update_profile_dropdown(GtkComboBox *cb_sel_launcher, GtkComboBox *cb_sel_profile) {
 	int id = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_sel_launcher));
-	struct LaunchProfiles_DB profiles = db_get_launch_profiles_from_lv_id(launcher_ids[id]);
-
 	GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
 	GtkTreeIter iter;
-	// Add items to the list store
-	for(int i = 0; i < profiles.num_profiles; i++) {
-		gtk_list_store_append(store, &iter);
-		char entry[50];
-		switch(profiles.profile[i].profiletype) {
-			case 1: sprintf(entry, "p = %.0f", profiles.profile[i].lp_params[0]);
-				break;
-			case 2: sprintf(entry, "p = 90*exp(-%f*h)", profiles.profile[i].lp_params[0]);
-				break;
-			case 3: sprintf(entry, "p = (90-%.0f)*exp(-%f*h) + %.0f",
-							profiles.profile[i].lp_params[1],
-							profiles.profile[i].lp_params[0],
-							profiles.profile[i].lp_params[1]);
-				break;
-			case 4: sprintf(entry, "p4(%f, %f, %f)",
-							profiles.profile[i].lp_params[0],
-							profiles.profile[i].lp_params[2],
-							profiles.profile[i].lp_params[1]);
-				break;
+	if(id >= 0 && id < num_launcher) {
+		struct LaunchProfiles_DB profiles = db_get_launch_profiles_from_lv_id(launcher_ids[id]);
+		for(int i = 0; i < profiles.num_profiles; i++) {
+			gtk_list_store_append(store, &iter);
+			char entry[50];
+			switch(profiles.profile[i].profiletype) {
+				case 1: sprintf(entry, "p = %.0f", profiles.profile[i].lp_params[0]);
+					break;
+				case 2: sprintf(entry, "p = 90*exp(-%f*h)", profiles.profile[i].lp_params[0]);
+					break;
+				case 3: sprintf(entry, "p = (90-%.0f)*exp(-%f*h) + %.0f",
+								profiles.profile[i].lp_params[1],
+								profiles.profile[i].lp_params[0],
+								profiles.profile[i].lp_params[1]);
+					break;
+				case 4: sprintf(entry, "p4(%f, %f, %f)",
+								profiles.profile[i].lp_params[0],
+								profiles.profile[i].lp_params[2],
+								profiles.profile[i].lp_params[1]);
+					break;
+				default: sprintf(entry, "Unknown profile");
+			}
+			gtk_list_store_set(store, &iter, 0, entry, 1, i, -1);
 		}
-		gtk_list_store_set(store, &iter, 0, entry, 1, i, -1);
 	}
 
 	gtk_combo_box_set_model(GTK_COMBO_BOX(cb_sel_profile), GTK_TREE_MODEL(store));

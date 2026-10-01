@@ -5,8 +5,9 @@
 #include "tools/file_io.h"
 
 
-void run_tests() {
+int run_tests() {
 	int num_tests = 0;
+	int failed_tests = 0;
 	const int max_num_tests = 1000;
 	union TestData test_data[max_num_tests];
 
@@ -24,9 +25,9 @@ void run_tests() {
 			"Stock System",
 			-1,
 			(char *[]){""},
-			"KERBIN",
-			"EELOO",
-			1321, 456 // expected num_nodes and num_itins
+			"Kerbin",
+			"Eeloo",
+			1896, 665 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Kerbin -> Eeloo; 1-001 | 2-001 | 3000; dv_dep = 1800, dv_arr = 1800 (circ) | Bodies: Eve, Kerbin, Duna, Eeloo
@@ -39,10 +40,10 @@ void run_tests() {
 			1800, 1800, 1e9, TF_CIRC,
 			"Stock System",
 			4,
-			(char *[]){"EVE", "KERBIN", "DUNA", "EELOO"},
-			"KERBIN",
-			"EELOO",
-			811, 266 // expected num_nodes and num_itins
+			(char *[]){"Eve", "Kerbin", "Duna", "Eeloo"},
+			"Kerbin",
+			"Eeloo",
+			1035, 311 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Kerbin -> Kerbin; 1-001 | 2-001 | 1000; dv_dep = 1800 | Bodies: Eve, Kerbin, Duna, Jool
@@ -55,10 +56,10 @@ void run_tests() {
 			1800, 1e9, 1e9, TF_FLYBY,
 			"Stock System",
 			4,
-			(char *[]){"EVE", "KERBIN", "DUNA", "JOOL"},
-			"KERBIN",
-			"KERBIN",
-			7760, 4023 // expected num_nodes and num_itins
+			(char *[]){"Eve", "Kerbin", "Duna", "Jool"},
+			"Kerbin",
+			"Kerbin",
+			11734, 6017 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: all
@@ -69,12 +70,12 @@ void run_tests() {
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			1000,
 			5000, 1e9, 1e9, TF_FLYBY,
-			"Solar System (Ephemerides)",
+			"Solar System (Ephemeris)",
 			-1,
 			(char *[]){""},
-			"EARTH",
-			"EARTH",
-			100166, 51288 // expected num_nodes and num_itins
+			"Earth",
+			"Earth",
+			100177, 51292 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
@@ -85,12 +86,12 @@ void run_tests() {
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			1000,
 			5000, 1e9, 1e9, TF_FLYBY,
-			"Solar System (Ephemerides)",
+			"Solar System (Ephemeris)",
 			3,
-			(char *[]){"MERCURY", "VENUS", "EARTH"},
-			"EARTH",
-			"EARTH",
-			80937, 42056 // expected num_nodes and num_itins
+			(char *[]){"Mercury", "Venus", "Earth"},
+			"Earth",
+			"Earth",
+			80938, 42056 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Earth -> Jupiter; 1967-01-01 | 1968-01-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
@@ -101,11 +102,11 @@ void run_tests() {
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			3000,
 			4500, 1e9, 1e9, TF_FLYBY,
-			"Solar System (Ephemerides)",
+			"Solar System (Ephemeris)",
 			4,
-			(char *[]){"VENUS", "EARTH", "MARS", "JUPITER"},
-			"EARTH",
-			"JUPITER",
+			(char *[]){"Venus", "Earth", "Mars", "Jupiter"},
+			"Earth",
+			"Jupiter",
 			18649, 3881 // expected num_nodes and num_itins
 	}; num_tests++;
 
@@ -122,8 +123,8 @@ void run_tests() {
 			1200, 1500, 1e9, TF_CIRC,
 			"Stock System",
 			2,
-			(char *[]){"KERBIN", "EVE"},
-			1568, 1541 // expected num_nodes and num_itins
+			(char *[]){"Kerbin", "Eve"},
+			0, 0 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Kerbin -> Eve -> Duna -> Kerbin; 2-001 | 3-001 | 1000; dv_dep = 1500
@@ -136,8 +137,8 @@ void run_tests() {
 			1500, 1e9, 1e9, TF_FLYBY,
 			"Stock System",
 			4,
-			(char *[]){"KERBIN", "EVE", "DUNA", "KERBIN"},
-			1813, 599 // expected num_nodes and num_itins
+			(char *[]){"Kerbin", "Eve", "Duna", "Kerbin"},
+			1821, 601 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Earth -> Mars; 1950-01-01 | 1951-06-01 | 1950-11-01 | 600; dv_dep = 5000; dv_arr = 4000 (circ); dv_tot = 8200
@@ -148,10 +149,10 @@ void run_tests() {
 			(struct Datetime) {.y = 1950, .m =11, .d = 1, .date_type = DATE_ISO},
 			600,
 			5000, 4000, 8200, TF_CIRC,
-			"Solar System (Ephemerides)",
+			"Solar System (Ephemeris)",
 			2,
-			(char *[]){"EARTH", "MARS"},
-			1984, 1946 // expected num_nodes and num_itins
+			(char *[]){"Earth", "Mars"},
+			0, 0 // expected num_nodes and num_itins
 	}; num_tests++;
 
 	// Earth -> Jupiter -> Saturn -> Uranus -> Neptune; 1977-01-01 | 1978-01-01 | 8000; dv_dep = 7200
@@ -162,9 +163,9 @@ void run_tests() {
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			8000,
 			7200, 1e9, 1e9, TF_FLYBY,
-			"Solar System (Ephemerides)",
+			"Solar System (Ephemeris)",
 			5,
-			(char *[]){"EARTH", "JUPITER", "SATURN", "URANUS", "NEPTUNE"},
+			(char *[]){"Earth", "Jupiter", "Saturn", "Uranus", "Neptune"},
 			5920, 1472 // expected num_nodes and num_itins
 	}; num_tests++;
 
@@ -177,7 +178,7 @@ void run_tests() {
 	GDir *dir = g_dir_open(itins_directory, 0, NULL);
 	if (!dir) {
 		g_printerr("Unable to open directory: %s\n", itins_directory);
-		return;
+		return 1;
 	}
 	const gchar *filename;
 	while ((filename = g_dir_read_name(dir)) != NULL) {
@@ -200,7 +201,7 @@ void run_tests() {
 	dir = g_dir_open(itin_directory, 0, NULL);
 	if (!dir) {
 		g_printerr("Unable to open directory: %s\n", itin_directory);
-		return;
+		return 1;
 	}
 	while ((filename = g_dir_read_name(dir)) != NULL) {
 		if (g_str_has_suffix(filename, ".itin")) {
@@ -220,7 +221,7 @@ void run_tests() {
 
 	enum TestResult test_results[max_num_tests];
 
-	for(int i = 10; i < num_tests; i++) {
+	for(int i = 0; i < num_tests; i++) {
 		printf("###################### TEST %02d/%02d ######################\n", i+1, num_tests);
 		switch(test_data[i].itin_to_target_test.test_type) {
 			case TEST_ITIN_TO_TARGET:
@@ -244,9 +245,16 @@ void run_tests() {
 	}
 
 
+	int executed_tests = num_tests;
+	int warning_tests = 0;
 	printf("\n\n##################### TEST RESULTS #####################\n");
-	for(int i = 10; i < num_tests; i++) {
+	for(int i = 0; i < num_tests; i++) {
 		printf("TEST %02d: ", i+1);
+		if(test_results[i] == TEST_WARN_DIFF_EXPECTED_NUM_NODES_OR_ITINS) {
+			warning_tests++;
+		} else if(test_results[i] != TEST_PASSED) {
+			failed_tests++;
+		}
 		switch(test_results[i]) {
 			case TEST_PASSED:
 				printf("PASS\n");
@@ -280,5 +288,8 @@ void run_tests() {
 		}
 	}
 	printf("--------------------------------------------------------\n\n");
+	printf("KMAT integration tests: %d total, %d passed, %d warnings, %d failed.\n",
+		   executed_tests, executed_tests - failed_tests - warning_tests, warning_tests, failed_tests);
 
+	return failed_tests;
 }

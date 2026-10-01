@@ -1,5 +1,5 @@
-#ifndef KSP_CAPABILITY_CALCULATOR_H
-#define KSP_CAPABILITY_CALCULATOR_H
+#ifndef KSP_CAPABILITY_ANALYZER_H
+#define KSP_CAPABILITY_ANALYZER_H
 
 #include <gtk/gtk.h>
 
@@ -12,4 +12,4 @@ G_MODULE_EXPORT void on_ca_change_launcher(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_capability_analyzer_disp_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
 G_MODULE_EXPORT void on_ca_analyze();
 
-#endif //KSP_CAPABILITY_CALCULATOR_H
+#endif //KSP_CAPABILITY_ANALYZER_H

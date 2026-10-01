@@ -2,95 +2,107 @@ cmake_minimum_required(VERSION 3.26)
 project(KMAT C)
 
 set(CMAKE_C_STANDARD 11)
+include(CTest)
 
 include_directories(.)
 
 add_subdirectory(external/orbitlib)
 
 add_executable(KMAT
-        tools/file_io.c
-        tools/file_io.h
-        launch_calculator/launch_calculator.c
-        launch_calculator/launch_calculator.h
-        launch_calculator/lv_profile.c
-        launch_calculator/lv_profile.h
-        main.c
-        tools/tool_funcs.c
-        tools/tool_funcs.h
-        launch_calculator/launch_circularization.c
-        launch_calculator/launch_circularization.h
-        launch_calculator/lp_parameters.c
-        launch_calculator/lp_parameters.h
-        orbit_calculator/transfer_calc.c
-        orbit_calculator/transfer_calc.h
-        launch_calculator/lp_parameters.h
-        tools/thread_pool.c
-        tools/thread_pool.h
-        gui/drawing.c
-        gui/drawing.h
-        tools/thread_pool.h
-        orbit_calculator/double_swing_by.c
-        orbit_calculator/double_swing_by.h
-        database/database.c
-        database/database.h
-        orbit_calculator/double_swing_by.h
-        orbit_calculator/itin_tool.c
-        orbit_calculator/itin_tool.h
-        gui/transfer_app/transfer_planner.c
-        gui/transfer_app/transfer_planner.h
-        gui/transfer_app/porkchop_analyzer.c
-        gui/transfer_app/porkchop_analyzer.h
-        gui/transfer_app/porkchop_analyzer_tools.c
-        gui/transfer_app/porkchop_analyzer_tools.h
-        gui/transfer_app/sequence_calculator.c
-        gui/transfer_app/sequence_calculator.h
-        launch_calculator/launch_sim.c
-        launch_calculator/launch_sim.h
-        launch_calculator/launch_state.c
-        launch_calculator/launch_state.h
-        gui/launch_app/launch_analyzer.c
-        gui/launch_app/launch_analyzer.h
-        database/lv_database.c
-        database/lv_database.h
-        gui/launch_app/capability_analyzer.c
-        gui/launch_app/capability_analyzer.h
-        launch_calculator/capability_calculator.c
-        launch_calculator/capability_calculator.h
-        gui/launch_app/launch_parameter_analyzer.c
-        gui/launch_app/launch_parameter_analyzer.h
-        gui/database_app/mission_db.c
-        gui/database_app/mission_db.h
-        database/mission_database.c
-        database/mission_database.h
-        gui/css_loader.c
-        gui/css_loader.h
-        gui/database_app/database_app_tools/mission_db_tools.c
-        gui/database_app/database_app_tools/mission_db_tools.h
-        gui/database_app/database_app_tools/mission_manager_tools.c
-        gui/database_app/database_app_tools/mission_manager_tools.h
-        tools/gmat_interface.c
-        tools/gmat_interface.h
-        orbit_calculator/itin_dsb_tool.c
-        orbit_calculator/itin_dsb_tool.h
-        gui/transfer_app/itinerary_calculator.c
-        gui/transfer_app/itinerary_calculator.h
-        gui/gui_manager.c
-        gui/gui_manager.h
-        gui/info_win_manager.c
-        gui/info_win_manager.h
-        gui/settings.c
-        gui/settings.h
-        00_Testing/testing.c
-        00_Testing/testing.h
-        00_Testing/testing_algorithms.c
-        00_Testing/testing_algorithms.h
-        gui/gui_tools/camera.c
-        gui/gui_tools/camera.h
-        gui/gui_tools/screen.c
-        gui/gui_tools/screen.h
-        tools/version_tool.c
-        tools/version_tool.h
-        tools/celestial_systems.c
+    tools/file_io.c
+    tools/file_io.h
+    launch_calculator/launch_calculator.c
+    launch_calculator/launch_calculator.h
+    launch_calculator/lv_profile.c
+    launch_calculator/lv_profile.h
+    main.c
+    tools/tool_funcs.c
+    tools/tool_funcs.h
+    launch_calculator/launch_circularization.c
+    launch_calculator/launch_circularization.h
+    launch_calculator/lp_parameters.c
+    launch_calculator/lp_parameters.h
+    orbit_calculator/transfer_calc.c
+    orbit_calculator/transfer_calc.h
+    launch_calculator/lp_parameters.h
+    tools/thread_pool.c
+    tools/thread_pool.h
+    gui/drawing.c
+    gui/drawing.h
+    tools/thread_pool.h
+    orbit_calculator/double_swing_by.c
+    orbit_calculator/double_swing_by.h
+    database/database.c
+    database/database.h
+    orbit_calculator/double_swing_by.h
+    orbit_calculator/itin_tool.c
+    orbit_calculator/itin_tool.h
+    gui/transfer_app/transfer_planner.c
+    gui/transfer_app/transfer_planner.h
+    gui/transfer_app/porkchop_analyzer.c
+    gui/transfer_app/porkchop_analyzer.h
+    gui/transfer_app/porkchop_analyzer_tools.c
+    gui/transfer_app/porkchop_analyzer_tools.h
+    gui/transfer_app/sequence_calculator.c
+    gui/transfer_app/sequence_calculator.h
+    launch_calculator/launch_sim.c
+    launch_calculator/launch_sim.h
+    launch_calculator/launch_state.c
+    launch_calculator/launch_state.h
+    gui/launch_app/launch_analyzer.c
+    gui/launch_app/launch_analyzer.h
+    database/lv_database.c
+    database/lv_database.h
+    gui/launch_app/capability_analyzer.c
+    gui/launch_app/capability_analyzer.h
+    launch_calculator/capability_calculator.c
+    launch_calculator/capability_calculator.h
+    gui/launch_app/launch_parameter_analyzer.c
+    gui/launch_app/launch_parameter_analyzer.h
+    gui/database_app/mission_db.c
+    gui/database_app/mission_db.h
+    database/mission_database.c
+    database/mission_database.h
+    gui/css_loader.c
+    gui/css_loader.h
+    gui/database_app/database_app_tools/mission_db_tools.c
+    gui/database_app/database_app_tools/mission_db_tools.h
+    gui/database_app/database_app_tools/mission_manager_tools.c
+    gui/database_app/database_app_tools/mission_manager_tools.h
+    tools/gmat_interface.c
+    tools/gmat_interface.h
+    orbit_calculator/itin_dsb_tool.c
+    orbit_calculator/itin_dsb_tool.h
+    gui/transfer_app/itinerary_calculator.c
+    gui/transfer_app/itinerary_calculator.h
+    gui/gui_manager.c
+    gui/gui_manager.h
+    gui/info_win_manager.c
+    gui/info_win_manager.h
+    gui/settings.c
+    gui/settings.h
+    00_Testing/testing.c
+    00_Testing/testing.h
+    00_Testing/testing_algorithms.c
+    00_Testing/testing_algorithms.h
+    gui/gui_tools/camera.c
+    gui/gui_tools/camera.h
+    gui/gui_tools/screen.c
+    gui/gui_tools/screen.h
+    tools/version_tool.c
+    tools/version_tool.h
+    tools/celestial_systems.c
+)
+
+add_executable(KMATUnitTests
+    00_Testing/unit_tests.c
+    tools/tool_funcs.c
+)
+
+target_link_libraries(KMATUnitTests PRIVATE orbitlib geometrylib)
+target_include_directories(KMATUnitTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
 )
 
 # Platform-specific setup
@@ -105,53 +117,53 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         link_directories(/usr/x86_64-w64-mingw32/lib)
 
         # GTK3 installation directory (modify if needed)
-        set(GTK3_ROOT "/usr/x86_64-w64-mingw32/gtk")  # Change to actual GTK3 install path
+        set(GTK3_ROOT "/usr/x86_64-w64-mingw32/gtk" CACHE PATH "GTK3 installation directory")
     else()
         message(STATUS "Configuring for Windows (native MinGW)")
-        set(GTK3_ROOT "C:/msys64/ucrt64")
+        set(GTK3_ROOT "C:/msys64/mingw64" CACHE PATH "GTK3 installation directory")
     endif ()
 
     include_directories(
-            ${GTK3_ROOT}/include
-            ${GTK3_ROOT}/include/gtk-3.0
-            ${GTK3_ROOT}/include/glib-2.0
-            ${GTK3_ROOT}/lib/glib-2.0/include
-            ${GTK3_ROOT}/include/pango-1.0
-            ${GTK3_ROOT}/include/cairo
-            ${GTK3_ROOT}/include/gdk-pixbuf-2.0
-            ${GTK3_ROOT}/include/atk-1.0
-            ${GTK3_ROOT}/include/harfbuzz
+        ${GTK3_ROOT}/include
+        ${GTK3_ROOT}/include/gtk-3.0
+        ${GTK3_ROOT}/include/glib-2.0
+        ${GTK3_ROOT}/lib/glib-2.0/include
+        ${GTK3_ROOT}/include/pango-1.0
+        ${GTK3_ROOT}/include/cairo
+        ${GTK3_ROOT}/include/gdk-pixbuf-2.0
+        ${GTK3_ROOT}/include/atk-1.0
+        ${GTK3_ROOT}/include/harfbuzz
     )
 
     # Explicit GTK3 library directories
     link_directories(
-            ${GTK3_ROOT}/lib
-            ${GTK3_ROOT}/lib/gtk-3.0
-            ${GTK3_ROOT}/lib/glib-2.0
+        ${GTK3_ROOT}/lib
+        ${GTK3_ROOT}/lib/gtk-3.0
+        ${GTK3_ROOT}/lib/glib-2.0
     )
 
     target_link_libraries(KMAT
-            orbitlib
-            gtk-3
-            gdk-3
-            gobject-2.0
-            glib-2.0
-            pango-1.0
-            cairo
-            gdk_pixbuf-2.0
-            atk-1.0
-            gio-2.0
-            urlmon
-            sqlite3
-            wininet
+        orbitlib
+        gtk-3
+        gdk-3
+        gobject-2.0
+        glib-2.0
+        pango-1.0
+        cairo
+        gdk_pixbuf-2.0
+        atk-1.0
+        gio-2.0
+        urlmon
+        sqlite3
+        wininet
     )
 
     target_include_directories(KMAT PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
     )
 
 
-    set_target_properties(KMAT PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_target_properties(KMAT PROPERTIES WIN32_EXECUTABLE FALSE)
 
 else(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(STATUS "Configuring for Linux (GCC)")
@@ -167,7 +179,34 @@ else(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(KMAT PRIVATE -rdynamic)
 
     target_include_directories(KMAT PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
     )
 
+endif()
+
+if(BUILD_TESTING)
+    add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
+    add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
+    set_tests_properties(KMATIntegrationTests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS integration
+    )
+    set_tests_properties(KMATUnitTests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS unit
+    )
+
+    add_custom_target(run_tests ALL
+        COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure -L unit
+        DEPENDS KMATUnitTests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        USES_TERMINAL
+    )
+
+    add_custom_target(run_integration_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure -L integration
+        DEPENDS KMAT
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        USES_TERMINAL
+    )
 endif()

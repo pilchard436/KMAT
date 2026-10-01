@@ -4,6 +4,7 @@
 #include "gui/gui_manager.h"
 #include "00_Testing/testing.h"
 #include <math.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <windows.h>  // for SetPriorityClass(), SetThreadPriority()
@@ -12,7 +13,7 @@
 
 // ------------------------------------------------------------
 
-void test();
+int test();
 
 void set_low_priority() {
 	// Low thread priority
@@ -28,16 +29,25 @@ void set_low_priority() {
 	#endif
 }
 
-int main() {
+int main(int argc, char **argv) {
 	set_low_priority();
 
 	init_celestial_bodies();
 	init_available_systems("../Celestial_Systems/");
 
-//	init_db();
+	if(argc > 1 && strcmp(argv[1], "--test") == 0) {
+		int failed_tests = test();
+		free_all_celestial_systems();
+		return failed_tests == 0 ? 0 : 1;
+	}
 
-//	test();
+	if(init_db() != SQLITE_OK) {
+		free_all_celestial_systems();
+		return 1;
+	}
+
 	start_gui("../GUI/GUI.glade");
+	close_db();
 
 //    int selection;
 //    char title[] = "CHOOSE PROGRAM:";
@@ -64,11 +74,10 @@ int main() {
 //            break;
 //        }
 //    } while(selection != 0);
-//	close_db();
 	free_all_celestial_systems();
     return 0;
 }
 
-void test() {
-	run_tests();
+int test() {
+	return run_tests();
 };

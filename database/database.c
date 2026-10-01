@@ -128,13 +128,50 @@ int db_get_id_of_last_inserted_row() {
 	return (int) sqlite3_last_insert_rowid(db);
 }
 
-void init_db() {
-	int rc = sqlite3_open("DERA.db", &db);
+int init_db() {
+	FILE *existing_db = fopen("DERA.db", "rb");
+	if(existing_db == NULL) {
+		FILE *template_db = fopen("../Database/template.db", "rb");
+		if(template_db == NULL) {
+			fprintf(stderr, "Cannot open database template: ../Database/template.db\n");
+			return SQLITE_CANTOPEN;
+		}
+		FILE *new_db = fopen("DERA.db", "wb");
+		if(new_db == NULL) {
+			fprintf(stderr, "Cannot create database: DERA.db\n");
+			fclose(template_db);
+			return SQLITE_CANTOPEN;
+		}
 
-	if (rc != SQLITE_OK) {
-		fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
-		return;
+		char buffer[8192];
+		size_t bytes_read;
+		int copy_succeeded = 1;
+		while((bytes_read = fread(buffer, 1, sizeof(buffer), template_db)) > 0) {
+			if(fwrite(buffer, 1, bytes_read, new_db) != bytes_read) {
+				copy_succeeded = 0;
+				break;
+			}
+		}
+		if(ferror(template_db)) copy_succeeded = 0;
+		fclose(template_db);
+		if(fclose(new_db) != 0) copy_succeeded = 0;
+		if(!copy_succeeded) {
+			fprintf(stderr, "Failed to initialize database from template.\n");
+			remove("DERA.db");
+			return SQLITE_IOERR;
+		}
+	} else {
+		fclose(existing_db);
 	}
+
+	int rc = sqlite3_open("DERA.db", &db);
+	if(rc != SQLITE_OK) {
+		fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+		db = NULL;
+		return rc;
+	}
+	return SQLITE_OK;
 }
 
 void close_db() {

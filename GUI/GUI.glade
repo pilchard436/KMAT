@@ -120,8 +120,8 @@
     </child>
   </object>
   <object class="GtkApplicationWindow" id="window">
-    <property name="width-request">1000</property>
-    <property name="height-request">800</property>
+    <property name="default-width">600</property>
+    <property name="default-height">700</property>
     <property name="can-focus">False</property>
     <property name="title" translatable="yes">KMAT</property>
     <child>
@@ -143,7 +143,6 @@
                 <property name="margin-bottom">50</property>
                 <property name="row-spacing">50</property>
                 <property name="column-spacing">50</property>
-                <property name="column-homogeneous">True</property>
                 <child>
                   <!-- n-columns=1 n-rows=3 -->
                   <object class="GtkGrid">
@@ -284,6 +283,8 @@
                             <property name="can-focus">False</property>
                             <property name="halign">end</property>
                             <property name="label" translatable="yes">Max Arrival Date:</property>
+                            <property name="valign">start</property>
+                            <property name="margin-top">8</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -295,7 +296,9 @@
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
                             <property name="halign">end</property>
-                            <property name="label" translatable="yes">Max Departure Date:</property>
+                            <property name="label" translatable="yes">Latest Departure Date:</property>
+                            <property name="valign">start</property>
+                            <property name="margin-top">8</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -307,7 +310,9 @@
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
                             <property name="halign">end</property>
-                            <property name="label" translatable="yes">Min Departure Date:</property>
+                            <property name="label" translatable="yes">Earliest Departure Date:</property>
+                            <property name="valign">start</property>
+                            <property name="margin-top">8</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -328,12 +333,90 @@
                           </packing>
                         </child>
                         <child>
-                          <object class="GtkEntry" id="tf_ic_maxarrdate">
+                          <object class="GtkBox">
                             <property name="visible">True</property>
-                            <property name="can-focus">True</property>
-                            <property name="has-frame">False</property>
-                            <property name="text" translatable="yes">2000-01-01</property>
-                            <property name="xalign">0.5</property>
+                            <property name="can-focus">False</property>
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkEntry" id="tf_ic_maxarrdate">
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="has-frame">False</property>
+                                <property name="secondary-icon-name">x-office-calendar</property>
+                                <property name="secondary-icon-activatable">True</property>
+                                <property name="text" translatable="yes">2000-01-01</property>
+                                <property name="xalign">0.5</property>
+                                <signal name="icon-release" handler="on_ic_date_icon_release" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="homogeneous">False</property>
+                                <property name="spacing">1</property>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_minus_year">
+                                    <property name="label" translatable="yes">-y</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one year</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_minus_month">
+                                    <property name="label" translatable="yes">-1mo</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one month</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_minus_week">
+                                    <property name="label" translatable="yes">-w</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one week</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_plus_week">
+                                    <property name="label" translatable="yes">+w</property>
+                                    <property name="tooltip-text" translatable="yes">Add one week</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_plus_month">
+                                    <property name="label" translatable="yes">+m</property>
+                                    <property name="tooltip-text" translatable="yes">Add one month</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxarr_plus_year">
+                                    <property name="label" translatable="yes">+y</property>
+                                    <property name="tooltip-text" translatable="yes">Add one year</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
                           </object>
                           <packing>
                             <property name="left-attach">1</property>
@@ -341,12 +424,90 @@
                           </packing>
                         </child>
                         <child>
-                          <object class="GtkEntry" id="tf_ic_maxdepdate">
+                          <object class="GtkBox">
                             <property name="visible">True</property>
-                            <property name="can-focus">True</property>
-                            <property name="has-frame">False</property>
-                            <property name="text" translatable="yes">1950-01-01</property>
-                            <property name="xalign">0.5</property>
+                            <property name="can-focus">False</property>
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkEntry" id="tf_ic_maxdepdate">
+                                <property name="visible">True</property>
+                                <property name="can-focus">True</property>
+                                <property name="has-frame">False</property>
+                                <property name="secondary-icon-name">x-office-calendar</property>
+                                <property name="secondary-icon-activatable">True</property>
+                                <property name="text" translatable="yes">1950-01-01</property>
+                                <property name="xalign">0.5</property>
+                                <signal name="icon-release" handler="on_ic_date_icon_release" swapped="no"/>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">0</property>
+                              </packing>
+                            </child>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="homogeneous">False</property>
+                                <property name="spacing">1</property>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_minus_year">
+                                    <property name="label" translatable="yes">-y</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one year</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_minus_month">
+                                    <property name="label" translatable="yes">-1mo</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one month</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_minus_week">
+                                    <property name="label" translatable="yes">-w</property>
+                                    <property name="tooltip-text" translatable="yes">Subtract one week</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_plus_week">
+                                    <property name="label" translatable="yes">+w</property>
+                                    <property name="tooltip-text" translatable="yes">Add one week</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_plus_month">
+                                    <property name="label" translatable="yes">+m</property>
+                                    <property name="tooltip-text" translatable="yes">Add one month</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="btn_ic_maxdep_plus_year">
+                                    <property name="label" translatable="yes">+y</property>
+                                    <property name="tooltip-text" translatable="yes">Add one year</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                              <packing>
+                                <property name="expand">False</property>
+                                <property name="fill">True</property>
+                                <property name="position">1</property>
+                              </packing>
+                            </child>
                           </object>
                           <packing>
                             <property name="left-attach">1</property>
@@ -358,8 +519,11 @@
                             <property name="visible">True</property>
                             <property name="can-focus">True</property>
                             <property name="has-frame">False</property>
+                            <property name="secondary-icon-name">x-office-calendar</property>
+                            <property name="secondary-icon-activatable">True</property>
                             <property name="text" translatable="yes">1950-01-01</property>
                             <property name="xalign">0.5</property>
+                            <signal name="icon-release" handler="on_ic_date_icon_release" swapped="no"/>
                           </object>
                           <packing>
                             <property name="left-attach">1</property>
@@ -614,7 +778,6 @@
                     <property name="vexpand">True</property>
                     <child>
                       <object class="GtkViewport" id="vp_sc_preview">
-                        <property name="width-request">500</property>
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
                         <property name="halign">start</property>
@@ -5211,7 +5374,7 @@
           </packing>
         </child>
         <child>
-          <!-- n-columns=2 n-rows=2 -->
+          <!-- n-columns=2 n-rows=4 -->
           <object class="GtkGrid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
@@ -5283,6 +5446,54 @@ ISO-like Kerbal:</property>
               <packing>
                 <property name="left-attach">1</property>
                 <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="label" translatable="yes">Default Celestial System on Startup:</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkComboBox" id="cb_settings_default_system">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <signal name="changed" handler="on_change_default_system" swapped="no"/>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="label" translatable="yes">Default Departure Date:</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">3</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkComboBoxText" id="cb_settings_default_departure_date">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <items>
+                  <item id="1950" translatable="yes">1950-01-01</item>
+                  <item id="today" translatable="yes">Today</item>
+                </items>
+                <signal name="changed" handler="on_change_default_departure_date" swapped="no"/>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">3</property>
               </packing>
             </child>
           </object>

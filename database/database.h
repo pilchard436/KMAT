@@ -20,7 +20,7 @@ struct PlaneInfo_DB {
 };
 
 
-void init_db();
+int init_db();
 int execute_query(const char *query);
 sqlite3_stmt * execute_single_row_request(const char *query);
 sqlite3_stmt * execute_multirow_request(const char *query);
