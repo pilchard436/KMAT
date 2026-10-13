@@ -42,10 +42,18 @@ typedef struct Calc_Acc {
 	double lambert, fb_finder;
 } Calc_Acc;
 
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+typedef struct ItinFlybyProfileStats {
+	unsigned long long searches;
+	unsigned long long left_evaluations;
+	unsigned long long right_evaluations;
+} ItinFlybyProfileStats;
+#endif
+
 struct PorkchopPoint {
 	struct ItinStep *arrival;
 	double dep_date, dur;
-	double dv_dep, dv_dsm, dv_arr_cap, dv_arr_circ;
+	double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
 };
 
 
@@ -53,6 +61,10 @@ enum LastTransferType {TF_FLYBY, TF_CAPTURE, TF_CIRC};
 
 // find viable flybys to next body with a given arrival trajectory
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+void set_itin_search_lambert_counter(unsigned long long *counter);
+void set_itin_search_flyby_profile(Body **bodies, int num_bodies, ItinFlybyProfileStats *stats);
+#endif
 
 // find viable flybys to next body with a given arrival trajectory
 void find_viable_dsb_flybys(struct ItinStep *tf, Ephem **ephems, Body *next_body, double min_dt0, double max_dt0, double min_dt1, double max_dt1);

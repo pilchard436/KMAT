@@ -52,7 +52,7 @@ int is_porkchop_point_inside_dv_filter(struct PorkchopPoint porkchop_point, stru
 	dv_sat += dv_filter.last_transfer_type == TF_CIRC ? porkchop_point.dv_arr_circ : dv_filter.last_transfer_type == TF_CAPTURE ? porkchop_point.dv_arr_cap : 0;
 	if(porkchop_point.dv_dep > dv_filter.max_depdv) {is_inside_dv_filter = 0; printf("Departure dv too high: %f | %f\n", porkchop_point.dv_dep, dv_filter.max_depdv);}
 	if(dv_sat > dv_filter.max_satdv) {is_inside_dv_filter = 0; printf("Satellite dv too high: %f | %f\n", dv_sat, dv_filter.max_satdv);}
-	if(porkchop_point.dv_dep + dv_sat > dv_filter.max_totdv) {is_inside_dv_filter = 0; printf("Total dv too high: %f | %f\n", porkchop_point.dv_dep + dv_sat, dv_filter.max_totdv);}
+	if(porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter.max_totdv) {is_inside_dv_filter = 0; printf("Total dv too high: %f | %f\n", porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby, dv_filter.max_totdv);}
 	return is_inside_dv_filter;
 }
 
@@ -64,7 +64,10 @@ int has_porkchop_point_valid_itinerary(struct PorkchopPoint porkchop_point) {
 	while(prev->prev != NULL && prev->body != NULL) {
 		double t[3] = {prev->prev->date, prev->date, step_ptr->date};
 		Body *bodies[3] = {prev->prev->body, prev->body, step_ptr->body};
-		if(!is_flyby_viable(prev->v_arr, step_ptr->v_dep, prev->v_body, prev->body, 10)) {
+		PoweredFlybyResult flyby_result;
+		double minimum_periapsis = prev->body->radius + prev->body->atmo_alt + 1e4;
+		if(!calculate_powered_flyby(prev->v_arr, step_ptr->v_dep, prev->v_body,
+			prev->body, minimum_periapsis, &flyby_result)) {
 			is_valid_itinerary = 0;
 			printf("Invalid Itinerary:\n%f - %s\n%f - %s\n%f - %s\n", t[0], bodies[0]->name, t[1], bodies[1]->name, t[2], bodies[2]->name);
 			for(int i = 0; i < 3; i++) {

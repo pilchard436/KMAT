@@ -623,8 +623,7 @@ G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data) 
 G_MODULE_EXPORT void on_show_itin_overview() {
 	if(curr_transfer_tp == NULL) return;
 	char text[10000];
-	itinerary_short_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
-//	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
+	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
 	show_msg_window(text);
 }
 

@@ -7,7 +7,7 @@
 static enum LastTransferType sort_last_transfer_type;
 
 static double porkchop_total_dv(struct PorkchopAnalyzerPoint point) {
-	double total_dv = point.data.dv_dep + point.data.dv_dsm;
+	double total_dv = point.data.dv_dep + point.data.dv_dsm + point.data.dv_flyby;
 	if(sort_last_transfer_type == TF_CAPTURE) total_dv += point.data.dv_arr_cap;
 	if(sort_last_transfer_type == TF_CIRC) total_dv += point.data.dv_arr_circ;
 	return total_dv;

@@ -788,55 +788,6 @@ ItinStepBinHeaderData get_itins_bfile_header(FILE *file) {
 	return header_data;
 }
 
-void print_header_data_to_string(ItinStepBinHeaderData header, char *string, enum DateType date_format) {
-	sprintf(string, "Number of stored nodes: %d\n", header.num_nodes);
-	sprintf(string, "%sNumber of Departures: %d\n", string, header.num_deps);
-	if(header.file_type > 2) {
-		sprintf(string, "%sNumber of Itineraries: %d\n", string, header.num_itins);
-		char date_string[32];
-		date_to_string(convert_JD_date(header.calc_data.jd_min_dep, date_format), date_string, 1);
-		sprintf(string, "%sMin departure date: %s\n", string, date_string);
-		date_to_string(convert_JD_date(header.calc_data.jd_max_dep, date_format), date_string, 1);
-		sprintf(string, "%sMax departure date: %s\n", string, date_string);
-		date_to_string(convert_JD_date(header.calc_data.jd_max_arr, date_format), date_string, 1);
-		sprintf(string, "%sMax arrival date: %s\n", string, date_string);
-		sprintf(string, "%sMax duration: %.2f days\n", string, header.calc_data.max_duration);
-		sprintf(string, "%sDep date step: %.4f days\n", string, header.calc_data.step_dep_date);
-		sprintf(string, "%sNum of deps per date: %d\n", string, header.calc_data.num_deps_per_date);
-		sprintf(string, "%sMax num of waiting orbits: %d\n", string, header.calc_data.max_num_waiting_orbits);
-		sprintf(string, "%sMax tot dv: %.0f m/s\n", string, header.calc_data.dv_filter.max_totdv);
-		sprintf(string, "%sMax dep dv: %.0f m/s\n", string, header.calc_data.dv_filter.max_depdv);
-		sprintf(string, "%sMax sat dv: %.0f m/s\n", string, header.calc_data.dv_filter.max_satdv);
-		if(header.file_type >= 5) {
-			sprintf(string, "%sLambert accuracy: %e s\n", string, header.calc_data.calc_acc.lambert);
-			sprintf(string, "%sFly-by Pos accuracy: %e m\n", string, header.calc_data.calc_acc.fb_finder);
-		} else {
-			sprintf(string, "%sLambert accuracy: %.2e s\n", string, 1.0);
-			sprintf(string, "%sFly-by Pos accuracy: %.2e m\n", string, 1.0);
-		}
-		sprintf(string, "%sDeparture Periapsis: %.0fkm\n", string, header.calc_data.dv_filter.dep_periapsis / 1e3);
-		sprintf(string, "%sArrival Periapsis: %.0fkm\n", string, header.calc_data.dv_filter.arr_periapsis / 1e3);
-		if(header.calc_data.dv_filter.last_transfer_type == TF_FLYBY)
-			sprintf(string, "%sLast transfer type: Fly-By\n", string);
-		if(header.calc_data.dv_filter.last_transfer_type == TF_CAPTURE)
-			sprintf(string, "%sLast transfer type: Capture\n", string);
-		if(header.calc_data.dv_filter.last_transfer_type == TF_CIRC)
-			sprintf(string, "%sLast transfer type: Circularization\n", string);
-
-		if(header.calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
-			sprintf(string, "%sDeparture body: %s\n", string, header.calc_data.seq_info.to_target.dep_body->name);
-			sprintf(string, "%sArrival body: %s\n", string, header.calc_data.seq_info.to_target.arr_body->name);
-			sprintf(string, "%sAllowed Fly-By bodies:\n", string);
-			for(int i = 0; i < header.calc_data.seq_info.to_target.num_flyby_bodies; i++) sprintf(string, "%s  - %s\n", string, header.calc_data.seq_info.to_target.flyby_bodies[i]->name);
-		} else if(header.calc_data.seq_info.spec_seq.type == ITIN_SEQ_INFO_SPEC_SEQ) {
-			sprintf(string, "%sSequence:\n", string);
-			for(int i = 0; i < header.calc_data.seq_info.spec_seq.num_steps; i++) sprintf(string, "%s  %d. %s\n", string, i+1, header.calc_data.seq_info.spec_seq.bodies[i]->name);
-		}
-	} else {
-		sprintf(string, "%s\nCan't find further analysis parameters because the analysis file\nwas created in version 1.2.2 or before\n", string);
-	}
-}
-
 struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 	struct ItinStep **departures = NULL;
 
@@ -847,7 +798,7 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 	BinTypes bin_types = get_itins_file_bin_types_from_file_type(header_data.file_type);
 
 	char header_string[1024];
-	print_header_data_to_string(header_data, header_string, DATE_ISO);
+	print_header_data_to_string(header_data, header_string, sizeof(header_string), DATE_ISO);
 	printf("\n--\n%s--\n", header_string);
 
 	if(header_data.num_deps < 0) return (struct ItinsLoadFileResults){header_data, NULL};

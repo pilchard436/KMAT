@@ -266,11 +266,13 @@
                         <property name="column-spacing">20</property>
                         <property name="column-homogeneous">True</property>
                         <child>
-                          <object class="GtkLabel">
+                          <object class="GtkRadioButton" id="rb_ic_maxdur">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
+                            <property name="can-focus">True</property>
                             <property name="halign">end</property>
                             <property name="label" translatable="yes">Max Duration:</property>
+                            <property name="group">rb_ic_maxarrdate</property>
+                            <signal name="toggled" handler="on_ic_time_limit_toggled" swapped="no"/>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -278,13 +280,15 @@
                           </packing>
                         </child>
                         <child>
-                          <object class="GtkLabel">
+                          <object class="GtkRadioButton" id="rb_ic_maxarrdate">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
+                            <property name="can-focus">True</property>
                             <property name="halign">end</property>
                             <property name="label" translatable="yes">Max Arrival Date:</property>
+                            <property name="active">True</property>
                             <property name="valign">start</property>
                             <property name="margin-top">8</property>
+                            <signal name="toggled" handler="on_ic_time_limit_toggled" swapped="no"/>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -356,7 +360,7 @@
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkBox">
+                              <object class="GtkBox" id="box_ic_maxarrdate_controls">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>
                                 <property name="orientation">horizontal</property>
@@ -5374,7 +5378,7 @@
           </packing>
         </child>
         <child>
-          <!-- n-columns=2 n-rows=4 -->
+          <!-- n-columns=2 n-rows=5 -->
           <object class="GtkGrid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
@@ -5494,6 +5498,32 @@ ISO-like Kerbal:</property>
               <packing>
                 <property name="left-attach">1</property>
                 <property name="top-attach">3</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="label" translatable="yes">Lambert Solver:</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">4</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkComboBoxText" id="cb_settings_lambert_solver">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <items>
+                  <item id="izzo" translatable="yes">Izzo (fast)</item>
+                  <item id="legacy" translatable="yes">Legacy</item>
+                </items>
+                <signal name="changed" handler="on_change_lambert_solver" swapped="no"/>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">4</property>
               </packing>
             </child>
           </object>

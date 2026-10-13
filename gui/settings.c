@@ -7,12 +7,14 @@
 GObject *cb_settings_datetime_type;
 GObject *cb_settings_default_system;
 GObject *cb_settings_default_departure_date;
+GObject *cb_settings_lambert_solver;
 
 struct GlobalSettings {
 	enum DateType date_type;
 	char default_system_name[100];
 	enum DefaultDepartureDate default_departure_date;
-} global_settings = {DATE_ISO, "Solar System (Ephemeris)", DEFAULT_DEPARTURE_DATE_1950};
+	enum LambertSolverMethod lambert_solver_method;
+} global_settings = {DATE_ISO, "Solar System (Ephemeris)", DEFAULT_DEPARTURE_DATE_1950, LAMBERT_METHOD_IZZO};
 
 static gchar *get_settings_file_path() {
 	return g_build_filename(g_get_user_config_dir(), "kmat", "settings.ini", NULL);
@@ -31,6 +33,10 @@ static void load_persisted_settings() {
 		if(g_strcmp0(departure_date, "today") == 0)
 			global_settings.default_departure_date = DEFAULT_DEPARTURE_DATE_TODAY;
 		g_free(departure_date);
+		gchar *lambert_solver = g_key_file_get_string(key_file, "Settings", "lambert-solver", NULL);
+		if(g_strcmp0(lambert_solver, "legacy") == 0)
+			global_settings.lambert_solver_method = LAMBERT_METHOD_LEGACY;
+		g_free(lambert_solver);
 	} else {
 		g_clear_error(&error);
 	}
@@ -50,6 +56,8 @@ static void save_settings() {
 	g_key_file_set_string(key_file, "Settings", "default-celestial-system", global_settings.default_system_name);
 	g_key_file_set_string(key_file, "Settings", "default-departure-date",
 		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950-01-01");
+	g_key_file_set_string(key_file, "Settings", "lambert-solver",
+		global_settings.lambert_solver_method == LAMBERT_METHOD_LEGACY ? "legacy" : "izzo");
 	gchar *data = g_key_file_to_data(key_file, &data_length, NULL);
 	if(g_mkdir_with_parents(directory, 0700) != 0) {
 		g_warning("Failed to create KMAT settings directory: %s", directory);
@@ -67,7 +75,13 @@ void init_global_settings(GtkBuilder *builder) {
 	cb_settings_datetime_type = gtk_builder_get_object(builder, "cb_settings_datetime_type");
 	cb_settings_default_system = gtk_builder_get_object(builder, "cb_settings_default_system");
 	cb_settings_default_departure_date = gtk_builder_get_object(builder, "cb_settings_default_departure_date");
+	cb_settings_lambert_solver = gtk_builder_get_object(builder, "cb_settings_lambert_solver");
 	load_persisted_settings();
+	g_signal_handlers_block_by_func(cb_settings_lambert_solver, G_CALLBACK(on_change_lambert_solver), NULL);
+	gtk_combo_box_set_active_id(GTK_COMBO_BOX(cb_settings_lambert_solver),
+		global_settings.lambert_solver_method == LAMBERT_METHOD_LEGACY ? "legacy" : "izzo");
+	g_signal_handlers_unblock_by_func(cb_settings_lambert_solver, G_CALLBACK(on_change_lambert_solver), NULL);
+	set_lambert_solver_method(global_settings.lambert_solver_method);
 	g_signal_handlers_block_by_func(cb_settings_default_departure_date, G_CALLBACK(on_change_default_departure_date), NULL);
 	gtk_combo_box_set_active_id(GTK_COMBO_BOX(cb_settings_default_departure_date),
 		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950");
@@ -107,6 +121,10 @@ enum DefaultDepartureDate get_settings_default_departure_date() {
 	return global_settings.default_departure_date;
 }
 
+enum LambertSolverMethod get_settings_lambert_solver_method() {
+	return global_settings.lambert_solver_method;
+}
+
 char *get_settings_default_system() {
 	return global_settings.default_system_name;
 }
@@ -123,5 +141,14 @@ G_MODULE_EXPORT void on_change_default_departure_date() {
 	if(active_id == NULL) return;
 	global_settings.default_departure_date = g_strcmp0(active_id, "today") == 0 ?
 		DEFAULT_DEPARTURE_DATE_TODAY : DEFAULT_DEPARTURE_DATE_1950;
+	save_settings();
+}
+
+G_MODULE_EXPORT void on_change_lambert_solver() {
+	const char *active_id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_settings_lambert_solver));
+	if(active_id == NULL) return;
+	global_settings.lambert_solver_method = g_strcmp0(active_id, "legacy") == 0 ?
+		LAMBERT_METHOD_LEGACY : LAMBERT_METHOD_IZZO;
+	set_lambert_solver_method(global_settings.lambert_solver_method);
 	save_settings();
 }

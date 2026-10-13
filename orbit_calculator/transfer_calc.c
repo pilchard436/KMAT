@@ -1,4 +1,5 @@
 #include "transfer_calc.h"
+#include "powered_flyby_optimizer.h"
 #include "tools/tool_funcs.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,15 +9,63 @@
 
 
 
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+typedef struct Itin_Search_Profile {
+	double initial_grid_seconds;
+	double recursive_search_seconds;
+	unsigned long long initial_lambert_calls;
+	unsigned long long recursive_lambert_calls;
+	ItinFlybyProfileStats *flyby_stats;
+} Itin_Search_Profile;
+#endif
+
 typedef struct Itin_Calc_Thread_Args {
 	struct ItinStep **departures;
 	Itin_Calc_Data *calc_data;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	Itin_Search_Profile *profiles;
+	Body **profile_bodies;
+	int num_profile_bodies;
+#endif
 } Itin_Calc_Thread_Args;
 
 struct Thread_Progress_and_Prop_Info {
 	double jd_min_dep;
 	double jd_max_dep;
 } thread_progress_and_prop_info;
+
+static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *calc_data) {
+	struct PorkchopPoint point = create_porkchop_point(arrival,
+		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
+	struct ItinStep *departure = get_first(arrival);
+	if(!isfinite(point.dv_dep) || !isfinite(point.dv_dsm) || !isfinite(point.dv_flyby) ||
+		arrival->date > calc_data->jd_max_arr || departure->date < calc_data->jd_min_dep ||
+		departure->date > calc_data->jd_max_dep) return 0;
+	double satellite_dv = point.dv_dsm;
+	if(calc_data->dv_filter.last_transfer_type == TF_CAPTURE) satellite_dv += point.dv_arr_cap;
+	if(calc_data->dv_filter.last_transfer_type == TF_CIRC) satellite_dv += point.dv_arr_circ;
+	return point.dv_dep <= calc_data->dv_filter.max_depdv &&
+		satellite_dv <= calc_data->dv_filter.max_satdv &&
+		point.dv_dep + satellite_dv + point.dv_flyby <= calc_data->dv_filter.max_totdv;
+}
+
+static void detach_itinerary_child(struct ItinStep *parent, int child_index) {
+	free_itinerary(parent->next[child_index]);
+	parent->num_next_nodes--;
+	for(int i = child_index; i < parent->num_next_nodes; i++)
+		parent->next[i] = parent->next[i + 1];
+}
+
+static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Data *calc_data) {
+	for(int child_index = 0; child_index < step->num_next_nodes;) {
+		struct ItinStep *child = step->next[child_index];
+		int valid = child->num_next_nodes == 0 ?
+			route_passes_filters(child, calc_data) : prune_invalid_route_leaves(child, calc_data);
+		if(valid) child_index++;
+		else detach_itinerary_child(step, child_index);
+	}
+	return step->num_next_nodes > 0;
+}
 
 const int NUM_INITIAL_TRANSFERS_PER_BODY = 500;
 
@@ -38,7 +87,7 @@ void *calc_itins_from_departure(void *args) {
 		*arr_body,			// only to_target: target body
 		**fly_by_bodies;	// to_target: allowed fly_by_bodies; spec_seq: bodies in sequence
 	int num_initial_transfers,
-			num_steps,			// only spec_seq: number of steps in sequence
+			num_steps = 0,		// only spec_seq: number of steps in sequence
 			num_flyby_bodies;	// only to_target: number of allowed fly_by_bodies
 
 	enum Transfer_Type tt = dv_filter.last_transfer_type == TF_CIRC ? circcirc : dv_filter.last_transfer_type == TF_CAPTURE ? circcap : circfb;
@@ -50,7 +99,7 @@ void *calc_itins_from_departure(void *args) {
 		arr_body = calc_data->seq_info.to_target.arr_body;
 		fly_by_bodies = calc_data->seq_info.to_target.flyby_bodies;
 		num_flyby_bodies = calc_data->seq_info.to_target.num_flyby_bodies;
-		num_initial_transfers = NUM_INITIAL_TRANSFERS_PER_BODY * (system->num_bodies - 1);
+		num_initial_transfers = NUM_INITIAL_TRANSFERS_PER_BODY * num_flyby_bodies;
 	} else {
 		// specific sequence
 		system = calc_data->seq_info.spec_seq.system;
@@ -72,6 +121,11 @@ void *calc_itins_from_departure(void *args) {
 	double jd_diff = jd_max_dep-jd_min_dep+1;
 
 	while(jd_dep <= jd_max_dep && get_thread_counter(3) == 0) {
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		Itin_Search_Profile *profile = &thread_args->profiles[index];
+		struct timeval phase_start, phase_end;
+		gettimeofday(&phase_start, NULL);
+#endif
 		osv_body0 = system->prop_method == ORB_ELEMENTS ?
 					osv_from_elements(dep_body->orbit, jd_dep) :
 					osv_from_ephem(dep_body->ephem, dep_body->num_ephems, jd_dep, system->cb);
@@ -122,7 +176,10 @@ void *calc_itins_from_departure(void *args) {
 							osv_from_elements(next_step_body->orbit, jd_arr) :
 							osv_from_ephem(next_step_body->ephem, next_step_body->num_ephems, jd_arr, system->cb);
 
-				Lambert3 tf = calc_lambert3(osv_body0.r, osv_body1.r, (jd_arr - jd_dep) * 86400, system->cb);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+				profile->initial_lambert_calls++;
+#endif
+				Lambert3 tf = calc_lambert3_selected(osv_body0.r, osv_body1.r, (jd_arr - jd_dep) * 86400, system->cb);
 				
 				
 				double dv_dep, dv_arr;
@@ -164,7 +221,16 @@ void *calc_itins_from_departure(void *args) {
 
 		curr_step = get_first(curr_step);
 		curr_step->num_next_nodes = next_step_id;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		gettimeofday(&phase_end, NULL);
+		profile->initial_grid_seconds += (phase_end.tv_sec - phase_start.tv_sec) +
+			(phase_end.tv_usec - phase_start.tv_usec) / 1000000.0;
 
+		set_itin_search_flyby_profile(thread_args->profile_bodies,
+			thread_args->num_profile_bodies, profile->flyby_stats);
+		set_itin_search_lambert_counter(&profile->recursive_lambert_calls);
+		gettimeofday(&phase_start, NULL);
+#endif
 		if(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
 			int num_of_end_nodes = find_copy_and_store_end_nodes(curr_step, arr_body);
 
@@ -182,6 +248,14 @@ void *calc_itins_from_departure(void *args) {
 				}
 			}
 		}
+
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		set_itin_search_lambert_counter(NULL);
+		gettimeofday(&phase_end, NULL);
+		profile->recursive_search_seconds += (phase_end.tv_sec - phase_start.tv_sec) +
+			(phase_end.tv_usec - phase_start.tv_usec) / 1000000.0;
+		set_itin_search_flyby_profile(NULL, 0, NULL);
+#endif
 
 		double progress = get_incr_thread_counter(1)+1;	// +1 because it gets the last value, not the incremented value
 		show_progress("Transfer Calculation progress", progress, jd_diff);
@@ -206,15 +280,45 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	for(int i = 0; i < num_deps; i++) departures[i]->num_next_nodes = 0;
 
 
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	Body **profile_bodies;
+	int num_profile_bodies;
+	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
+		profile_bodies = calc_data.seq_info.to_target.flyby_bodies;
+		num_profile_bodies = calc_data.seq_info.to_target.num_flyby_bodies;
+	} else {
+		profile_bodies = calc_data.seq_info.spec_seq.bodies;
+		num_profile_bodies = calc_data.seq_info.spec_seq.num_steps;
+	}
+	ItinFlybyProfileStats *flyby_profiles = calloc((size_t)num_deps * num_profile_bodies, sizeof(*flyby_profiles));
+	Itin_Search_Profile *profiles = calloc(num_deps, sizeof(*profiles));
+	for(int i = 0; i < num_deps; i++)
+		profiles[i].flyby_stats = flyby_profiles + (size_t)i * num_profile_bodies;
+#endif
 	Itin_Calc_Thread_Args thread_args = {
-			departures,
-			&calc_data,
+		.departures = departures,
+		.calc_data = &calc_data
 	};
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	thread_args.profiles = profiles;
+	thread_args.profile_bodies = profile_bodies;
+	thread_args.num_profile_bodies = num_profile_bodies;
+#endif
 
 	thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
 			calc_data.jd_min_dep,
 			calc_data.jd_max_dep
 	};
+	printf("Search window: departure JD %.2f..%.2f, max arrival JD %.2f, max duration %.2f days\n",
+		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.jd_max_arr, calc_data.max_duration);
+	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
+		struct ItinSequenceInfoToTarget *target = &calc_data.seq_info.to_target;
+		printf("Search bodies: %s -> %s; flyby candidates (%d):",
+			target->dep_body->name, target->arr_body->name, target->num_flyby_bodies);
+		for(int i = 0; i < target->num_flyby_bodies; i++)
+			printf(" %s", target->flyby_bodies[i]->name);
+		printf("\n");
+	}
 
 	show_progress("Transfer Calculation progress", 0, 1);
 	struct Thread_Pool thread_pool;
@@ -222,16 +326,65 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	join_thread_pool(thread_pool);
 	show_progress("Transfer Calculation progress", 1, 1);
 	printf("\n");
+	#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	double initial_grid_seconds = 0;
+	double recursive_search_seconds = 0;
+	unsigned long long initial_lambert_calls = 0;
+	unsigned long long recursive_lambert_calls = 0;
+	for(int i = 0; i < num_deps; i++) {
+		initial_grid_seconds += profiles[i].initial_grid_seconds;
+		recursive_search_seconds += profiles[i].recursive_search_seconds;
+		initial_lambert_calls += profiles[i].initial_lambert_calls;
+		recursive_lambert_calls += profiles[i].recursive_lambert_calls;
+	}
+	printf("Initial grid: %.3f summed worker-seconds, %llu Lambert solves\n",
+		initial_grid_seconds, initial_lambert_calls);
+	printf("Recursive search: %.3f summed worker-seconds, %llu Lambert solves\n",
+		recursive_search_seconds, recursive_lambert_calls);
+	for(int body_index = 0; body_index < num_profile_bodies; body_index++) {
+		unsigned long long searches = 0;
+		unsigned long long left_evaluations = 0;
+		unsigned long long right_evaluations = 0;
+		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++) {
+			ItinFlybyProfileStats stats = profiles[departure_index].flyby_stats[body_index];
+			searches += stats.searches;
+			left_evaluations += stats.left_evaluations;
+			right_evaluations += stats.right_evaluations;
+		}
+		if(searches > 0)
+			printf("Flyby %s: %llu searches, %llu left / %llu right root evaluations\n",
+				profile_bodies[body_index]->name, searches, left_evaluations, right_evaluations);
+	}
+	free(profiles);
+	free(flyby_profiles);
+	#endif
 
-	// remove departure dates with no valid itinerary
+	// Remove empty departure trees and compact the results in one pass.
+	int valid_departures = 0;
 	for(int i = 0; i < num_deps; i++) {
 		if(departures[i] == NULL || departures[i]->num_next_nodes == 0) {
-			num_deps--;
-			for(int j = i; j < num_deps; j++) {
-				departures[j] = departures[j + 1];
-			}
-			i--;
+			free_itinerary(departures[i]);
+			continue;
 		}
+		departures[valid_departures++] = departures[i];
+	}
+	num_deps = valid_departures;
+	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
+		PoweredFlybyOptimizationStats powered_stats;
+		optimize_powered_flyby_routes(departures, num_deps, &calc_data, 100, &powered_stats);
+		printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best total dV saving %.2f m/s\n",
+			powered_stats.routes_improved, powered_stats.routes_considered,
+			powered_stats.routes_valid, powered_stats.routes_corrected,
+			powered_stats.best_delta_v_saving);
+		valid_departures = 0;
+		for(int i = 0; i < num_deps; i++) {
+			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
+				free_itinerary(departures[i]);
+				continue;
+			}
+			departures[valid_departures++] = departures[i];
+		}
+		num_deps = valid_departures;
 	}
 
 	gettimeofday(&end, NULL);  // Record the ending time

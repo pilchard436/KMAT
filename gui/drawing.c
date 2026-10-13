@@ -447,8 +447,8 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	double min_depdate = pp.dep_date, max_depdate = pp.dep_date;
 	double min_dur = pp.dur, max_dur = pp.dur;
 	double min_arrdate = pp.dep_date+pp.dur, max_arrdate = pp.dep_date+pp.dur;
-	double min_dv = pp.dv_dep + dv_sat;
-	double max_dv = pp.dv_dep + dv_sat;
+	double min_dv = pp.dv_dep + dv_sat + pp.dv_flyby;
+	double max_dv = pp.dv_dep + dv_sat + pp.dv_flyby;
 
 	// find min and max
 	for(int i = 1; i < num_itins; i++) {
@@ -459,7 +459,7 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 		if(last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
 		if(last_transfer_type == TF_CIRC)		dv_sat += pp.dv_arr_circ;
 
-		dv = pp.dv_dep + dv_sat;
+		dv = pp.dv_dep + dv_sat + pp.dv_flyby;
 		depdate = pp.dep_date;
 		dur = pp.dur;
 		arrdate = pp.dep_date+pp.dur;
@@ -522,7 +522,7 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 		if(last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
 		if(last_transfer_type == TF_CIRC)		dv_sat += pp.dv_arr_circ;
 
-		dv = pp.dv_dep + dv_sat;
+		dv = pp.dv_dep + dv_sat + pp.dv_flyby;
 		depdate = pp.dep_date;
 		dur = pp.dur;
 		arrdate = pp.dep_date+pp.dur;

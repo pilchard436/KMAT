@@ -1,15 +1,40 @@
 cmake_minimum_required(VERSION 3.26)
 project(KMAT C)
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_C_STANDARD 11)
 include(CTest)
+option(KMAT_ENABLE_SEARCH_PROFILE "Enable detailed per-body itinerary search profiling" OFF)
+
+if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/O2>)
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options($<$<CONFIG:Release>:-O3>)
+endif()
 
 include_directories(.)
 
 add_subdirectory(external/orbitlib)
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(external/orbitlib/src/transfer.c PROPERTIES
+        COMPILE_OPTIONS "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:-ffast-math>"
+    )
+elseif(MSVC)
+    set_source_files_properties(external/orbitlib/src/transfer.c PROPERTIES
+        COMPILE_OPTIONS "$<$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>:/fp:fast>"
+    )
+endif()
+
 add_executable(KMAT
     tools/file_io.c
+    tools/file_io_format.c
+    tools/itinerary_date_limits.c
+    tools/itinerary_reference_defaults.c
+    tools/itinerary_reference_defaults.h
     tools/file_io.h
     launch_calculator/launch_calculator.c
     launch_calculator/launch_calculator.h
@@ -24,6 +49,8 @@ add_executable(KMAT
     launch_calculator/lp_parameters.h
     orbit_calculator/transfer_calc.c
     orbit_calculator/transfer_calc.h
+    orbit_calculator/powered_flyby_optimizer.c
+    orbit_calculator/powered_flyby_optimizer.h
     launch_calculator/lp_parameters.h
     tools/thread_pool.c
     tools/thread_pool.h
@@ -41,6 +68,8 @@ add_executable(KMAT
     gui/transfer_app/transfer_planner.h
     gui/transfer_app/porkchop_analyzer.c
     gui/transfer_app/porkchop_analyzer.h
+    gui/transfer_app/porkchop_analyzer_model.c
+    gui/transfer_app/porkchop_analyzer_model.h
     gui/transfer_app/porkchop_analyzer_tools.c
     gui/transfer_app/porkchop_analyzer_tools.h
     gui/transfer_app/sequence_calculator.c
@@ -96,6 +125,10 @@ add_executable(KMAT
 
 add_executable(KMATUnitTests
     00_Testing/unit_tests.c
+    tools/file_io_format.c
+    tools/itinerary_date_limits.c
+    tools/itinerary_reference_defaults.c
+    gui/transfer_app/porkchop_analyzer_model.c
     tools/tool_funcs.c
 )
 
@@ -104,6 +137,32 @@ target_include_directories(KMATUnitTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
     ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
 )
+
+add_executable(KMATLambertBenchmark 00_Testing/lambert_benchmark.c)
+target_link_libraries(KMATLambertBenchmark PRIVATE orbitlib geometrylib)
+target_include_directories(KMATLambertBenchmark PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
+)
+
+add_executable(KMATSearchIntegration
+    00_Testing/itinerary_search_integration.c
+    orbit_calculator/transfer_calc.c
+    orbit_calculator/powered_flyby_optimizer.c
+    orbit_calculator/itin_tool.c
+    tools/thread_pool.c
+    tools/tool_funcs.c
+)
+target_link_libraries(KMATSearchIntegration PRIVATE orbitlib geometrylib)
+target_include_directories(KMATSearchIntegration PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
+)
+
+if(KMAT_ENABLE_SEARCH_PROFILE)
+    target_compile_definitions(KMAT PRIVATE KMAT_ENABLE_SEARCH_PROFILE)
+    target_compile_definitions(KMATSearchIntegration PRIVATE KMAT_ENABLE_SEARCH_PROFILE)
+endif()
 
 # Platform-specific setup
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -158,6 +217,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         wininet
     )
 
+    target_link_libraries(KMATUnitTests PRIVATE urlmon)
+    target_link_libraries(KMATSearchIntegration PRIVATE urlmon)
+
     target_include_directories(KMAT PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
     )
@@ -186,6 +248,7 @@ endif()
 
 if(BUILD_TESTING)
     add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
+    add_test(NAME KMATSearchIntegration COMMAND KMATSearchIntegration)
     add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
     set_tests_properties(KMATIntegrationTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -194,6 +257,10 @@ if(BUILD_TESTING)
     set_tests_properties(KMATUnitTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS unit
+    )
+    set_tests_properties(KMATSearchIntegration PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS integration
     )
 
     add_custom_target(run_tests ALL
@@ -205,7 +272,7 @@ if(BUILD_TESTING)
 
     add_custom_target(run_integration_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure -L integration
-        DEPENDS KMAT
+        DEPENDS KMAT KMATSearchIntegration
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         USES_TERMINAL
     )

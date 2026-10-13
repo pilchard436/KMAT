@@ -1,5 +1,6 @@
 #include "porkchop_analyzer.h"
 #include "porkchop_analyzer_tools.h"
+#include "porkchop_analyzer_model.h"
 #include "gui/drawing.h"
 #include "gui/gui_manager.h"
 #include "gui/css_loader.h"
@@ -21,6 +22,8 @@ double current_date_pa;
 int pa_num_groups = 0;
 struct PorkchopGroup *pa_groups;
 struct PorkchopAnalyzerPoint *pa_porkchop_points;
+static guint group_overview_source_id;
+static gpointer group_overview_build_data;
 
 ItinStepBinHeaderData pa_analysis_params;
 
@@ -49,6 +52,10 @@ GObject *lb_pa_periapsis;
 GObject *st_pa_step_group_selector;
 GObject *vp_pa_groups;
 GtkWidget *grid_pa_groups;
+
+double calc_step_dv_pa(struct ItinStep *step);
+double calc_total_dv_pa(void);
+double calc_periapsis_height_pa(void);
 
 void update_pa();
 void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
@@ -107,7 +114,26 @@ void update_pa_porkchop_diagram() {
 void update_pa_itinerary_preview() {
 	clear_camera_screen(pa_itin_preview_camera);
 
-	if(pa_system == NULL) return;
+	if(pa_system == NULL || body_show_status_pa == NULL) return;
+	char date_text[32];
+	date_to_string(convert_JD_date(current_date_pa, get_settings_datetime_type()), date_text, 0);
+	gtk_label_set_text(GTK_LABEL(lb_pa_tfdate), date_text);
+	if(curr_transfer_pa != NULL) {
+		gtk_label_set_text(GTK_LABEL(lb_pa_tfbody),
+			curr_transfer_pa->body != NULL ? curr_transfer_pa->body->name : "Deep Space Maneuver");
+		char value_text[48];
+		g_snprintf(value_text, sizeof(value_text), "%.0f m/s", calc_step_dv_pa(curr_transfer_pa));
+		gtk_label_set_text(GTK_LABEL(lb_pa_transfer_dv), value_text);
+		g_snprintf(value_text, sizeof(value_text), "%.0f m/s", calc_total_dv_pa());
+		gtk_label_set_text(GTK_LABEL(lb_pa_total_dv), value_text);
+		double periapsis_height = calc_periapsis_height_pa();
+		if(periapsis_height < -1e10)
+			gtk_label_set_text(GTK_LABEL(lb_pa_periapsis), "- km");
+		else {
+			g_snprintf(value_text, sizeof(value_text), "%.2f km", periapsis_height);
+			gtk_label_set_text(GTK_LABEL(lb_pa_periapsis), value_text);
+		}
+	}
 
 	// Sun
 	draw_body(pa_itin_preview_camera, pa_system, pa_system->cb, current_date_pa);
@@ -270,6 +296,11 @@ double calc_periapsis_height_pa() {
 }
 
 void free_all_porkchop_analyzer_itins() {
+	if(group_overview_source_id != 0) {
+		g_source_remove(group_overview_source_id);
+		group_overview_source_id = 0;
+	}
+	g_clear_pointer(&group_overview_build_data, g_free);
 	if(pa_departures != NULL) {
 		for(int i = 0; i < pa_num_deps; i++) free(pa_departures[i]);
 		free(pa_departures);
@@ -292,43 +323,99 @@ void free_all_porkchop_analyzer_itins() {
 }
 
 void pa_update_body_show_status() {
-	if(pa_system == NULL) return;
-	struct ItinStep *step = get_last(curr_transfer_pa);
-	for(int i = 0; i < pa_system->num_bodies; i++) body_show_status_pa[i] = 0;
-	if(step == NULL) return;
-	while(step != NULL) {
-		if(step->body != NULL) body_show_status_pa[get_body_system_id(step->body,pa_system)] = 1;
-		step = step->prev;
-	}
+	if(pa_system == NULL || body_show_status_pa == NULL) return;
+	mark_itinerary_bodies_visible(body_show_status_pa, pa_system->num_bodies, get_last(curr_transfer_pa), pa_system);
 }
 
-void pa_update_preview() {
-	pa_update_body_show_status();
-	update_pa_itinerary_preview();
+typedef struct {
+	int next_group_idx;
+} GroupOverviewBuildData;
 
-	if(curr_transfer_pa == NULL) {
-		char date0_string[10];
-		date_to_string((Datetime) {.date_type=get_settings_datetime_type()}, date0_string, 0);
-		gtk_label_set_label(GTK_LABEL(lb_pa_tfdate), date0_string);
-		gtk_label_set_label(GTK_LABEL(lb_pa_tfbody), "Planet");
-	} else {
-		Datetime date = convert_JD_date(curr_transfer_pa->date, get_settings_datetime_type());
-		char date_string[10];
-		date_to_string(date, date_string, 0);
-		gtk_label_set_label(GTK_LABEL(lb_pa_tfdate), date_string);
-		if(curr_transfer_pa->body != NULL) gtk_label_set_label(GTK_LABEL(lb_pa_tfbody), curr_transfer_pa->body->name);
-		else gtk_label_set_label(GTK_LABEL(lb_pa_tfbody), "Deep-Space Man");
-		char s_dv[20];
-		sprintf(s_dv, "%6.0f m/s", calc_step_dv_pa(curr_transfer_pa));
-		gtk_label_set_label(GTK_LABEL(lb_pa_transfer_dv), s_dv);
-		sprintf(s_dv, "%6.0f m/s", calc_total_dv_pa());
-		gtk_label_set_label(GTK_LABEL(lb_pa_total_dv), s_dv);
-		double h = calc_periapsis_height_pa();
-		if(curr_transfer_pa->body != NULL && h > -curr_transfer_pa->body->radius*1e-3)
-			sprintf(s_dv, "%.0f km", h);
-		else sprintf(s_dv, "- km");
-		gtk_label_set_label(GTK_LABEL(lb_pa_periapsis), s_dv);
+static gboolean build_group_overview_batch(gpointer user_data) {
+	GroupOverviewBuildData *build_data = user_data;
+	int groups_built = 0;
+	while(build_data->next_group_idx < pa_num_groups && groups_built < 100) {
+		int group_idx = build_data->next_group_idx++;
+		if(!pa_groups[group_idx].has_itin_inside_filter) continue;
+		int row = group_idx * 2 + 3;
+		GString *route_label = g_string_new(NULL);
+		GString *route_tooltip = g_string_new(NULL);
+		GPtrArray *route_steps = g_ptr_array_new();
+		for(struct ItinStep *step = pa_groups[group_idx].sample_arrival_node; step != NULL; step = step->prev)
+			g_ptr_array_add(route_steps, step);
+		for(gint step_idx = (gint)route_steps->len - 1; step_idx >= 0; step_idx--) {
+			struct ItinStep *step = g_ptr_array_index(route_steps, step_idx);
+			if(step_idx != (gint)route_steps->len - 1) {
+				g_string_append(route_label, " - ");
+				g_string_append(route_tooltip, " - ");
+			}
+			if(step->body != NULL) {
+				g_string_append_printf(route_label, "%d", get_body_system_id(step->body, pa_system) + 1);
+				g_string_append(route_tooltip, step->body->name);
+			} else {
+				g_string_append(route_label, "DSB");
+			}
+		}
+
+		GtkWidget *check_button = gtk_check_button_new();
+		gtk_widget_set_halign(check_button, GTK_ALIGN_CENTER);
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_button), pa_groups[group_idx].show_group);
+		g_signal_connect(check_button, "clicked", G_CALLBACK(on_change_itin_group_visibility), &pa_groups[group_idx]);
+		pa_groups[group_idx].cb_pa_show_group = check_button;
+		gtk_widget_set_tooltip_text(check_button, route_tooltip->str);
+		gtk_grid_attach(GTK_GRID(grid_pa_groups), check_button, 1, row, 1, 1);
+		gtk_widget_show(check_button);
+
+		GtkWidget *route_label_widget = gtk_label_new(route_label->str);
+		gtk_widget_set_tooltip_text(route_label_widget, route_tooltip->str);
+		gtk_widget_set_halign(route_label_widget, GTK_ALIGN_START);
+		set_css_class_for_widget(route_label_widget, "pag-group-itin");
+		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_widget, 3, row, 1, 1);
+		gtk_widget_show(route_label_widget);
+
+		GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+		gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, 2, row, 1, 1);
+		gtk_widget_show(separator);
+		g_ptr_array_free(route_steps, TRUE);
+		g_string_free(route_label, TRUE);
+		g_string_free(route_tooltip, TRUE);
+		groups_built++;
 	}
+
+	if(build_data->next_group_idx < pa_num_groups) return G_SOURCE_CONTINUE;
+	group_overview_source_id = 0;
+	group_overview_build_data = NULL;
+	g_free(build_data);
+	return G_SOURCE_REMOVE;
+}
+
+void update_group_overview() {
+	if(group_overview_source_id != 0) {
+		g_source_remove(group_overview_source_id);
+		group_overview_source_id = 0;
+	}
+	g_clear_pointer(&group_overview_build_data, g_free);
+	if(grid_pa_groups != NULL && GTK_WIDGET(vp_pa_groups) == gtk_widget_get_parent(grid_pa_groups))
+		gtk_container_remove(GTK_CONTAINER(vp_pa_groups), grid_pa_groups);
+
+	grid_pa_groups = gtk_grid_new();
+	GtkWidget *show_header = gtk_label_new("Show");
+	gtk_widget_set_size_request(show_header, 50, -1);
+	set_css_class_for_widget(show_header, "pag-header");
+	gtk_widget_set_halign(show_header, GTK_ALIGN_START);
+	gtk_grid_attach(GTK_GRID(grid_pa_groups), show_header, 1, 1, 1, 1);
+	GtkWidget *itinerary_header = gtk_label_new("Itinerary");
+	set_css_class_for_widget(itinerary_header, "pag-header");
+	gtk_widget_set_halign(itinerary_header, GTK_ALIGN_START);
+	gtk_grid_attach(GTK_GRID(grid_pa_groups), itinerary_header, 3, 1, 1, 1);
+	GtkWidget *header_separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+	gtk_grid_attach(GTK_GRID(grid_pa_groups), header_separator, 2, 1, 1, 1);
+	gtk_container_add(GTK_CONTAINER(vp_pa_groups), grid_pa_groups);
+	gtk_widget_show_all(grid_pa_groups);
+
+	GroupOverviewBuildData *build_data = g_new0(GroupOverviewBuildData, 1);
+	group_overview_build_data = build_data;
+	group_overview_source_id = g_idle_add(build_group_overview_batch, build_data);
 }
 
 void reset_min_max_feedback(int take_hidden_group_into_account) {
@@ -336,85 +423,65 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 	int cap = pa_last_transfer_type == TF_CAPTURE, circ = pa_last_transfer_type == TF_CIRC;
 
 	int first_show_idx = 0;
-	while(!pa_porkchop_points[first_show_idx].inside_filter || (!take_hidden_group_into_account && !pa_porkchop_points[first_show_idx].group->show_group)) first_show_idx++;
+	while(first_show_idx < pa_num_itins &&
+		(!pa_porkchop_points[first_show_idx].inside_filter ||
+		 (!take_hidden_group_into_account && !pa_porkchop_points[first_show_idx].group->show_group)))
+		first_show_idx++;
+	if(first_show_idx >= pa_num_itins) return;
 	struct PorkchopPoint pp = pa_porkchop_points[first_show_idx].data;
 
 	double min[6] = {
-			/* depdate	*/ pp.dep_date,
-			/* arrdate	*/ pp.dep_date+pp.dur,
-			/* duration	*/ pp.dur,
-			/* total dv	*/ pp.dv_dep + pp.dv_dsm + pp.dv_arr_cap*cap + pp.dv_arr_circ*circ,
-			/* dep dv	*/ pp.dv_dep,
-			/* sat dv	*/ pp.dv_dsm + pp.dv_arr_cap*cap + pp.dv_arr_circ*circ,
+			/* depdate */ pp.dep_date,
+			/* arrdate */ pp.dep_date + pp.dur,
+			/* duration */ pp.dur,
+			/* total dv */ pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
+			/* dep dv */ pp.dv_dep,
+			/* sat dv */ pp.dv_dsm + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
 	};
-	double max[6] = {
-			/* depdate	*/ pp.dep_date,
-			/* arrdate	*/ pp.dep_date+pp.dur,
-			/* duration	*/ pp.dur,
-			/* total dv	*/ pp.dv_dep + pp.dv_dsm + pp.dv_arr_cap*cap + pp.dv_arr_circ*circ,
-			/* dep dv	*/ pp.dv_dep,
-			/* sat dv	*/ pp.dv_dsm + pp.dv_arr_cap*cap + pp.dv_arr_circ*circ,
-	};
-	double dep_dv, sat_dv, tot_dv, depdate, arrdate, dur;
+	double max[6];
+	memcpy(max, min, sizeof(max));
 
-	for(int i = 1; i < pa_num_itins; i++) {
-		if(!pa_porkchop_points[i].inside_filter || (!take_hidden_group_into_account && !pa_porkchop_points[i].group->show_group)) continue;
+	for(int i = first_show_idx + 1; i < pa_num_itins; i++) {
+		if(!pa_porkchop_points[i].inside_filter ||
+			(!take_hidden_group_into_account && !pa_porkchop_points[i].group->show_group)) continue;
 		pp = pa_porkchop_points[i].data;
-		dep_dv = pp.dv_dep;
-		sat_dv = pp.dv_dsm + pp.dv_arr_cap*cap + pp.dv_arr_circ*circ;
-		tot_dv = dep_dv + sat_dv;
-		depdate = pp.dep_date;
-		dur = pp.dur;
-		arrdate = depdate + dur;
-		
-		int j = 0;
-		
-		if(depdate < min[j]) min[j] = depdate;
-		else if(depdate > max[j]) max[j] = depdate;
-		j++;
-		if(arrdate < min[j]) min[j] = arrdate;
-		else if(arrdate > max[j]) max[j] = arrdate;
-		j++;
-		if(dur < min[j]) min[j] = dur;
-		else if(dur > max[j]) max[j] = dur;
-		j++;
-		if(tot_dv < min[j]) min[j] = tot_dv;
-		else if(tot_dv > max[j]) max[j] = tot_dv;
-		j++;
-		if(dep_dv < min[j]) min[j] = dep_dv;
-		else if(dep_dv > max[j]) max[j] = dep_dv;
-		j++;
-		if(sat_dv < min[j]) min[j] = sat_dv;
-		else if(sat_dv > max[j]) max[j] = sat_dv;
+		double values[6] = {
+			pp.dep_date,
+			pp.dep_date + pp.dur,
+			pp.dur,
+			pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
+			pp.dv_dep,
+			pp.dv_dsm + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
+		};
+		for(int value_idx = 0; value_idx < 6; value_idx++) {
+			min[value_idx] = MIN(min[value_idx], values[value_idx]);
+			max[value_idx] = MAX(max[value_idx], values[value_idx]);
+		}
 	}
 
-	char string[20];
+	char string[32];
 	date_to_string(convert_JD_date(min[PA_DEP], get_settings_datetime_type()), string, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]), string);
 	date_to_string(convert_JD_date(min[PA_ARR], get_settings_datetime_type()), string, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_ARR]), string);
-	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? min[PA_DUR]*4 : min[PA_DUR]);
+	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? min[PA_DUR] * 4 : min[PA_DUR]);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DUR]), string);
-
 	for(int i = 3; i < 6; i++) {
 		sprintf(string, "%.2f", min[i]);
 		gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[i]), string);
 	}
-
 	date_to_string(convert_JD_date(max[PA_DEP], get_settings_datetime_type()), string, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DEP]), string);
 	date_to_string(convert_JD_date(max[PA_ARR], get_settings_datetime_type()), string, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_ARR]), string);
-	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? max[PA_DUR]*4 : max[PA_DUR]);
+	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? max[PA_DUR] * 4 : max[PA_DUR]);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DUR]), string);
-
 	for(int i = 3; i < 6; i++) {
 		sprintf(string, "%.2f", max[i]);
 		gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[i]), string);
 	}
-
-	for(int i = 0; i < 6; i++) pa_min_vals[i] = min[i];
-	for(int i = 0; i < 6; i++) pa_max_vals[i] = max[i];
+	memcpy(pa_min_vals, min, sizeof(min));
+	memcpy(pa_max_vals, max, sizeof(max));
 }
 
 G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) {
@@ -423,114 +490,10 @@ G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) 
 }
 
 G_MODULE_EXPORT void on_change_itin_group_visibility(GtkWidget* widget, gpointer data) {
-	struct PorkchopGroup *group = (struct PorkchopGroup *) data;  // Cast data back to group struct
+	struct PorkchopGroup *group = (struct PorkchopGroup *) data;
 	int visibility = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
 	group->show_group = visibility;
 	update_pa();
-}
-
-void update_group_overview() {
-	int num_cols = 2;
-
-	// Remove grid if exists
-	if (grid_pa_groups != NULL && GTK_WIDGET(vp_pa_groups) == gtk_widget_get_parent(grid_pa_groups)) {
-		gtk_container_remove(GTK_CONTAINER(vp_pa_groups), grid_pa_groups);
-	}
-
-
-	grid_pa_groups = gtk_grid_new();
-	GtkWidget *separator;
-
-	for (int col = 0; col < num_cols; col++) {
-		// Create a horizontal separator line (optional)
-		if(col > 0) {
-			separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-			gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, col * 2, 1, 1, 1);
-		}
-
-		char label_text[20];
-		int req_width;
-		switch(col) {
-			case 0: sprintf(label_text, "Show"); req_width = 50; break;
-			case 1: sprintf(label_text, "Itinerary"); req_width = -1; break;
-			default:sprintf(label_text, ""); req_width = 50; break;
-		}
-
-		// Create a GtkLabel
-		GtkWidget *label = gtk_label_new(label_text);
-		// width request
-		gtk_widget_set_size_request(GTK_WIDGET(label), req_width, -1);
-		// set css class
-		set_css_class_for_widget(GTK_WIDGET(label), "pag-header");
-
-		// Set the label in the grid at the specified row and column
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), label, col*2+1, 1, 1, 1);
-		gtk_widget_set_halign(label, GTK_ALIGN_START);
-	}
-
-	// Create labels and buttons and add them to the grid
-	for (int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
-		if(!pa_groups[group_idx].has_itin_inside_filter) continue;
-		int row = group_idx*2+3;
-		
-		char widget_text[100];
-		char tooltip_text[255];
-		sprintf(widget_text, "");
-		sprintf(tooltip_text, "");
-		struct ItinStep *ptr;
-		for(int step_idx = 0; step_idx < pa_groups[group_idx].num_steps; step_idx++) {
-			ptr = pa_groups[group_idx].sample_arrival_node;
-			for(int k = 0; k < pa_groups[group_idx].num_steps - step_idx - 1; k++) ptr = ptr->prev;
-			if(step_idx != 0) {
-				sprintf(widget_text, "%s - ", widget_text);
-				sprintf(tooltip_text, "%s - ", tooltip_text);
-			}
-			if(ptr->body != NULL) {
-				sprintf(widget_text, "%s%d", widget_text, get_body_system_id(ptr->body, pa_system) + 1);
-				sprintf(tooltip_text, "%s%s", tooltip_text, ptr->body->name);
-			} else
-				sprintf(widget_text, "%sDSB", widget_text);
-		}
-
-		for (int j = 0; j < num_cols; j++) {
-			int col = j*2+1;
-			GtkWidget *widget = NULL;
-			switch(j) {
-				case 0:
-					// Create a show group check button
-					widget = gtk_check_button_new();
-					gtk_widget_set_halign(widget, GTK_ALIGN_CENTER);
-					gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), pa_groups[group_idx].show_group);
-					g_signal_connect(widget, "clicked", G_CALLBACK(on_change_itin_group_visibility), &(pa_groups[group_idx]));
-					pa_groups[group_idx].cb_pa_show_group = widget;
-					gtk_widget_set_tooltip_text(widget, tooltip_text);
-					break;
-				case 1:
-					// Create itinerary group label
-					widget = gtk_label_new(widget_text);
-					gtk_widget_set_tooltip_text(widget, tooltip_text);
-					gtk_widget_set_halign(widget, GTK_ALIGN_START);
-					// set css class
-					set_css_class_for_widget(GTK_WIDGET(widget), "pag-group-itin");
-					break;
-				default:
-					sprintf(widget_text, "");
-					widget = gtk_label_new(widget_text);
-					break;
-			}
-
-			// Set the label in the grid at the specified row and column
-			gtk_grid_attach(GTK_GRID(grid_pa_groups), widget, col, row, 1, 1);
-
-			// Create a horizontal separator line (optional)
-			if(col > 1) {
-				separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-				gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, col - 1, row, 1, 1);
-			}
-		}
-	}
-	gtk_container_add (GTK_CONTAINER (vp_pa_groups), grid_pa_groups);
-	gtk_widget_show_all(GTK_WIDGET(vp_pa_groups));
 }
 
 // Comparison function for group qsort
@@ -628,12 +591,13 @@ void initialize_itinerary_groups() {
 }
 
 void update_best_itin() {
-	if(pa_porkchop_points == NULL) return;
-	int best_show_ind = 0;
-	while(!pa_porkchop_points[best_show_ind].inside_filter || !pa_porkchop_points[best_show_ind].group->show_group) best_show_ind++;
+	if(pa_porkchop_points == NULL || pa_num_itins <= 0) return;
+	int best_show_ind = find_first_visible_porkchop_point(pa_porkchop_points, pa_num_itins);
+	if(best_show_ind < 0 || best_show_ind >= pa_num_itins) return;
 	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
 	curr_transfer_pa = create_itin_copy_from_arrival(pa_porkchop_points[best_show_ind].data.arrival);
 	current_date_pa = get_last(curr_transfer_pa)->date;
+	pa_update_body_show_status();
 	camera_zoom_to_fit_itinerary(pa_itin_preview_camera, curr_transfer_pa);
 }
 
@@ -669,7 +633,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	free_all_porkchop_analyzer_itins();
 	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
 	char param_string[1000];
-	print_header_data_to_string(load_results.header, param_string, get_settings_datetime_type());
+	print_header_data_to_string(load_results.header, param_string, sizeof(param_string), get_settings_datetime_type());
 	printf("%s\n", param_string);
 	if(load_results.departures == NULL) return;
 	
@@ -687,7 +651,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	analyze_departure_itins();
 
 	update_pa_porkchop_diagram();
-	pa_update_preview();
+	update_pa_itinerary_preview();
 }
 
 G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
@@ -702,7 +666,7 @@ G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
 G_MODULE_EXPORT void show_pa_analysis_parameters() {
 	if(pa_analysis_params.num_deps == 0) return;
 	char param_string[1000];
-	print_header_data_to_string(pa_analysis_params, param_string, get_settings_datetime_type());
+	print_header_data_to_string(pa_analysis_params, param_string, sizeof(param_string), get_settings_datetime_type());
 	show_msg_window(param_string);
 }
 
@@ -718,14 +682,14 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
 	update_best_itin();
 	update_pa_porkchop_diagram();
-	pa_update_preview();
+	update_pa_itinerary_preview();
 	reset_min_max_feedback(1);
 }
 
 void update_pa() {
 	update_best_itin();
 	update_pa_porkchop_diagram();
-	pa_update_preview();
+	update_pa_itinerary_preview();
 	update_group_overview();
 	reset_min_max_feedback(1);
 }
@@ -748,7 +712,7 @@ gboolean are_any_porkchop_points_in_filter(const double min[6], const double max
 		if(	!(pp.dep_date 			< min[PA_DEP] || pp.dep_date 			> max[PA_DEP] ||
 			  pp.dep_date+pp.dur 	< min[PA_ARR] || pp.dep_date+pp.dur 	> max[PA_ARR] ||
 			  pp.dur 				< min[PA_DUR] || pp.dur 				> max[PA_DUR] ||
-			  pp.dv_dep + dv_sat	< min[PA_TOTDV] || pp.dv_dep + dv_sat	> max[PA_TOTDV] ||
+			  pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
 			  pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
 			  dv_sat 				< min[PA_SATDV] || dv_sat 				> max[PA_SATDV])) return TRUE;
 	}
@@ -804,7 +768,7 @@ void apply_filter() {
 		if(	pp.dep_date 		< min[PA_DEP] 	|| pp.dep_date 			> max[PA_DEP] ||
 			pp.dep_date+pp.dur 	< min[PA_ARR] 	|| pp.dep_date+pp.dur 	> max[PA_ARR] ||
 			pp.dur 				< min[PA_DUR] 	|| pp.dur 				> max[PA_DUR] ||
-			pp.dv_dep + dv_sat	< min[PA_TOTDV] || pp.dv_dep + dv_sat	> max[PA_TOTDV] ||
+			pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
 			pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
 			dv_sat 				< min[PA_SATDV] || dv_sat 				> max[PA_SATDV]) pa_porkchop_points[i].inside_filter = 0;
 		else pa_porkchop_points[i].group->has_itin_inside_filter = 1;
@@ -839,14 +803,14 @@ G_MODULE_EXPORT void on_prev_transfer_pa(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_pa == NULL) return;
 	if(curr_transfer_pa->prev != NULL) curr_transfer_pa = curr_transfer_pa->prev;
 	current_date_pa = curr_transfer_pa->date;
-	pa_update_preview();
+	update_pa_itinerary_preview();
 }
 
 G_MODULE_EXPORT void on_next_transfer_pa(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_pa == NULL) return;
 	if(curr_transfer_pa->next != NULL) curr_transfer_pa = curr_transfer_pa->next[0];
 	current_date_pa = curr_transfer_pa->date;
-	pa_update_preview();
+	update_pa_itinerary_preview();
 }
 
 G_MODULE_EXPORT void on_switch_steps_groups(GtkWidget* widget, gpointer data) {

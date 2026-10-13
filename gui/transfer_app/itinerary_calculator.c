@@ -5,6 +5,9 @@
 #include "gui/settings.h"
 #include "gui/info_win_manager.h"
 #include "tools/file_io.h"
+#include "tools/itinerary_date_limits.h"
+#include "tools/itinerary_reference_defaults.h"
+#include <math.h>
 
 
 GObject *tf_ic_window;
@@ -17,6 +20,8 @@ GObject *tf_ic_mindepdate;
 GObject *tf_ic_maxdepdate;
 GObject *tf_ic_maxarrdate;
 GObject *tf_ic_maxdur;
+static GObject *rb_ic_maxarrdate;
+static GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
 GObject *tf_ic_totdv;
 GObject *tf_ic_depdv;
@@ -28,6 +33,7 @@ static GtkWidget *ic_latest_dep_plus_month_button;
 static GtkWidget *ic_latest_arr_minus_month_button;
 static GtkWidget *ic_latest_arr_plus_month_button;
 static gboolean ic_changing_date_type;
+static gboolean ic_syncing_time_limits;
 
 CelestSystem *ic_system;
 
@@ -53,6 +59,9 @@ static void populate_date_picker_year_grid(DatePickerDialogData *data);
 static void on_ic_latest_date_adjust(GtkButton *button, gpointer user_data);
 static void on_ic_earliest_dep_changed(GtkEditable *editable, gpointer user_data);
 static void on_ic_latest_arrival_changed(GtkEditable *editable, gpointer user_data);
+static void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data);
+static gboolean update_ic_reference_defaults(void);
+static void on_ic_reference_input_changed(GtkWidget *widget, gpointer user_data);
 
 static double adjust_date_by_interval(double jd, const char *interval, int direction, enum DateType date_type) {
 	if(g_strcmp0(interval, "week") == 0)
@@ -276,13 +285,103 @@ static void on_ic_earliest_dep_changed(GtkEditable *editable, gpointer user_data
 	if(ic_changing_date_type) return;
 	const char *date_text = gtk_entry_get_text(GTK_ENTRY(editable));
 	if(is_string_valid_date_format(date_text, get_settings_datetime_type())) {
+		ic_syncing_time_limits = TRUE;
 		gtk_entry_set_text(GTK_ENTRY(tf_ic_maxdepdate), date_text);
 		enforce_latest_arrival_after_earliest();
+		ic_syncing_time_limits = FALSE;
 	}
 }
 
 static void on_ic_latest_arrival_changed(GtkEditable *editable, gpointer user_data) {
+	if(ic_syncing_time_limits) return;
 	enforce_latest_arrival_after_earliest();
+	const char *earliest_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_mindepdate));
+	const char *arrival_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxarrdate));
+	enum DateType date_type = get_settings_datetime_type();
+	if(!is_string_valid_date_format(earliest_text, date_type) ||
+		!is_string_valid_date_format(arrival_text, date_type)) return;
+	double earliest_jd = convert_date_JD(date_from_string((char *)earliest_text, date_type));
+	double arrival_jd = convert_date_JD(date_from_string((char *)arrival_text, date_type));
+	ItineraryDateLimits limits = calculate_itinerary_date_limits(
+		TRUE, earliest_jd, 0, arrival_jd, 0, date_type);
+	double user_duration = limits.max_duration_days * (date_type == DATE_KERBAL ? 4.0 : 1.0);
+	char duration_text[32];
+	g_snprintf(duration_text, sizeof(duration_text), "%.0f", user_duration);
+	ic_syncing_time_limits = TRUE;
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(rb_ic_maxarrdate), TRUE);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_maxdur), duration_text);
+	ic_syncing_time_limits = FALSE;
+}
+
+static void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data) {
+	if(ic_syncing_time_limits) return;
+	const char *duration_text = gtk_entry_get_text(GTK_ENTRY(editable));
+	char *end = NULL;
+	double user_duration = g_ascii_strtod(duration_text, &end);
+	while(end != NULL && g_ascii_isspace(*end)) end++;
+	if(end == duration_text || end == NULL || *end != '\0' || !isfinite(user_duration) || user_duration < 0)
+		return;
+	const char *min_dep_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_mindepdate));
+	const char *max_dep_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdepdate));
+	enum DateType date_type = get_settings_datetime_type();
+	if(!is_string_valid_date_format(min_dep_text, date_type) ||
+		!is_string_valid_date_format(max_dep_text, date_type)) return;
+	double min_dep_jd = convert_date_JD(date_from_string((char *)min_dep_text, date_type));
+	double max_dep_jd = convert_date_JD(date_from_string((char *)max_dep_text, date_type));
+	ItineraryDateLimits limits = calculate_itinerary_date_limits(
+		FALSE, min_dep_jd, max_dep_jd, 0, user_duration, date_type);
+	ic_syncing_time_limits = TRUE;
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(rb_ic_maxdur), TRUE);
+	set_entry_date_from_jd(GTK_ENTRY(tf_ic_maxarrdate), limits.max_arrival_jd, date_type);
+	ic_syncing_time_limits = FALSE;
+}
+
+static gboolean update_ic_reference_defaults(void) {
+	if(ic_system == NULL || tf_ic_mindepdate == NULL || tf_ic_maxarrdate == NULL ||
+		tf_ic_maxdur == NULL || tf_ic_totdv == NULL || tf_ic_depdv == NULL || tf_ic_satdv == NULL) return FALSE;
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
+	if(departure_index < 0 || departure_index >= ic_system->num_bodies ||
+		arrival_index < 0 || arrival_index >= ic_system->num_bodies) return FALSE;
+	Body *departure_body = ic_system->bodies[departure_index];
+	Body *arrival_body = ic_system->bodies[arrival_index];
+	const char *transfer_type_id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
+	if(transfer_type_id == NULL) return FALSE;
+	enum LastTransferType transfer_type = (enum LastTransferType)strtol(transfer_type_id, NULL, 10);
+	if(transfer_type != TF_FLYBY && transfer_type != TF_CAPTURE && transfer_type != TF_CIRC) return FALSE;
+
+	ItineraryHohmannReference reference;
+	if(!calculate_itinerary_hohmann_reference(departure_body, arrival_body, ic_system->cb,
+		ic_dep_periapsis, ic_arr_periapsis, &reference)) return FALSE;
+	const char *earliest_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_mindepdate));
+	enum DateType date_type = get_settings_datetime_type();
+	if(!is_string_valid_date_format(earliest_text, date_type)) return FALSE;
+	double earliest_jd = convert_date_JD(date_from_string((char *)earliest_text, date_type));
+	ItineraryHohmannDefaults defaults;
+	if(!calculate_itinerary_hohmann_defaults(&reference, transfer_type, date_type, earliest_jd, &defaults))
+		return FALSE;
+
+	char value_text[32];
+	Datetime max_arrival = convert_JD_date(defaults.max_arrival_jd, date_type);
+	date_to_string(max_arrival, value_text, 0);
+	ic_syncing_time_limits = TRUE;
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_maxarrdate), value_text);
+	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_duration_user_days);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_maxdur), value_text);
+	ic_syncing_time_limits = FALSE;
+	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_departure_dv);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_depdv), value_text);
+	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_satellite_dv);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_satdv), value_text);
+	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_total_dv);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_totdv), value_text);
+	return TRUE;
+}
+
+static void on_ic_reference_input_changed(GtkWidget *widget, gpointer user_data) {
+	if(widget == GTK_WIDGET(cb_ic_depbody) || widget == GTK_WIDGET(cb_ic_arrbody))
+		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+	update_ic_reference_defaults();
 }
 
 void init_itinerary_calculator(GtkBuilder *builder) {
@@ -295,8 +394,15 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	tf_ic_mindepdate = gtk_builder_get_object(builder, "tf_ic_mindepdate");
 	tf_ic_maxdepdate = gtk_builder_get_object(builder, "tf_ic_maxdepdate");
 	tf_ic_maxarrdate = gtk_builder_get_object(builder, "tf_ic_maxarrdate");
+	tf_ic_maxdur = gtk_builder_get_object(builder, "tf_ic_maxdur");
+	rb_ic_maxarrdate = gtk_builder_get_object(builder, "rb_ic_maxarrdate");
+	rb_ic_maxdur = gtk_builder_get_object(builder, "rb_ic_maxdur");
+	g_signal_connect(rb_ic_maxarrdate, "toggled", G_CALLBACK(on_ic_time_limit_toggled), NULL);
+	g_signal_connect(rb_ic_maxdur, "toggled", G_CALLBACK(on_ic_time_limit_toggled), NULL);
+	on_ic_time_limit_toggled(GTK_TOGGLE_BUTTON(rb_ic_maxarrdate), NULL);
 	g_signal_connect(tf_ic_mindepdate, "changed", G_CALLBACK(on_ic_earliest_dep_changed), NULL);
 	g_signal_connect(tf_ic_maxarrdate, "changed", G_CALLBACK(on_ic_latest_arrival_changed), NULL);
+	g_signal_connect(tf_ic_maxdur, "changed", G_CALLBACK(on_ic_max_duration_changed), NULL);
 	connect_date_adjust_buttons(builder, "ic_maxdep", GTK_ENTRY(tf_ic_maxdepdate));
 	connect_date_adjust_buttons(builder, "ic_maxarr", GTK_ENTRY(tf_ic_maxarrdate));
 	update_month_adjust_button_labels(get_settings_datetime_type());
@@ -315,7 +421,6 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		date_to_string(today, date_text, 0);
 		gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
 	}
-	tf_ic_maxdur = gtk_builder_get_object(builder, "tf_ic_maxdur");
 	cb_ic_transfertype = gtk_builder_get_object(builder, "cb_ic_transfertype");
 	tf_ic_totdv = gtk_builder_get_object(builder, "tf_ic_totdv");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
@@ -337,6 +442,10 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
 	}
+	g_signal_connect(cb_ic_depbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
+	g_signal_connect(cb_ic_arrbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
+	g_signal_connect(cb_ic_transfertype, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
+	update_ic_reference_defaults();
 }
 
 void set_ic_default_system(char *system_name) {
@@ -476,6 +585,12 @@ G_MODULE_EXPORT void on_ic_date_icon_release(GtkEntry *entry, GtkEntryIconPositi
 		show_date_picker(entry);
 }
 
+G_MODULE_EXPORT void on_ic_time_limit_toggled(GtkToggleButton *button, gpointer data) {
+	if(!gtk_toggle_button_get_active(button)) return;
+	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_maxarrdate), TRUE);
+	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_maxdur), TRUE);
+}
+
 
 GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid) {
 	if (grid != NULL && GTK_WIDGET(viewport) == gtk_widget_get_parent(grid)) {
@@ -483,6 +598,10 @@ GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid) {
 	}
 
 	grid = gtk_grid_new();
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
+	int first_route_index = MIN(departure_index, arrival_index);
+	int last_route_index = MAX(departure_index, arrival_index);
 
 	// Create labels and buttons and add them to the grid
 	for (int body_idx = 0; body_idx < ic_system->num_bodies; body_idx++) {
@@ -490,7 +609,11 @@ GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid) {
 		GtkWidget *widget;
 		// Create a show body check button
 		widget = gtk_check_button_new_with_label(ic_system->bodies[body_idx]->name);
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), 1);
+		gboolean is_endpoint = body_idx == departure_index || body_idx == arrival_index;
+		gboolean is_between_endpoints = departure_index >= 0 && arrival_index >= 0 &&
+			body_idx >= first_route_index && body_idx <= last_route_index;
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), is_between_endpoints);
+		gtk_widget_set_sensitive(widget, !is_endpoint);
 		gtk_widget_set_halign(widget, GTK_ALIGN_START);
 
 		// Set the label in the grid at the specified row and column
@@ -554,11 +677,25 @@ void ic_calc_thread() {
 	ic_calc_data.jd_min_dep = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdepdate));
 	ic_calc_data.jd_max_dep = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxarrdate));
-	ic_calc_data.jd_max_arr = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdur));
-	ic_calc_data.max_duration = strtod(string, NULL);
-	if(get_settings_datetime_type() == DATE_KERBAL) ic_calc_data.max_duration /= 4;	// kerbal day is 4 times shorter (24h/6h)
+	int use_max_arrival_date = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(rb_ic_maxarrdate));
+	double max_arrival_jd = 0;
+	double user_max_duration = 0;
+	if(use_max_arrival_date) {
+		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxarrdate));
+		max_arrival_jd = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
+	} else {
+		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdur));
+		user_max_duration = strtod(string, NULL);
+	}
+	ItineraryDateLimits time_limits = calculate_itinerary_date_limits(
+		use_max_arrival_date,
+		ic_calc_data.jd_min_dep,
+		ic_calc_data.jd_max_dep,
+		max_arrival_jd,
+		user_max_duration,
+		get_settings_datetime_type());
+	ic_calc_data.jd_max_arr = time_limits.max_arrival_jd;
+	ic_calc_data.max_duration = time_limits.max_duration_days;
 
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_totdv));
 	ic_calc_data.dv_filter.max_totdv = strtod(string, NULL);
@@ -612,6 +749,7 @@ G_MODULE_EXPORT void on_ic_system_change() {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_depbody), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+		update_ic_reference_defaults();
 	}
 }
 
@@ -627,25 +765,21 @@ G_MODULE_EXPORT void on_ic_central_body_change() {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_depbody), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+		update_ic_reference_defaults();
 	}
 }
 
 G_MODULE_EXPORT void on_get_ic_ref_values() {
-	if(ic_system == NULL) return;
-	double dv_dep, dv_arr_cap, dv_arr_circ, dur;
-	Body *dep_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))];
-	Body *arr_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody))];
-
-	if(dep_body == arr_body) return;
-	
-	Hohmann hohmann = calc_hohmann_transfer(dep_body->orbit.a, arr_body->orbit.a, ic_system->cb);
-	
-	dur = hohmann.dur;
-	dv_dep = dv_circ(dep_body, altatmo2radius(dep_body,ic_dep_periapsis), hohmann.dv_dep);
-	dv_arr_circ = dv_circ(arr_body, altatmo2radius(arr_body,ic_arr_periapsis), hohmann.dv_arr);
-	dv_arr_cap = dv_capture(arr_body, altatmo2radius(arr_body,ic_arr_periapsis), hohmann.dv_arr);
-	
-	dur /= get_settings_datetime_type() != DATE_KERBAL ? (24*60*60) : (6*60*60);
+	if(ic_system == NULL || !update_ic_reference_defaults()) return;
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
+	Body *dep_body = ic_system->bodies[departure_index];
+	Body *arr_body = ic_system->bodies[arrival_index];
+	ItineraryHohmannReference reference;
+	if(!calculate_itinerary_hohmann_reference(dep_body, arr_body, ic_system->cb,
+		ic_dep_periapsis, ic_arr_periapsis, &reference)) return;
+	double duration = reference.duration_seconds /
+		(get_settings_datetime_type() == DATE_KERBAL ? 6 * 60 * 60 : 24 * 60 * 60);
 
 	char msg[256];
 	sprintf(msg, "Hohmann Transfer from %s to %s \n(from %.3E km to %.3E km circular orbit):\n\n"
@@ -653,7 +787,8 @@ G_MODULE_EXPORT void on_get_ic_ref_values() {
 				 "Arrival Capture dv: %.0f m/s\n"
 				 "Arrival Circularization: %.0f m/s\n"
 				 "Duration: %.0f days",
-			dep_body->name, arr_body->name, dep_body->orbit.a/1e3, arr_body->orbit.a/1e3, dv_dep, dv_arr_cap, dv_arr_circ, dur);
+			dep_body->name, arr_body->name, dep_body->orbit.a/1e3, arr_body->orbit.a/1e3,
+			reference.departure_dv, reference.arrival_capture_dv, reference.arrival_circularization_dv, duration);
 	show_msg_window(msg);
 }
 

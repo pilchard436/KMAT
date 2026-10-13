@@ -2,6 +2,8 @@
 #define CSW_WRITER
 
 
+#include <stddef.h>
+#include <stdio.h>
 #include "celestial_systems.h"
 #include "orbit_calculator/itin_tool.h"
 #include "orbit_calculator/transfer_calc.h"
@@ -48,7 +50,7 @@ struct ItinLoadFileResults {
 // store itineraries in binary file from multiple departures (pre-order storing)
 void store_itineraries_in_bfile(struct ItinStep **departures, int num_nodes, int num_deps, int num_itins, Itin_Calc_Data calc_data, CelestSystem *system, char *filepath, int file_type);
 
-void print_header_data_to_string(ItinStepBinHeaderData header, char *string, enum DateType date_format);
+void print_header_data_to_string(ItinStepBinHeaderData header, char *string, size_t string_size, enum DateType date_format);
 
 // load itineraries from binary file for multiple departures (from pre-order storing)
 struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath);

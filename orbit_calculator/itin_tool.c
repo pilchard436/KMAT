@@ -7,6 +7,32 @@
 
 
 const int MIN_TRANSFER_DURATION = 10;	// days
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+static _Thread_local unsigned long long *itin_search_lambert_counter;
+static _Thread_local Body **profile_bodies_tls;
+static _Thread_local ItinFlybyProfileStats *profile_stats_tls;
+static _Thread_local int profile_body_count_tls;
+#endif
+
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+void set_itin_search_lambert_counter(unsigned long long *counter) {
+	itin_search_lambert_counter = counter;
+}
+
+void set_itin_search_flyby_profile(Body **bodies, int num_bodies, ItinFlybyProfileStats *stats) {
+	profile_bodies_tls = bodies;
+	profile_body_count_tls = num_bodies;
+	profile_stats_tls = stats;
+}
+
+static ItinFlybyProfileStats *get_flyby_profile_stats(Body *body) {
+	if(profile_bodies_tls == NULL || profile_stats_tls == NULL) return NULL;
+	for(int i = 0; i < profile_body_count_tls; i++) {
+		if(profile_bodies_tls[i] == body) return &profile_stats_tls[i];
+	}
+	return NULL;
+}
+#endif
 
 void calc_time_to_next_conjunction_and_opposition(Vector3 r0, OSV osv0_next, Body *cb, double *next_conjunction_dt, double *next_opposition_dt) {
 	Vector3 proj_vec = proj_vec3_plane3(r0, constr_plane3(vec3(0,0,0), osv0_next.r, osv0_next.v));
@@ -31,6 +57,10 @@ void calc_time_to_next_conjunction_and_opposition(Vector3 r0, OSV osv0_next, Bod
 }
 
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	ItinFlybyProfileStats *profile_stats = get_flyby_profile_stats(next_body);
+	if(profile_stats != NULL) profile_stats->searches++;
+#endif
 	OSV osv_dep = {tf->r, tf->v_body};
 	OSV osv_arr0 = system->prop_method == ORB_ELEMENTS ?
 				   osv_from_elements(next_body->orbit, tf->date) :
@@ -59,6 +89,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 	double last_dt, dt, t1, diff_vinf;
 
 	Vector3 v_init = subtract_vec3(tf->v_arr, tf->v_body);
+	double v_init_magnitude = mag_vec3(v_init);
 
 	while(dt0 < max_dt && counter < max_new_steps) {
 		int right_side = 0;	// 0 = left, 1 = right
@@ -67,19 +98,30 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 			if(i == 0) dt = dt0;
 			if(dt < min_dt) dt = min_dt;
 			if(dt > max_dt) dt = max_dt;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+			if(profile_stats != NULL) {
+				if(right_side) profile_stats->right_evaluations++;
+				else profile_stats->left_evaluations++;
+			}
+#endif
 
 			t1 = t0 + dt / 86400;
 
-			struct OSV osv_arr = system->prop_method == ORB_ELEMENTS ?
-					osv_from_elements(next_body->orbit, t1) :
-					osv_from_ephem(next_body->ephem, next_body->num_ephems, t1, system->cb);
-
-			Lambert3 new_transfer = calc_lambert3(osv_dep.r, osv_arr.r, dt, system->cb);
+			OSV osv_arr = system->prop_method == ORB_ELEMENTS ?
+				osv_from_elements(next_body->orbit, t1) :
+				osv_from_ephem(next_body->ephem, next_body->num_ephems, t1, system->cb);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+			if(itin_search_lambert_counter != NULL) (*itin_search_lambert_counter)++;
+#endif
+			Lambert3 new_transfer = calc_lambert3_selected(osv_dep.r, osv_arr.r, dt, system->cb);
 			Vector3 v_dep = subtract_vec3(new_transfer.v0, tf->v_body);
-			diff_vinf = mag_vec3(v_dep) - mag_vec3(v_init);
+			diff_vinf = mag_vec3(v_dep) - v_init_magnitude;
 
 			if(fabs(diff_vinf) < 1) {
-				if(get_flyby_periapsis(tf->v_arr, new_transfer.v0, tf->v_body, tf->body) > altatmo2radius(tf->body, 10e3)) {	// +10e3 to avoid precision errors when checking for fly-by viability later on
+				PoweredFlybyResult flyby_result;
+				double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+				if(calculate_powered_flyby(tf->v_arr, new_transfer.v0, tf->v_body,
+					tf->body, minimum_periapsis, &flyby_result)) {
 					new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
 					new_steps[counter]->body = next_body;
 					new_steps[counter]->date = t1;
@@ -301,16 +343,32 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	pp.dv_arr_circ = dv_circ(itin->body, alt2radius(itin->body, arr_periapsis), vinf);
 
 	pp.dv_dsm = 0;
+	pp.dv_flyby = 0;
 	while(itin->prev->prev != NULL) {
 		if(itin->body == NULL) {
 			pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
+		} else if(itin->prev->body != NULL && itin->prev->prev != NULL) {
+			struct ItinStep *flyby = itin->prev;
+			PoweredFlybyResult flyby_result;
+			double minimum_periapsis = flyby->body->radius + flyby->body->atmo_alt + 1e4;
+			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
+				flyby->body, minimum_periapsis, &flyby_result))
+				pp.dv_flyby += flyby_result.burn_delta_v;
+			else
+				pp.dv_flyby = HUGE_VAL;
 		}
 		itin = itin->prev;
 	}
 
 	pp.dep_date = itin->prev->date;
-	vinf = mag_vec3(subtract_vec3(itin->v_dep, itin->prev->v_body));
-	pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis), vinf);
+	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
+	DepartureBurn3D departure_burn;
+	if(calculate_free_plane_departure_burn(departure_vinf, itin->prev->body,
+		alt2radius(itin->prev->body, dep_periapsis), &departure_burn))
+		pp.dv_dep = departure_burn.burn_magnitude;
+	else
+		pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis),
+			mag_vec3(departure_vinf));
 	return pp;
 }
 
@@ -332,7 +390,8 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				double dv_sat = porkchop_point.dv_dsm;
 				if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-				if(dv_sat > dv_filter->max_satdv || porkchop_point.dv_dep + dv_sat > dv_filter->max_totdv) {
+						if(dv_sat > dv_filter->max_satdv ||
+							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
 						return 0;
@@ -457,10 +516,11 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 	for(int i = curr_step->num_next_nodes-num_of_end_nodes; i < curr_step->num_next_nodes; i++) {
 		struct ItinStep *next = curr_step->next[i];
 		struct PorkchopPoint porkchop_point = create_porkchop_point(next, dv_filter->dep_periapsis, dv_filter->arr_periapsis);
-		double dv_sat = porkchop_point.dv_dsm;
+			double dv_sat = porkchop_point.dv_dsm;
 		if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 		if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-		if(dv_sat > dv_filter->max_satdv || porkchop_point.dv_dep + dv_sat > dv_filter->max_totdv) {
+			if(dv_sat > dv_filter->max_satdv ||
+				porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
 				curr_step->num_next_nodes = 0;
@@ -511,7 +571,7 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 			} else if(next->next[0]->next == NULL) {
 				next = next->next[0];
 				double dt = (next->date - step->date) * 86400;
-				Lambert3 transfer = calc_lambert3(step->r, next->r, dt, system->cb);
+				Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
 				next->v_dep = transfer.v0;
 				next->v_arr = transfer.v1;
 			} else {
@@ -519,7 +579,7 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 				struct ItinStep *arr = next->next[0]->next[0];
 				OSV osv_sb2 = {next->next[0]->r, next->next[0]->v_body};
 				OSV osv_arr = {next->next[0]->next[0]->r, next->next[0]->next[0]->v_body};
-				Lambert3 transfer_after_dsb = calc_lambert3(osv_sb2.r, osv_arr.r, (arr->date - sb2->date) * 86400, system->cb);
+				Lambert3 transfer_after_dsb = calc_lambert3_selected(osv_sb2.r, osv_arr.r, (arr->date - sb2->date) * 86400, system->cb);
 
 				OSV s0 = {step->r, step->v_arr};
 				OSV p0 = {step->r, step->v_body};
@@ -536,14 +596,14 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 				} else {
 					next = next->next[0];
 					dt = (next->date - step->date) * 86400;
-					Lambert3 transfer= calc_lambert3(step->r, next->r, dt, system->cb);
+					Lambert3 transfer= calc_lambert3_selected(step->r, next->r, dt, system->cb);
 					next->v_dep = transfer.v0;
 					next->v_arr = transfer.v1;
 				}
 			}
 		} else {
 			double dt = (next->date - step->date) * 86400;
-			Lambert3 transfer = calc_lambert3(step->r, next->r, dt, system->cb);
+			Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
 			next->v_dep = transfer.v0;
 			next->v_arr = transfer.v1;
 		}
@@ -678,7 +738,8 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
-	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n\n--\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
+	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
 	
 	step = get_first(step);
 	int step_id = 0;
@@ -699,8 +760,13 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 			Vector3 v_arr = step->v_arr;
 			Vector3 v_dep = step->next[0]->v_dep;
 			Vector3 v_body = step->v_body;
-			double rp = get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
-			sprintf(string, "%s |  Periapsis: %.2fkm\n", string, (rp-step->body->radius)/1e3);
+			PoweredFlybyResult flyby;
+			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
+			double burn = valid_flyby ? flyby.burn_delta_v : 0;
+			sprintf(string, "%s | Periapsis: %.2fkm | Burn: %.2f m/s\n", string,
+				(periapsis-step->body->radius)/1e3, burn);
 		}
 		if(step->next != NULL) step = step->next[0];
 		else step = NULL;
@@ -730,8 +796,24 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s\n", string, pp.dv_dep);
+	struct ItinStep *departure = get_first(step);
+	DepartureBurn3D departure_burn;
+	Vector3 departure_vinf = subtract_vec3(departure->next[0]->v_dep, departure->v_body);
+	if(calculate_free_plane_departure_burn(departure_vinf, departure->body,
+		alt2radius(departure->body, dep_periapsis), &departure_burn)) {
+		Vector3 radial = departure_burn.periapsis_direction;
+		Vector3 tangential = departure_burn.tangential_direction;
+		Vector3 normal = norm_vec3(cross_vec3(radial, tangential));
+		double burn_radial = dot_vec3(departure_burn.burn_delta_v, radial);
+		double burn_tangential = dot_vec3(departure_burn.burn_delta_v, tangential);
+		double burn_normal = dot_vec3(departure_burn.burn_delta_v, normal);
+		sprintf(string, "%sInitial burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f) "
+			"[parking-orbit RTN]\n", string, departure_burn.burn_magnitude,
+			burn_radial, burn_tangential, burn_normal);
+	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);
-	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_arr_circ);
+	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n", string, pp.dv_arr_circ);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
 	
 	step = get_first(step);
 	int step_id = 0;
@@ -750,9 +832,21 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			Vector3 v_arr = step->v_arr;
 			Vector3 v_dep = step->next[0]->v_dep;
 			Vector3 v_body = step->v_body;
-			double rp = get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double incl = get_flyby_inclination(v_arr, v_dep, v_body, get_body_equatorial_plane(step->body));
-			sprintf(string, "%sPeriapsis: %.2fkm\nInclination: %.2f°\n", string, (rp-step->body->radius)/1e3, rad2deg(incl));
+			PoweredFlybyResult flyby;
+			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
+			double burn = valid_flyby ? flyby.burn_delta_v : 0;
+			Vector3 burn_normal = valid_flyby ?
+				cross_vec3(flyby.periapsis_direction, flyby.incoming_tangent_direction) : vec3(0, 0, 0);
+			double burn_radial = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, flyby.periapsis_direction) : 0;
+			double burn_tangential = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, flyby.incoming_tangent_direction) : 0;
+			double burn_normal_component = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, burn_normal) : 0;
+			sprintf(string, "%sPeriapsis: %.2fkm\nInclination: %.2f°\n"
+				"Powered burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n",
+				string, (periapsis-step->body->radius)/1e3, rad2deg(incl), burn,
+				burn_radial, burn_tangential, burn_normal_component);
 		}
 		if(step->next != NULL) step = step->next[0];
 		else step = NULL;
