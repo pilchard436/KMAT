@@ -84,8 +84,8 @@ int main(void) {
 
     DataArray2 *first_root_samples = data_array2_create();
     DataArray2 *second_root_samples = data_array2_create();
-    data_array2_insert_new(first_root_samples, 1, 10);
-    data_array2_insert_new(second_root_samples, 2, 20);
+    data_array2_insert_new(first_root_samples, vec2(1, 10));
+    data_array2_insert_new(second_root_samples, vec2(2, 20));
     failures += expect_int("simultaneous root sample arrays remain independent",
                            data_array2_size(first_root_samples) == 1 &&
                            data_array2_size(second_root_samples) == 1 &&
