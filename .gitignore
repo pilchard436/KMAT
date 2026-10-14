@@ -63,6 +63,7 @@ dkms.conf
 *.lv
 *.ods
 *.ods#
+/Itineraries/
 
 
 # VSCode

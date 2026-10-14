@@ -33,21 +33,19 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 	struct Transfer_Calc_Status calc_status = get_current_transfer_calc_status();
 	gint64 now = g_get_monotonic_time();
 	double elapsed_seconds = (double)(now - progress_started_at) / G_USEC_PER_SEC;
-	if(calc_status.progress < 1)
-		gtk_progress_bar_pulse(GTK_PROGRESS_BAR(tf_prog_bar));
-	else
-		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
+	gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
+	char progress_text[32];
+	g_snprintf(progress_text, sizeof(progress_text), "%.0f%%", calc_status.progress * 100);
+	gtk_progress_bar_set_text(GTK_PROGRESS_BAR(tf_prog_bar), progress_text);
 	char s[256];
 	if(get_thread_counter(3) == 0)
-		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nStarted: %d; active: %d\nItineraries found: %d",
+		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
 			elapsed_seconds,
-			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_deps_started,
-			calc_status.num_deps_active, calc_status.num_itins);
+			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
 	else
-		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nStarted: %d; active: %d\nItineraries found: %d",
+		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
 			elapsed_seconds,
-			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_deps_started,
-			calc_status.num_deps_active, calc_status.num_itins);
+			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
 	gtk_label_set_text(GTK_LABEL(lb_prog_info), s);
 	if(now - last_console_progress_at >= G_USEC_PER_SEC) {
 		char console_status[160];
@@ -63,7 +61,7 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 }
 
 void init_sc_ic_progress_window() {
-	gtk_progress_bar_set_pulse_step(GTK_PROGRESS_BAR(tf_prog_bar), 0.08);
+	gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(tf_prog_bar), TRUE);
 	progress_started_at = g_get_monotonic_time();
 	last_console_progress_at = progress_started_at;
 	gtk_widget_set_visible(GTK_WIDGET(prog_window), 1);

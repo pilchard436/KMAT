@@ -39,3 +39,6 @@ int strcicmp(char const *a, char const *b);
  * @param total The total progress needed for 100%
  */
 void show_progress(char *text, double progress, double total);
+
+/** Restore the terminal cursor after an interrupted progress display. */
+void finish_progress(void);

@@ -32,7 +32,15 @@ typedef struct Itin_Calc_Thread_Args {
 struct Thread_Progress_and_Prop_Info {
 	double jd_min_dep;
 	double jd_max_dep;
+	int total_initial_samples;
 } thread_progress_and_prop_info;
+
+#define INITIAL_SAMPLE_PROGRESS_COUNTER 5
+
+static int itinerary_search_cancelled(void *context) {
+	(void)context;
+	return get_thread_counter(3) > 0;
+}
 
 static void show_departure_progress(double total_departures) {
 	int completed = get_thread_counter(1);
@@ -42,10 +50,13 @@ static void show_departure_progress(double total_departures) {
 	char status[128];
 	snprintf(status, sizeof(status), "Departure dates: %d/%d complete, %d started, %d active",
 		completed, (int)total_departures, started, active);
-	show_progress(status, completed, total_departures);
+	Transfer_Calc_Status calc_status = get_current_transfer_calc_status();
+	show_progress(status, calc_status.progress, 1);
 }
 
 static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *calc_data) {
+	if(calc_data->seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET &&
+		arrival->body != calc_data->seq_info.to_target.arr_body) return 0;
 	struct PorkchopPoint point = create_porkchop_point(arrival,
 		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
 	struct ItinStep *departure = get_first(arrival);
@@ -156,8 +167,9 @@ void *calc_itins_from_departure(void *args) {
 		Body *next_step_body;
 		int num_next_bodies = itin_seq_type == ITIN_SEQ_INFO_TO_TARGET ? num_flyby_bodies : 1;
 		int next_step_id = 0;
+		int pending_progress_samples = 0;
 
-		for(int i = 0; i < num_next_bodies; i++) {
+		for(int i = 0; i < num_next_bodies && !itinerary_search_cancelled(NULL); i++) {
 			if(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
 				next_step_body = fly_by_bodies[i];
 				if(next_step_body == dep_body) continue;
@@ -177,8 +189,7 @@ void *calc_itins_from_departure(void *args) {
 			double max_duration = (4*(r_ratio-0.85)*(r_ratio-0.85)+1.5) * hohmann_dur; if(max_duration/hohmann_dur > 3) max_duration = hohmann_dur*3;
 			double max_min_duration_diff = max_duration - min_duration;
 
-			for(int j = 0; j < NUM_INITIAL_TRANSFERS_PER_BODY; j++) {
-				if(get_thread_counter(3) > 0) break;
+			for(int j = 0; j < NUM_INITIAL_TRANSFERS_PER_BODY && !itinerary_search_cancelled(NULL); j++) {
 				double jd_arr = jd_dep + min_duration + max_min_duration_diff * j/(NUM_INITIAL_TRANSFERS_PER_BODY - 1);
 
 				if(jd_arr > jd_max_arr) break;
@@ -190,7 +201,13 @@ void *calc_itins_from_departure(void *args) {
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 				profile->initial_lambert_calls++;
 #endif
-				Lambert3 tf = calc_lambert3_selected(osv_body0.r, osv_body1.r, (jd_arr - jd_dep) * 86400, system->cb);
+				Lambert3 tf = calc_lambert3_selected_cancellable(osv_body0.r, osv_body1.r,
+					(jd_arr - jd_dep) * 86400, system->cb, itinerary_search_cancelled, NULL);
+				if(++pending_progress_samples >= 10) {
+					incr_thread_counter_by_amount(INITIAL_SAMPLE_PROGRESS_COUNTER, pending_progress_samples);
+					pending_progress_samples = 0;
+				}
+				if(itinerary_search_cancelled(NULL)) break;
 				
 				
 				double dv_dep, dv_arr;
@@ -228,6 +245,10 @@ void *calc_itins_from_departure(void *args) {
 
 				next_step_id++;
 			}
+			if(pending_progress_samples > 0) {
+				incr_thread_counter_by_amount(INITIAL_SAMPLE_PROGRESS_COUNTER, pending_progress_samples);
+				pending_progress_samples = 0;
+			}
 		}
 
 		curr_step = get_first(curr_step);
@@ -251,10 +272,10 @@ void *calc_itins_from_departure(void *args) {
 				continue_to_next_steps_and_check_for_valid_itins(curr_step, num_of_end_nodes, &calc_data->seq_info.to_target, jd_max_arr, max_total_duration, &dv_filter);
 			}
 		} else if(get_thread_counter(3) == 0) {
-			if(num_steps > 2) {
+			if(num_steps > 2 && !itinerary_search_cancelled(NULL)) {
 				int itin_del = 0;
 				int init_num_next_nodes = curr_step->num_next_nodes;
-				for(int i = 0; i < init_num_next_nodes; i++) {
+				for(int i = 0; i < init_num_next_nodes && !itinerary_search_cancelled(NULL); i++) {
 					if(!calc_next_spec_itin_step(curr_step->next[i - itin_del], system, fly_by_bodies, jd_max_arr, &dv_filter, num_steps, 2)) itin_del++;
 				}
 			}
@@ -316,9 +337,17 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	thread_args.num_profile_bodies = num_profile_bodies;
 #endif
 
+	int initial_body_count = 1;
+	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
+		initial_body_count = 0;
+		for(int i = 0; i < calc_data.seq_info.to_target.num_flyby_bodies; i++)
+			if(calc_data.seq_info.to_target.flyby_bodies[i] != calc_data.seq_info.to_target.dep_body)
+				initial_body_count++;
+	}
 	thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
-			calc_data.jd_min_dep,
-			calc_data.jd_max_dep
+		.jd_min_dep = calc_data.jd_min_dep,
+		.jd_max_dep = calc_data.jd_max_dep,
+		.total_initial_samples = num_deps * initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY
 	};
 	printf("Search window: departure JD %.2f..%.2f, max arrival JD %.2f, max duration %.2f days\n",
 		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.jd_max_arr, calc_data.max_duration);
@@ -339,6 +368,7 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	show_progress(get_thread_counter(3) > 0 ? "Transfer Calculation canceled" :
 		"Transfer Calculation progress", final_status.progress, 1);
 	printf("\n");
+	finish_progress();
 	#ifdef KMAT_ENABLE_SEARCH_PROFILE
 	double initial_grid_seconds = 0;
 	double recursive_search_seconds = 0;
@@ -383,12 +413,14 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	}
 	num_deps = valid_departures;
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
-		PoweredFlybyOptimizationStats powered_stats;
-		optimize_powered_flyby_routes(departures, num_deps, &calc_data, 100, &powered_stats);
-		printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best total dV saving %.2f m/s\n",
-			powered_stats.routes_improved, powered_stats.routes_considered,
-			powered_stats.routes_valid, powered_stats.routes_corrected,
-			powered_stats.best_delta_v_saving);
+		if(get_thread_counter(3) == 0) {
+			PoweredFlybyOptimizationStats powered_stats;
+			optimize_powered_flyby_routes(departures, num_deps, &calc_data, 100, &powered_stats);
+			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best total dV saving %.2f m/s\n",
+				powered_stats.routes_improved, powered_stats.routes_considered,
+				powered_stats.routes_valid, powered_stats.routes_corrected,
+				powered_stats.best_delta_v_saving);
+		}
 		valid_departures = 0;
 		for(int i = 0; i < num_deps; i++) {
 			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
@@ -423,8 +455,14 @@ struct Transfer_Calc_Status get_current_transfer_calc_status() {
 	int num_deps = get_thread_counter(1);
 	int num_deps_started = get_thread_counter(0);
 	int num_deps_active = get_thread_counter(4);
+	int initial_samples = get_thread_counter(INITIAL_SAMPLE_PROGRESS_COUNTER);
 	if(jd_diff > 0 && num_deps_started > jd_diff) num_deps_started = (int)jd_diff;
-	double progress = jd_diff > 0 ? fmin(1, (double)num_deps / jd_diff) : 0;
+	double completed_date_progress = jd_diff > 0 ? fmin(1, (double)num_deps / jd_diff) : 0;
+	double initial_sample_progress = thread_progress_and_prop_info.total_initial_samples > 0 ?
+		fmin(1, (double)initial_samples / thread_progress_and_prop_info.total_initial_samples) :
+		completed_date_progress;
+	double progress = 0.75 * initial_sample_progress + 0.25 * completed_date_progress;
+	if(completed_date_progress >= 1) progress = 1;
 
 	return (struct Transfer_Calc_Status) {
 		.num_itins = get_thread_counter(2),

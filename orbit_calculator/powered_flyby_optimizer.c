@@ -4,10 +4,16 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "tools/thread_pool.h"
 
 #define POWERED_ROUTE_LIMIT 100
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
+
+static int itinerary_search_cancelled(void *context) {
+	(void)context;
+	return get_thread_counter(3) > 0;
+}
 
 typedef struct PoweredRouteCandidate {
 	int departure_index;
@@ -77,20 +83,23 @@ static int hyperbolic_excess_velocity(OSV relative_state, Body *body, int incomi
 
 static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
 		const double *times, OSV *states, Lambert3 *legs) {
+	if(itinerary_search_cancelled(NULL)) return DBL_MAX;
 	CelestSystem *system = calc_data->seq_info.to_target.system;
 	double latest_arrival = fmin(calc_data->jd_max_arr, times[0] + calc_data->max_duration);
 	if(times[candidate->num_steps - 1] > latest_arrival) return DBL_MAX;
 
-	for(size_t i = 0; i < candidate->num_steps; i++) {
+	for(size_t i = 0; i < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		Body *body = candidate->bodies[i];
 		if(!body_state_at(system, body, times[i], &states[i])) return DBL_MAX;
 	}
+	if(itinerary_search_cancelled(NULL)) return DBL_MAX;
 
-	for(size_t i = 0; i + 1 < candidate->num_steps; i++) {
+	for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		double duration_days = times[i + 1] - times[i];
 		if(duration_days < POWERED_MIN_LEG_DAYS) return DBL_MAX;
-		legs[i] = calc_lambert3_selected(states[i].r, states[i + 1].r,
-			duration_days * 86400, system->cb);
+		legs[i] = calc_lambert3_selected_cancellable(states[i].r, states[i + 1].r,
+			duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+		if(itinerary_search_cancelled(NULL)) return DBL_MAX;
 		if(legs[i].success == LAMBERT_FAIL_NAN || legs[i].success == LAMBERT_FAIL_ECC ||
 			legs[i].success == LAMBERT_MAX_ITERATIONS || !is_finite_vector(legs[i].v0) ||
 			!is_finite_vector(legs[i].v1)) return DBL_MAX;
@@ -107,7 +116,7 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 	}
 	double total_dv = DBL_MAX;
 	int valid_route = 1;
-	for(size_t i = 1; i + 1 < candidate->num_steps; i++) {
+	for(size_t i = 1; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		Body *body = candidate->bodies[i];
 		double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
 		incoming_excess[i] = subtract_vec3(legs[i - 1].v1, states[i].v);
@@ -118,10 +127,11 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 			break;
 		}
 	}
+	if(itinerary_search_cancelled(NULL)) valid_route = 0;
 
 	int converged = 0;
-	for(int iteration = 0; valid_route && iteration < 60; iteration++) {
-		for(size_t i = 0; i + 1 < candidate->num_steps; i++) {
+	for(int iteration = 0; valid_route && !itinerary_search_cancelled(NULL) && iteration < 60; iteration++) {
+		for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 			double departure_epoch = times[i];
 			double arrival_epoch = times[i + 1];
 			Vector3 departure_position = states[i].r;
@@ -149,8 +159,12 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 				valid_route = 0;
 				break;
 			}
-			legs[i] = calc_lambert3_selected(departure_position, arrival_position,
-				duration_days * 86400, system->cb);
+			legs[i] = calc_lambert3_selected_cancellable(departure_position, arrival_position,
+				duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+			if(itinerary_search_cancelled(NULL)) {
+				valid_route = 0;
+				break;
+			}
 			if(legs[i].success == LAMBERT_FAIL_NAN || legs[i].success == LAMBERT_FAIL_ECC ||
 				legs[i].success == LAMBERT_MAX_ITERATIONS || !is_finite_vector(legs[i].v0) ||
 				!is_finite_vector(legs[i].v1)) {
@@ -158,12 +172,12 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 				break;
 			}
 		}
-		if(!valid_route) break;
+		if(!valid_route || itinerary_search_cancelled(NULL)) break;
 
 		double maximum_time_change = 0;
 		double maximum_velocity_change = 0;
 		double maximum_boundary_position_change = 0;
-		for(size_t i = 1; i + 1 < candidate->num_steps; i++) {
+		for(size_t i = 1; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 			Body *body = candidate->bodies[i];
 			double entry_epoch = times[i] - flybys[i].incoming_soi_time / 86400;
 			double exit_epoch = times[i] + flybys[i].outgoing_soi_time / 86400;
@@ -221,14 +235,14 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 			outgoing_excess[i] = new_outgoing_excess;
 			flybys[i] = updated_flyby;
 		}
-		if(!valid_route) break;
+		if(!valid_route || itinerary_search_cancelled(NULL)) break;
 		if(maximum_time_change < 1e-3 && maximum_velocity_change < 1e-3 &&
 			maximum_boundary_position_change < 2e-3) {
 			converged = 1;
 			break;
 		}
 	}
-	if(!valid_route || !converged) {
+	if(!valid_route || !converged || itinerary_search_cancelled(NULL)) {
 		goto cleanup;
 	}
 
@@ -360,10 +374,12 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 	static const double time_steps_days[] = {180, 60, 20, 7, 2, 0.5};
 	double latest_arrival = fmin(calc_data->jd_max_arr,
 		candidate->times[0] + calc_data->max_duration);
-	for(size_t step_index = 0; step_index < sizeof(time_steps_days) / sizeof(time_steps_days[0]); step_index++) {
-		for(int sweep = 0; sweep < 2; sweep++) {
+	for(size_t step_index = 0; step_index < sizeof(time_steps_days) / sizeof(time_steps_days[0]) &&
+		!itinerary_search_cancelled(NULL); step_index++) {
+		for(int sweep = 0; sweep < 2 && !itinerary_search_cancelled(NULL); sweep++) {
 			int improved_in_sweep = 0;
-			for(size_t i = candidate->mutable_start; i < candidate->num_steps; i++) {
+			for(size_t i = candidate->mutable_start; i < candidate->num_steps &&
+				!itinerary_search_cancelled(NULL); i++) {
 				double lower = candidate->times[i - 1] + POWERED_MIN_LEG_DAYS;
 				double upper = latest_arrival;
 				if(i + 1 < candidate->num_steps)
@@ -392,7 +408,7 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 	}
 	free(trial_states);
 	free(trial_legs);
-	return 1;
+	return !itinerary_search_cancelled(NULL);
 }
 
 static int vector_equal(Vector3 first, Vector3 second) {
@@ -545,8 +561,11 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	if(stats != NULL) *stats = (PoweredFlybyOptimizationStats){0};
 	if(departures == NULL || num_departures <= 0 || calc_data == NULL || max_routes <= 0 ||
 		calc_data->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET) return 0;
+	if(itinerary_search_cancelled(NULL)) return 0;
 	int num_itineraries = 0;
-	for(int i = 0; i < num_departures; i++) num_itineraries += get_number_of_itineraries(departures[i]);
+	for(int i = 0; i < num_departures && !itinerary_search_cancelled(NULL); i++)
+		num_itineraries += get_number_of_itineraries(departures[i]);
+	if(itinerary_search_cancelled(NULL)) return 0;
 	if(num_itineraries <= 0) return 0;
 	struct PorkchopPoint *points = create_porkchop_array_from_departures(departures, num_departures,
 		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
@@ -556,7 +575,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	double top_costs[POWERED_ROUTE_LIMIT];
 	int top_count = 0;
 	int route_limit = max_routes < POWERED_ROUTE_LIMIT ? max_routes : POWERED_ROUTE_LIMIT;
-	for(int point_index = 0; point_index < num_itineraries; point_index++) {
+	for(int point_index = 0; point_index < num_itineraries && !itinerary_search_cancelled(NULL); point_index++) {
 		if(get_num_of_itin_layers(get_first(points[point_index].arrival)) < 3) continue;
 		double arrival_dv = arrival_delta_v(&calc_data->dv_filter,
 			points[point_index].arrival->body, points[point_index].arrival->v_arr,
@@ -572,7 +591,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		return 0;
 	}
 	int candidates_optimized = 0;
-	for(int candidate_index = 0; candidate_index < top_count; candidate_index++) {
+	for(int candidate_index = 0; candidate_index < top_count && !itinerary_search_cancelled(NULL); candidate_index++) {
 		PoweredRouteCandidate *candidate = &candidates[candidates_optimized];
 		if(!initialize_candidate(candidate, points[top_indices[candidate_index]].arrival,
 			departures, num_departures, top_costs[candidate_index])) {
@@ -585,9 +604,15 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		} else free_candidate(candidate);
 	}
 	free(points);
+	if(itinerary_search_cancelled(NULL)) {
+		for(int candidate_index = 0; candidate_index < candidates_optimized; candidate_index++)
+			free_candidate(&candidates[candidate_index]);
+		free(candidates);
+		return 0;
+	}
 
 	int improvements = 0;
-	for(int i = 0; i < candidates_optimized; i++) {
+	for(int i = 0; i < candidates_optimized && !itinerary_search_cancelled(NULL); i++) {
 		PoweredRouteCandidate *candidate = &candidates[i];
 		if(replace_candidate_route(departures, candidate)) {
 			if(stats != NULL) stats->routes_corrected++;

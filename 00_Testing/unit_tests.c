@@ -52,10 +52,14 @@ static int expect_int(const char *name, int actual, int expected) {
     return 1;
 }
 
+static int cancel_requested(void *context) {
+    return *(int *)context;
+}
+
 int main(void) {
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
-    const int total_checks = 91;
+    const int total_checks = 92;
     int failures = 0;
 
     failures += expect_int("Izzo is the default Lambert solver", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
@@ -121,6 +125,12 @@ int main(void) {
                            isfinite(izzo_transfer.v0.x) && isfinite(izzo_transfer.v0.y) &&
                            isfinite(izzo_transfer.v0.z) && isfinite(izzo_transfer.v1.x) &&
                            isfinite(izzo_transfer.v1.y) && isfinite(izzo_transfer.v1.z), 1);
+    int lambert_cancel_requested = 1;
+    Lambert3 cancelled_transfer = calc_lambert3_selected_cancellable(
+        vec3(start_radius, 0, 0), vec3(0, end_radius, 0), hohmann_time, &earth_cb,
+        cancel_requested, &lambert_cancel_requested);
+    failures += expect_int("cancellable Lambert solver stops before solving",
+                           cancelled_transfer.success, LAMBERT_FAIL_NAN);
 
     Body solar_central_body = {.mu = 1.3271244004193938e20};
     int izzo_corpus_closes = 1;
