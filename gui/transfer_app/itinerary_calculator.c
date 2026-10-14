@@ -611,8 +611,11 @@ GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid) {
 		// Create a show body check button
 		widget = gtk_check_button_new_with_label(ic_system->bodies[body_idx]->name);
 		gboolean is_endpoint = body_idx == departure_index || body_idx == arrival_index;
+		const char *body_name = ic_system->bodies[body_idx]->name;
+		gboolean is_default_excluded = g_ascii_strcasecmp(body_name, "Vesta") == 0 ||
+			g_ascii_strcasecmp(body_name, "Ceres") == 0;
 		gboolean is_between_endpoints = departure_index >= 0 && arrival_index >= 0 &&
-			body_idx >= first_route_index && body_idx <= last_route_index;
+			body_idx >= first_route_index && body_idx <= last_route_index && !is_default_excluded;
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), is_between_endpoints);
 		gtk_widget_set_sensitive(widget, !is_endpoint);
 		gtk_widget_set_halign(widget, GTK_ALIGN_START);
