@@ -10,6 +10,7 @@
 #include <string.h>
 
 #define POWERED_TEST_DV_TOLERANCE 0.1
+#define POWERED_TEST_GRID_RELATIVE_TOLERANCE 0.10
 
 static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
         double min_departure_jd, double max_arrival_jd, enum LambertSolverMethod solver,
@@ -45,6 +46,35 @@ static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	return valid;
+}
+
+static double score_powered_arrival_route(struct ItinStep *arrival,
+		const Itin_Calc_Data *calc_data, Body *flyby_body) {
+	size_t num_steps = 0;
+	int contains_flyby = 0;
+	for(struct ItinStep *step = arrival; step != NULL; step = step->prev) {
+		if(step->body == flyby_body && step->prev != NULL && step->next != NULL)
+			contains_flyby = 1;
+		num_steps++;
+	}
+	if(!contains_flyby || num_steps < 3) return DBL_MAX;
+	Body **bodies = malloc(num_steps * sizeof(*bodies));
+	double *times = malloc(num_steps * sizeof(*times));
+	if(bodies == NULL || times == NULL) {
+		free(bodies);
+		free(times);
+		return DBL_MAX;
+	}
+	struct ItinStep *step = arrival;
+	for(size_t i = num_steps; i > 0; i--) {
+		bodies[i - 1] = step->body;
+		times[i - 1] = step->date;
+		step = step->prev;
+	}
+	double objective = evaluate_powered_flyby_route_objective(calc_data, bodies, times, num_steps);
+	free(bodies);
+	free(times);
+	return objective;
 }
 
 static int run_powered_flyby_objective_regression(CelestSystem *system,
@@ -100,17 +130,53 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	PoweredFlybyOptimizationStats stats;
 	optimize_powered_flyby_routes(results.departures, results.num_deps,
 		&calc_data, 100, &stats);
+	double best_search_objective = DBL_MAX;
+	int optimized_itinerary_count = 0;
+	for(int i = 0; i < results.num_deps; i++)
+		optimized_itinerary_count += get_number_of_itineraries(results.departures[i]);
+	struct ItinStep **optimized_arrivals = malloc((size_t)optimized_itinerary_count * sizeof(*optimized_arrivals));
+	if(optimized_arrivals != NULL) {
+		int optimized_arrival_count = 0;
+		for(int i = 0; i < results.num_deps; i++)
+			store_itineraries_in_array(results.departures[i], optimized_arrivals, &optimized_arrival_count);
+		for(int i = 0; i < optimized_arrival_count; i++) {
+			double objective = score_powered_arrival_route(optimized_arrivals[i], &calc_data, flyby_body);
+			if(objective < best_search_objective) best_search_objective = objective;
+		}
+		free(optimized_arrivals);
+	}
+	double grid_flyby_offsets[] = {120, 240, 360, 480, 600};
+	double grid_arrival_offsets[] = {700, 850, 1000, 1150, 1300, 1400};
+	Body *reference_bodies[] = {departure_body, flyby_body, arrival_body};
+	double best_grid_objective = DBL_MAX;
+	for(size_t flyby_index = 0; flyby_index <
+		sizeof(grid_flyby_offsets) / sizeof(grid_flyby_offsets[0]); flyby_index++) {
+		for(size_t arrival_index = 0; arrival_index <
+			sizeof(grid_arrival_offsets) / sizeof(grid_arrival_offsets[0]); arrival_index++) {
+			if(grid_arrival_offsets[arrival_index] <= grid_flyby_offsets[flyby_index] + 10 ||
+				grid_arrival_offsets[arrival_index] > calc_data.max_duration) continue;
+			double reference_times[] = {departure_jd,
+				departure_jd + grid_flyby_offsets[flyby_index],
+				departure_jd + grid_arrival_offsets[arrival_index]};
+			double objective = evaluate_powered_flyby_route_objective(&calc_data,
+				reference_bodies, reference_times, 3);
+			if(objective < best_grid_objective) best_grid_objective = objective;
+		}
+	}
 	int objective_did_not_increase = stats.routes_valid > 0 && stats.routes_corrected > 0 &&
 		isfinite(stats.best_initial_total_dv) && isfinite(stats.best_refined_total_dv) &&
-		stats.best_refined_total_dv <= stats.best_initial_total_dv + POWERED_TEST_DV_TOLERANCE;
+		stats.best_refined_total_dv <= stats.best_initial_total_dv + POWERED_TEST_DV_TOLERANCE &&
+		isfinite(best_search_objective) && isfinite(best_grid_objective) &&
+		best_search_objective <= best_grid_objective *
+			(1 + POWERED_TEST_GRID_RELATIVE_TOLERANCE) + POWERED_TEST_DV_TOLERANCE;
 	if(!objective_did_not_increase)
-		fprintf(stderr, "Powered objective worsened or was not evaluated: %d valid, %d corrected, %.3f -> %.3f m/s\n",
+		fprintf(stderr, "Powered objective regression failed: %d valid, %d corrected, refine %.3f -> %.3f m/s, search %.3f, grid %.3f m/s\n",
 			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
-			stats.best_refined_total_dv);
+			stats.best_refined_total_dv, best_search_objective, best_grid_objective);
 	else
-		printf("Powered-flyby objective regression passed: %d valid, %d SOI-corrected, best full dV %.3f -> %.3f m/s\n",
+		printf("Powered-flyby objective regression passed: %d valid, %d SOI-corrected, refine %.3f -> %.3f m/s, best search %.3f vs grid %.3f m/s\n",
 			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
-			stats.best_refined_total_dv);
+			stats.best_refined_total_dv, best_search_objective, best_grid_objective);
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	return objective_did_not_increase;

@@ -288,6 +288,25 @@ cleanup:
 	return total_dv;
 }
 
+double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
+		Body **bodies, const double *times, size_t num_steps) {
+	if(calc_data == NULL || bodies == NULL || times == NULL || num_steps < 3) return DBL_MAX;
+	for(size_t i = 0; i < num_steps; i++)
+		if(bodies[i] == NULL || !isfinite(times[i])) return DBL_MAX;
+	OSV *states = calloc(num_steps, sizeof(*states));
+	Lambert3 *legs = calloc(num_steps - 1, sizeof(*legs));
+	if(states == NULL || legs == NULL) {
+		free(states);
+		free(legs);
+		return DBL_MAX;
+	}
+	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies};
+	double objective = evaluate_route(&candidate, calc_data, times, states, legs);
+	free(states);
+	free(legs);
+	return objective;
+}
+
 static int initialize_candidate(PoweredRouteCandidate *candidate, struct ItinStep *arrival,
 		struct ItinStep **departures, int num_departures) {
 	size_t num_steps = 0;

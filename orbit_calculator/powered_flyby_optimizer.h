@@ -2,6 +2,7 @@
 #define KMAT_POWERED_FLYBY_OPTIMIZER_H
 
 #include "orbit_calculator/transfer_calc.h"
+#include <stddef.h>
 
 typedef struct PoweredFlybyOptimizationStats {
 	int routes_considered;
@@ -15,5 +16,8 @@ typedef struct PoweredFlybyOptimizationStats {
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
 	const Itin_Calc_Data *calc_data, int max_routes, PoweredFlybyOptimizationStats *stats);
+
+double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
+	Body **bodies, const double *times, size_t num_steps);
 
 #endif
