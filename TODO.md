@@ -24,5 +24,69 @@
 
 
 
+The limitation is the route search: find_viable_flybys() only generates candidates when the incoming and outgoing excess-speed magnitudes differ by less than 1 m/s. So KMAT can model an unequal-speed powered flyby, but the main search does not seed routes that require a substantial 
+𝑉
+∞
+V 
+∞
+​
+  speed change.
 
+Don’t search for speed difference itself. Search over encounter dates, and at each date evaluate whether a powered flyby can connect the incoming and outgoing 
+V
+∞
+V 
+∞
+​
+  vectors.
 
+In KMAT’s find_viable_flybys(), for each sampled Lambert departure date:
+
+Compute incoming 
+V
+∞
+=
+v
+arr
+−
+v
+body
+V 
+∞
+​
+ =v 
+arr
+​
+ −v 
+body
+​
+  and outgoing 
+V
+∞
+=
+v
+Lambert
+,
+0
+−
+v
+body
+V 
+∞
+​
+ =v 
+Lambert,0
+​
+ −v 
+body
+​
+  at the current flyby body.
+Pass both vectors to calculate_powered_flyby(). It checks flyby geometry and SOI feasibility, and computes the required periapsis burn and radius. Don’t reject a candidate just because the magnitudes differ by more than 1 m/s.
+Retain several feasible dates across the search window, then rank/refine them using full mission Δv: departure burn + all powered-flyby burns + arrival/DSM burns.
+A speed-changing flyby is worth keeping only if its periapsis cost leads to a better feasible total mission objective. Validate the search with a small case where the incoming/outgoing 
+V
+∞
+V 
+∞
+​
+  magnitudes differ by more than 1 m/s and compare its result to a coarse date grid.
