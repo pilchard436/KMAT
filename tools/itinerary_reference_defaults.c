@@ -49,9 +49,9 @@ int calculate_itinerary_hohmann_defaults(
 	*defaults = (ItineraryHohmannDefaults) {
 		.max_arrival_jd = earliest_departure_jd + duration_jd_days,
 		.max_duration_user_days = duration_user_days,
-		.max_departure_dv = reference->departure_dv,
+		.max_departure_dv = 1.1 * reference->departure_dv,
 		.max_satellite_dv = satellite_dv,
-		.max_total_dv = reference->departure_dv + satellite_dv
+		.max_total_dv = 1.1 * (reference->departure_dv + satellite_dv)
 	};
 	return 1;
 }

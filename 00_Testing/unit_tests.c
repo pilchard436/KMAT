@@ -363,16 +363,16 @@ int main(void) {
                            calculate_itinerary_hohmann_defaults(&sample_reference, TF_FLYBY, DATE_ISO, 2450000, &defaults), 1);
     failures += expect_near("Hohmann default duration is twice baseline", defaults.max_duration_user_days, 20, tolerance);
     failures += expect_near("Hohmann default arrival follows earliest departure", defaults.max_arrival_jd, 2450020, tolerance);
-    failures += expect_near("Hohmann default departure cap uses baseline", defaults.max_departure_dv, 1200, tolerance);
+    failures += expect_near("Hohmann default departure cap includes 10 percent margin", defaults.max_departure_dv, 1320, tolerance);
     failures += expect_near("flyby mode has no arrival insertion budget", defaults.max_satellite_dv, 0, tolerance);
-    failures += expect_near("flyby total cap matches departure baseline", defaults.max_total_dv, 1200, tolerance);
+    failures += expect_near("flyby total cap includes 10 percent margin", defaults.max_total_dv, 1320, tolerance);
 
     calculate_itinerary_hohmann_defaults(&sample_reference, TF_CAPTURE, DATE_ISO, 2450000, &defaults);
     failures += expect_near("capture mode satellite cap uses capture baseline", defaults.max_satellite_dv, 400, tolerance);
-    failures += expect_near("capture total cap sums direct baselines", defaults.max_total_dv, 1600, tolerance);
+    failures += expect_near("capture total cap includes 10 percent margin", defaults.max_total_dv, 1760, tolerance);
     calculate_itinerary_hohmann_defaults(&sample_reference, TF_CIRC, DATE_ISO, 2450000, &defaults);
     failures += expect_near("circularization mode satellite cap uses circular baseline", defaults.max_satellite_dv, 600, tolerance);
-    failures += expect_near("circularization total cap sums direct baselines", defaults.max_total_dv, 1800, tolerance);
+    failures += expect_near("circularization total cap includes 10 percent margin", defaults.max_total_dv, 1980, tolerance);
 
     calculate_itinerary_hohmann_defaults(&sample_reference, TF_FLYBY, DATE_KERBAL, 2450000, &defaults);
     failures += expect_near("Kerbal Hohmann window converts to local days", defaults.max_duration_user_days, 80, tolerance);
