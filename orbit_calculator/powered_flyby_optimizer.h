@@ -9,6 +9,8 @@ typedef struct PoweredFlybyOptimizationStats {
 	int routes_corrected;
 	int routes_improved;
 	double best_delta_v_saving;
+	double best_initial_total_dv;
+	double best_refined_total_dv;
 } PoweredFlybyOptimizationStats;
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,

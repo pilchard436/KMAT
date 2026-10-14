@@ -1,10 +1,15 @@
 #include "orbit_calculator/transfer_calc.h"
+#include "orbit_calculator/powered_flyby_optimizer.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
 
+#include <float.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define POWERED_TEST_DV_TOLERANCE 0.1
 
 static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
         double min_departure_jd, double max_arrival_jd, enum LambertSolverMethod solver,
@@ -40,6 +45,80 @@ static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	return valid;
+}
+
+static int run_powered_flyby_objective_regression(CelestSystem *system,
+		Body *departure_body, Body *flyby_body, Body *arrival_body,
+		double departure_jd, double hohmann_duration) {
+	Body *flyby_bodies[] = {flyby_body, arrival_body};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd;
+	calc_data.jd_max_arr = departure_jd + 1.5 * hohmann_duration;
+	calc_data.max_duration = calc_data.jd_max_arr - departure_jd;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9,
+		.max_depdv = 1e9,
+		.max_satdv = 1e9,
+		.dep_periapsis = departure_body->atmo_alt + 50000,
+		.arr_periapsis = arrival_body->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET,
+		.system = system,
+		.dep_body = departure_body,
+		.arr_body = arrival_body,
+		.flyby_bodies = flyby_bodies,
+		.num_flyby_bodies = 2
+	};
+	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	if(results.num_deps <= 0 || results.num_itins <= 0) goto cleanup;
+
+	struct ItinStep **arrivals = malloc((size_t)results.num_itins * sizeof(*arrivals));
+	if(arrivals == NULL) goto cleanup;
+	int arrival_count = 0;
+	for(int i = 0; i < results.num_deps; i++)
+		store_itineraries_in_array(results.departures[i], arrivals, &arrival_count);
+	int has_valid_powered_route = 0;
+	for(int i = 0; i < arrival_count && !has_valid_powered_route; i++) {
+		for(struct ItinStep *step = arrivals[i]->prev; step != NULL && step->prev != NULL;
+			step = step->prev) {
+			if(step->body != flyby_body) continue;
+			PoweredFlybyResult flyby_result;
+			double minimum_periapsis = flyby_body->radius + flyby_body->atmo_alt + 1e4;
+			if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body,
+				flyby_body, minimum_periapsis, &flyby_result) &&
+				isfinite(flyby_result.burn_delta_v)) has_valid_powered_route = 1;
+			break;
+		}
+	}
+	free(arrivals);
+	if(!has_valid_powered_route) goto cleanup;
+
+	PoweredFlybyOptimizationStats stats;
+	optimize_powered_flyby_routes(results.departures, results.num_deps,
+		&calc_data, 100, &stats);
+	int objective_did_not_increase = stats.routes_valid > 0 && stats.routes_corrected > 0 &&
+		isfinite(stats.best_initial_total_dv) && isfinite(stats.best_refined_total_dv) &&
+		stats.best_refined_total_dv <= stats.best_initial_total_dv + POWERED_TEST_DV_TOLERANCE;
+	if(!objective_did_not_increase)
+		fprintf(stderr, "Powered objective worsened or was not evaluated: %d valid, %d corrected, %.3f -> %.3f m/s\n",
+			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
+			stats.best_refined_total_dv);
+	else
+		printf("Powered-flyby objective regression passed: %d valid, %d SOI-corrected, best full dV %.3f -> %.3f m/s\n",
+			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
+			stats.best_refined_total_dv);
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	return objective_did_not_increase;
+
+cleanup:
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	return 0;
 }
 static int run_full_profile(void) {
 	char system_path[] = "../Celestial_Systems/solar_system_ephem.cfg";
@@ -119,9 +198,10 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 	Body *departure_body = get_body_by_name("EARTH", system);
+	Body *flyby_body = get_body_by_name("VENUS", system);
 	Body *arrival_body = get_body_by_name("JUPITER", system);
-	if(departure_body == NULL || arrival_body == NULL) {
-		fprintf(stderr, "Test system is missing Earth or Jupiter\n");
+	if(departure_body == NULL || flyby_body == NULL || arrival_body == NULL) {
+		fprintf(stderr, "Test system is missing Earth, Venus, or Jupiter\n");
 		free_celestial_system(system);
 		return EXIT_FAILURE;
 	}
@@ -139,9 +219,12 @@ int main(int argc, char **argv) {
 		max_arrival_jd, LAMBERT_METHOD_LEGACY, &legacy_nodes, &legacy_itins);
 	int izzo_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,
 		max_arrival_jd, LAMBERT_METHOD_IZZO, &izzo_nodes, &izzo_itins);
+	int powered_valid = run_powered_flyby_objective_regression(system, departure_body,
+		flyby_body, arrival_body, departure_jd, hohmann_duration);
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
+	if(!legacy_valid || !izzo_valid || !powered_valid ||
+		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
 		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
 			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);
 		return EXIT_FAILURE;

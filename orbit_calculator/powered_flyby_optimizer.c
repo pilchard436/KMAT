@@ -567,7 +567,10 @@ static int insert_top_candidate(PoweredRouteCandidate *candidate, double cost,
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
 		const Itin_Calc_Data *calc_data, int max_routes, PoweredFlybyOptimizationStats *stats) {
-	if(stats != NULL) *stats = (PoweredFlybyOptimizationStats){0};
+	if(stats != NULL) *stats = (PoweredFlybyOptimizationStats) {
+		.best_initial_total_dv = DBL_MAX,
+		.best_refined_total_dv = DBL_MAX
+	};
 	if(departures == NULL || num_departures <= 0 || calc_data == NULL || max_routes <= 0 ||
 		calc_data->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET) return 0;
 	if(itinerary_search_cancelled(NULL)) return 0;
@@ -609,6 +612,8 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		}
 		candidate->original_total_dv = candidate->best_total_dv;
 		routes_valid++;
+		if(stats != NULL && candidate->original_total_dv < stats->best_initial_total_dv)
+			stats->best_initial_total_dv = candidate->original_total_dv;
 		if(!insert_top_candidate(candidate, candidate->best_total_dv, route_limit,
 			&top_count, candidates, top_costs)) destroy_candidate(candidate);
 	}
@@ -629,7 +634,11 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	for(; candidate_index < top_count && !itinerary_search_cancelled(NULL); candidate_index++) {
 		PoweredRouteCandidate *candidate = candidates[candidate_index];
 		if(optimize_candidate(candidate, calc_data) && replace_candidate_route(departures, candidate)) {
-			if(stats != NULL) stats->routes_corrected++;
+			if(stats != NULL) {
+				stats->routes_corrected++;
+				if(candidate->best_total_dv < stats->best_refined_total_dv)
+					stats->best_refined_total_dv = candidate->best_total_dv;
+			}
 			double saving = candidate->original_total_dv - candidate->best_total_dv;
 			if(saving > POWERED_IMPROVEMENT_THRESHOLD) {
 				improvements++;
