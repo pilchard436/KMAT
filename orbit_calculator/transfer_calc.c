@@ -329,8 +329,6 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		for(int i = 0; i < target->num_flyby_bodies; i++)
 			printf(" %s", target->flyby_bodies[i]->name);
 		printf("\n");
-		printf("Powered flyby seed budget: %d candidates per body search\n",
-			ITIN_FLYBY_CANDIDATE_BUDGET);
 	}
 
 	show_progress("Transfer Calculation progress", 0, 1);
@@ -360,20 +358,15 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		unsigned long long searches = 0;
 		unsigned long long left_evaluations = 0;
 		unsigned long long right_evaluations = 0;
-		unsigned long long seed_checks = 0;
-		unsigned long long candidate_budget_drops = 0;
 		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++) {
 			ItinFlybyProfileStats stats = profiles[departure_index].flyby_stats[body_index];
 			searches += stats.searches;
 			left_evaluations += stats.left_evaluations;
 			right_evaluations += stats.right_evaluations;
-			seed_checks += stats.seed_checks;
-			candidate_budget_drops += stats.candidate_budget_drops;
 		}
 		if(searches > 0)
-			printf("Flyby %s: %llu windows, %llu time samples, %llu SOI seed checks, %llu candidates dropped by budget\n",
-				profile_bodies[body_index]->name, searches, left_evaluations + right_evaluations,
-				seed_checks, candidate_budget_drops);
+			printf("Flyby %s: %llu searches, %llu left / %llu right root evaluations\n",
+				profile_bodies[body_index]->name, searches, left_evaluations, right_evaluations);
 	}
 	free(profiles);
 	free(flyby_profiles);
