@@ -12,6 +12,7 @@ typedef struct PoweredFlybyOptimizationStats {
 	int routes_corrected;
 	int routes_improved;
 	double best_delta_v_saving;
+	double best_unpowered_seed_total_dv;
 	double best_initial_total_dv;
 	double best_refined_total_dv;
 } PoweredFlybyOptimizationStats;

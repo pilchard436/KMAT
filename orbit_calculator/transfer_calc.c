@@ -300,7 +300,11 @@ void *calc_itins_from_departure(void *args) {
 }
 
 struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
-	struct Itin_Calc_Results results = {NULL, 0, 0};
+	struct Itin_Calc_Results results = {
+		.best_unpowered_seed_total_dv = HUGE_VAL,
+		.best_powered_initial_total_dv = HUGE_VAL,
+		.best_powered_refined_total_dv = HUGE_VAL
+	};
 
 	struct timeval start, end;
 	double elapsed_time;
@@ -417,6 +421,11 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 			PoweredFlybyOptimizationStats powered_stats;
 			optimize_powered_flyby_routes(departures, num_deps, &calc_data,
 				POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+			results.powered_routes_valid = powered_stats.routes_valid;
+			results.powered_routes_corrected = powered_stats.routes_corrected;
+			results.best_unpowered_seed_total_dv = powered_stats.best_unpowered_seed_total_dv;
+			results.best_powered_initial_total_dv = powered_stats.best_initial_total_dv;
+			results.best_powered_refined_total_dv = powered_stats.best_refined_total_dv;
 			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best saving %.2f m/s, best full dV %.3f -> %.3f m/s\n",
 				powered_stats.routes_improved, powered_stats.routes_considered,
 				powered_stats.routes_valid, powered_stats.routes_corrected,

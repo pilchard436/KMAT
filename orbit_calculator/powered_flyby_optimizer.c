@@ -8,6 +8,7 @@
 
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
+#define POWERED_TIMING_START_COUNT 3
 
 static int itinerary_search_cancelled(void *context) {
 	(void)context;
@@ -377,7 +378,8 @@ static void destroy_candidate(PoweredRouteCandidate *candidate) {
 	free(candidate);
 }
 
-static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data) {
+static int refine_candidate_from_start(PoweredRouteCandidate *candidate,
+		const Itin_Calc_Data *calc_data) {
 	OSV *trial_states = malloc(candidate->num_steps * sizeof(*trial_states));
 	Lambert3 *trial_legs = malloc((candidate->num_steps - 1) * sizeof(*trial_legs));
 	if(trial_states == NULL || trial_legs == NULL) {
@@ -434,6 +436,95 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 	free(trial_states);
 	free(trial_legs);
 	return !itinerary_search_cancelled(NULL);
+}
+
+static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data) {
+	size_t num_steps = candidate->num_steps;
+	double *seed_times = malloc(num_steps * sizeof(*seed_times));
+	double *best_times = malloc(num_steps * sizeof(*best_times));
+	OSV *best_states = malloc(num_steps * sizeof(*best_states));
+	Lambert3 *best_legs = malloc((num_steps - 1) * sizeof(*best_legs));
+	PoweredRouteCandidate trial = *candidate;
+	trial.times = malloc(num_steps * sizeof(*trial.times));
+	trial.best_states = malloc(num_steps * sizeof(*trial.best_states));
+	trial.best_legs = malloc((num_steps - 1) * sizeof(*trial.best_legs));
+	if(seed_times == NULL || best_times == NULL || best_states == NULL || best_legs == NULL ||
+		trial.times == NULL || trial.best_states == NULL || trial.best_legs == NULL) {
+		free(seed_times);
+		free(best_times);
+		free(best_states);
+		free(best_legs);
+		free(trial.times);
+		free(trial.best_states);
+		free(trial.best_legs);
+		return 0;
+	}
+
+	memcpy(seed_times, candidate->times, num_steps * sizeof(*seed_times));
+	memcpy(best_times, candidate->times, num_steps * sizeof(*best_times));
+	memcpy(best_states, candidate->best_states, num_steps * sizeof(*best_states));
+	memcpy(best_legs, candidate->best_legs, (num_steps - 1) * sizeof(*best_legs));
+	double best_total_dv = candidate->best_total_dv;
+	double latest_arrival = fmin(calc_data->jd_max_arr,
+		seed_times[0] + calc_data->max_duration);
+	int valid_start_found = 0;
+
+	for(int start_index = 0; start_index < POWERED_TIMING_START_COUNT &&
+		!itinerary_search_cancelled(NULL); start_index++) {
+		memcpy(trial.times, seed_times, num_steps * sizeof(*trial.times));
+		if(start_index > 0) {
+			double fraction = (double)start_index / POWERED_TIMING_START_COUNT;
+			int valid_start = 1;
+			for(size_t i = candidate->mutable_start; i < num_steps; i++) {
+				double lower = trial.times[i - 1] + POWERED_MIN_LEG_DAYS;
+				double upper = latest_arrival;
+				if(i + 1 < num_steps)
+					upper = fmin(upper, trial.times[i + 1] - POWERED_MIN_LEG_DAYS);
+				if(upper < lower) {
+					valid_start = 0;
+					break;
+				}
+				trial.times[i] = lower + fraction * (upper - lower);
+			}
+			if(!valid_start) continue;
+		}
+
+		if(start_index == 0) {
+			trial.best_total_dv = best_total_dv;
+			memcpy(trial.best_states, best_states, num_steps * sizeof(*best_states));
+			memcpy(trial.best_legs, best_legs, (num_steps - 1) * sizeof(*best_legs));
+		} else {
+			trial.best_total_dv = DBL_MAX;
+		}
+		if(!refine_candidate_from_start(&trial, calc_data)) {
+			if(itinerary_search_cancelled(NULL)) break;
+			continue;
+		}
+		if(!isfinite(trial.best_total_dv) || trial.best_total_dv >= DBL_MAX) continue;
+		valid_start_found = 1;
+		if(trial.best_total_dv >= best_total_dv) continue;
+		best_total_dv = trial.best_total_dv;
+		memcpy(best_times, trial.times, num_steps * sizeof(*best_times));
+		memcpy(best_states, trial.best_states, num_steps * sizeof(*best_states));
+		memcpy(best_legs, trial.best_legs, (num_steps - 1) * sizeof(*best_legs));
+		valid_start_found = 1;
+	}
+
+	if(best_total_dv < candidate->best_total_dv) {
+		candidate->best_total_dv = best_total_dv;
+		memcpy(candidate->times, best_times, num_steps * sizeof(*candidate->times));
+		memcpy(candidate->best_states, best_states, num_steps * sizeof(*candidate->best_states));
+		memcpy(candidate->best_legs, best_legs, (num_steps - 1) * sizeof(*candidate->best_legs));
+		valid_start_found = 1;
+	}
+	free(seed_times);
+	free(best_times);
+	free(best_states);
+	free(best_legs);
+	free(trial.times);
+	free(trial.best_states);
+	free(trial.best_legs);
+	return valid_start_found && !itinerary_search_cancelled(NULL);
 }
 
 static int vector_equal(Vector3 first, Vector3 second) {
@@ -586,6 +677,7 @@ static int insert_top_candidate(PoweredRouteCandidate *candidate, double cost,
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
 		const Itin_Calc_Data *calc_data, int max_routes, PoweredFlybyOptimizationStats *stats) {
 	if(stats != NULL) *stats = (PoweredFlybyOptimizationStats) {
+		.best_unpowered_seed_total_dv = DBL_MAX,
 		.best_initial_total_dv = DBL_MAX,
 		.best_refined_total_dv = DBL_MAX
 	};
@@ -631,6 +723,13 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		}
 		candidate->original_total_dv = candidate->best_total_dv;
 		routes_valid++;
+		if(stats != NULL) {
+			struct PorkchopPoint seed_point = create_porkchop_point(arrivals[point_index],
+				calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
+			if(isfinite(seed_point.dv_flyby) && seed_point.dv_flyby <= 1.0 &&
+				candidate->original_total_dv < stats->best_unpowered_seed_total_dv)
+				stats->best_unpowered_seed_total_dv = candidate->original_total_dv;
+		}
 		if(stats != NULL && candidate->original_total_dv < stats->best_initial_total_dv)
 			stats->best_initial_total_dv = candidate->original_total_dv;
 		if(!insert_top_candidate(candidate, candidate->best_total_dv, route_limit,

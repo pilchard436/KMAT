@@ -10,6 +10,7 @@
 #include <string.h>
 
 #define POWERED_TEST_DV_TOLERANCE 0.1
+#define POWERED_TEST_MIN_LEG_DAYS 10.0
 #define POWERED_TEST_GRID_RELATIVE_TOLERANCE 0.10
 
 static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
@@ -77,6 +78,164 @@ static double score_powered_arrival_route(struct ItinStep *arrival,
 	return objective;
 }
 
+static int score_unpowered_grid_route(CelestSystem *system, Body **bodies,
+		const double *times, const Itin_Calc_Data *calc_data, double *objective) {
+	OSV states[3];
+	for(int i = 0; i < 3; i++) {
+		states[i] = system->prop_method == ORB_ELEMENTS ?
+			osv_from_elements(bodies[i]->orbit, times[i]) :
+			osv_from_ephem(bodies[i]->ephem, bodies[i]->num_ephems, times[i], system->cb);
+		if(!isfinite(states[i].r.x) || !isfinite(states[i].r.y) || !isfinite(states[i].r.z) ||
+			!isfinite(states[i].v.x) || !isfinite(states[i].v.y) || !isfinite(states[i].v.z)) return 0;
+	}
+	Lambert3 inbound = calc_lambert3_selected(states[0].r, states[1].r,
+		(times[1] - times[0]) * 86400, system->cb);
+	Lambert3 outbound = calc_lambert3_selected(states[1].r, states[2].r,
+		(times[2] - times[1]) * 86400, system->cb);
+	if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
+		inbound.success == LAMBERT_MAX_ITERATIONS || outbound.success == LAMBERT_FAIL_NAN ||
+		outbound.success == LAMBERT_FAIL_ECC || outbound.success == LAMBERT_MAX_ITERATIONS ||
+		!isfinite(inbound.v1.x) || !isfinite(inbound.v1.y) || !isfinite(inbound.v1.z) ||
+		!isfinite(outbound.v0.x) || !isfinite(outbound.v0.y) || !isfinite(outbound.v0.z)) return 0;
+	PoweredFlybyResult unpowered_flyby;
+	double minimum_periapsis = bodies[1]->radius + bodies[1]->atmo_alt + 1e4;
+	if(!calculate_powered_flyby(inbound.v1, outbound.v0, states[1].v,
+		bodies[1], minimum_periapsis, &unpowered_flyby) ||
+		unpowered_flyby.burn_delta_v > 1.0) return 0;
+	*objective = evaluate_powered_flyby_route_objective(calc_data, bodies, times, 3);
+	return isfinite(*objective) && *objective < DBL_MAX;
+}
+
+static int is_valid_lambert_solution(Lambert3 solution) {
+	return solution.success != LAMBERT_FAIL_NAN && solution.success != LAMBERT_FAIL_ECC &&
+		solution.success != LAMBERT_MAX_ITERATIONS &&
+		isfinite(solution.v0.x) && isfinite(solution.v0.y) && isfinite(solution.v0.z) &&
+		isfinite(solution.v1.x) && isfinite(solution.v1.y) && isfinite(solution.v1.z);
+}
+
+static int outgoing_excess_speed_difference(CelestSystem *system, Body *flyby_body,
+		Body *arrival_body, OSV flyby_state, double flyby_jd, double arrival_jd,
+		double incoming_excess_speed, Lambert3 *outbound, double *speed_difference) {
+	OSV arrival_state = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(arrival_body->orbit, arrival_jd) :
+		osv_from_ephem(arrival_body->ephem, arrival_body->num_ephems, arrival_jd, system->cb);
+	if(!isfinite(arrival_state.r.x) || !isfinite(arrival_state.r.y) || !isfinite(arrival_state.r.z) ||
+		!isfinite(arrival_state.v.x) || !isfinite(arrival_state.v.y) || !isfinite(arrival_state.v.z)) return 0;
+	*outbound = calc_lambert3_selected(flyby_state.r, arrival_state.r,
+		(arrival_jd - flyby_jd) * 86400, system->cb);
+	if(!is_valid_lambert_solution(*outbound)) return 0;
+	Vector3 outgoing_excess = subtract_vec3(outbound->v0, flyby_state.v);
+	*speed_difference = mag_vec3(outgoing_excess) - incoming_excess_speed;
+	if(!isfinite(*speed_difference)) return 0;
+	return 1;
+}
+
+static void consider_unpowered_baseline(Body **bodies,
+		OSV departure_state, OSV flyby_state, Lambert3 inbound, Lambert3 outbound,
+		double departure_jd, double flyby_jd, double arrival_jd,
+		const Itin_Calc_Data *calc_data, double *best_baseline) {
+	PoweredFlybyResult flyby;
+	double minimum_periapsis = bodies[1]->radius + bodies[1]->atmo_alt + 1e4;
+	if(!calculate_powered_flyby(inbound.v1, outbound.v0, flyby_state.v,
+		bodies[1], minimum_periapsis, &flyby) ||
+		flyby.burn_delta_v > POWERED_TEST_DV_TOLERANCE) return;
+	double times[] = {departure_jd, flyby_jd, arrival_jd};
+	double objective = evaluate_powered_flyby_route_objective(calc_data, bodies, times, 3);
+	if(isfinite(objective) && objective < DBL_MAX && objective < *best_baseline)
+		*best_baseline = objective;
+}
+
+static double find_unpowered_grid_baseline(CelestSystem *system, Body *departure_body,
+		Body *flyby_body, Body *arrival_body, double departure_jd,
+		const Itin_Calc_Data *calc_data) {
+	OSV departure_state = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(departure_body->orbit, departure_jd) :
+		osv_from_ephem(departure_body->ephem, departure_body->num_ephems, departure_jd, system->cb);
+	if(!isfinite(departure_state.r.x) || !isfinite(departure_state.r.y) || !isfinite(departure_state.r.z) ||
+		!isfinite(departure_state.v.x) || !isfinite(departure_state.v.y) || !isfinite(departure_state.v.z))
+		return DBL_MAX;
+	Body *bodies[] = {departure_body, flyby_body, arrival_body};
+	double best_baseline = DBL_MAX;
+	const double flyby_step_days = 30;
+	const double arrival_step_days = 40;
+	for(double flyby_offset = 30; flyby_offset < calc_data->max_duration - 2 * arrival_step_days;
+		flyby_offset += flyby_step_days) {
+		double flyby_jd = departure_jd + flyby_offset;
+		OSV flyby_state = system->prop_method == ORB_ELEMENTS ?
+			osv_from_elements(flyby_body->orbit, flyby_jd) :
+			osv_from_ephem(flyby_body->ephem, flyby_body->num_ephems, flyby_jd, system->cb);
+		if(!isfinite(flyby_state.r.x) || !isfinite(flyby_state.r.y) || !isfinite(flyby_state.r.z) ||
+			!isfinite(flyby_state.v.x) || !isfinite(flyby_state.v.y) || !isfinite(flyby_state.v.z)) continue;
+		Lambert3 inbound = calc_lambert3_selected(departure_state.r, flyby_state.r,
+			flyby_offset * 86400, system->cb);
+		if(!is_valid_lambert_solution(inbound)) continue;
+		Vector3 incoming_excess = subtract_vec3(inbound.v1, flyby_state.v);
+		double incoming_speed = mag_vec3(incoming_excess);
+		if(!(incoming_speed > 0)) continue;
+
+		double previous_offset = flyby_offset + POWERED_TEST_MIN_LEG_DAYS;
+		Lambert3 previous_outbound;
+		double previous_difference;
+		if(!outgoing_excess_speed_difference(system, flyby_body, arrival_body, flyby_state,
+			flyby_jd, departure_jd + previous_offset, incoming_speed,
+			&previous_outbound, &previous_difference)) continue;
+		if(fabs(previous_difference) <= POWERED_TEST_DV_TOLERANCE)
+			consider_unpowered_baseline(bodies, departure_state, flyby_state, inbound,
+				previous_outbound, departure_jd, flyby_jd, departure_jd + previous_offset,
+				calc_data, &best_baseline);
+
+		for(double arrival_offset = previous_offset + arrival_step_days;
+			arrival_offset <= calc_data->max_duration; arrival_offset += arrival_step_days) {
+			Lambert3 current_outbound;
+			double current_difference;
+			if(!outgoing_excess_speed_difference(system, flyby_body, arrival_body, flyby_state,
+				flyby_jd, departure_jd + arrival_offset, incoming_speed,
+				&current_outbound, &current_difference)) continue;
+			if(fabs(current_difference) <= POWERED_TEST_DV_TOLERANCE)
+				consider_unpowered_baseline(bodies, departure_state, flyby_state, inbound,
+					current_outbound, departure_jd, flyby_jd, departure_jd + arrival_offset,
+					calc_data, &best_baseline);
+			if((previous_difference < 0 && current_difference > 0) ||
+				(previous_difference > 0 && current_difference < 0)) {
+				double lower_offset = previous_offset;
+				double upper_offset = arrival_offset;
+				double lower_difference = previous_difference;
+				Lambert3 root_outbound = current_outbound;
+				for(int iteration = 0; iteration < 30; iteration++) {
+					double middle_offset = (lower_offset + upper_offset) / 2;
+					double middle_difference;
+					if(!outgoing_excess_speed_difference(system, flyby_body, arrival_body,
+						flyby_state, flyby_jd, departure_jd + middle_offset, incoming_speed,
+						&root_outbound, &middle_difference)) break;
+					if(fabs(middle_difference) <= POWERED_TEST_DV_TOLERANCE) {
+						lower_offset = middle_offset;
+						upper_offset = middle_offset;
+						break;
+					}
+					if((lower_difference < 0 && middle_difference < 0) ||
+						(lower_difference > 0 && middle_difference > 0)) {
+						lower_offset = middle_offset;
+						lower_difference = middle_difference;
+					} else upper_offset = middle_offset;
+				}
+				double root_offset = (lower_offset + upper_offset) / 2;
+				double root_difference;
+				if(outgoing_excess_speed_difference(system, flyby_body, arrival_body,
+					flyby_state, flyby_jd, departure_jd + root_offset, incoming_speed,
+					&root_outbound, &root_difference) &&
+					fabs(root_difference) <= POWERED_TEST_DV_TOLERANCE)
+					consider_unpowered_baseline(bodies, departure_state, flyby_state,
+						inbound, root_outbound, departure_jd, flyby_jd,
+						departure_jd + root_offset, calc_data, &best_baseline);
+			}
+		previous_offset = arrival_offset;
+		previous_difference = current_difference;
+		previous_outbound = current_outbound;
+		}
+	}
+	return best_baseline;
+}
+
 static int run_powered_flyby_objective_regression(CelestSystem *system,
 		Body *departure_body, Body *flyby_body, Body *arrival_body,
 		double departure_jd, double hohmann_duration) {
@@ -127,9 +286,6 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	free(arrivals);
 	if(!has_valid_powered_route) goto cleanup;
 
-	PoweredFlybyOptimizationStats stats;
-	optimize_powered_flyby_routes(results.departures, results.num_deps,
-		&calc_data, POWERED_ROUTE_REFINEMENT_LIMIT, &stats);
 	double best_search_objective = DBL_MAX;
 	int optimized_itinerary_count = 0;
 	for(int i = 0; i < results.num_deps; i++)
@@ -149,6 +305,7 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	double grid_arrival_offsets[] = {700, 850, 1000, 1150, 1300, 1400};
 	Body *reference_bodies[] = {departure_body, flyby_body, arrival_body};
 	double best_grid_objective = DBL_MAX;
+	double best_unpowered_baseline = results.best_unpowered_seed_total_dv;
 	for(size_t flyby_index = 0; flyby_index <
 		sizeof(grid_flyby_offsets) / sizeof(grid_flyby_offsets[0]); flyby_index++) {
 		for(size_t arrival_index = 0; arrival_index <
@@ -161,22 +318,39 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 			double objective = evaluate_powered_flyby_route_objective(&calc_data,
 				reference_bodies, reference_times, 3);
 			if(objective < best_grid_objective) best_grid_objective = objective;
+			double unpowered_objective;
+			if(score_unpowered_grid_route(system, reference_bodies, reference_times,
+				&calc_data, &unpowered_objective) && unpowered_objective < best_unpowered_baseline)
+				best_unpowered_baseline = unpowered_objective;
 		}
 	}
-	int objective_did_not_increase = stats.routes_valid > 0 && stats.routes_corrected > 0 &&
-		isfinite(stats.best_initial_total_dv) && isfinite(stats.best_refined_total_dv) &&
-		stats.best_refined_total_dv <= stats.best_initial_total_dv + POWERED_TEST_DV_TOLERANCE &&
-		isfinite(best_search_objective) && isfinite(best_grid_objective) &&
+	double root_found_unpowered_baseline = find_unpowered_grid_baseline(system,
+		departure_body, flyby_body, arrival_body, departure_jd, &calc_data);
+	if(root_found_unpowered_baseline < best_unpowered_baseline)
+		best_unpowered_baseline = root_found_unpowered_baseline;
+	int objective_did_not_increase = results.powered_routes_valid > 0 &&
+		results.powered_routes_corrected > 0 &&
+		isfinite(results.best_powered_initial_total_dv) && results.best_powered_initial_total_dv < DBL_MAX &&
+		isfinite(results.best_powered_refined_total_dv) && results.best_powered_refined_total_dv < DBL_MAX &&
+		results.best_powered_refined_total_dv <= results.best_powered_initial_total_dv + POWERED_TEST_DV_TOLERANCE &&
+		isfinite(best_search_objective) && best_search_objective < DBL_MAX &&
+		isfinite(best_grid_objective) && best_grid_objective < DBL_MAX &&
 		best_search_objective <= best_grid_objective *
-			(1 + POWERED_TEST_GRID_RELATIVE_TOLERANCE) + POWERED_TEST_DV_TOLERANCE;
+			(1 + POWERED_TEST_GRID_RELATIVE_TOLERANCE) + POWERED_TEST_DV_TOLERANCE &&
+		isfinite(best_unpowered_baseline) && best_unpowered_baseline < DBL_MAX &&
+		best_search_objective <= best_unpowered_baseline + POWERED_TEST_DV_TOLERANCE;
 	if(!objective_did_not_increase)
-		fprintf(stderr, "Powered objective regression failed: %d valid, %d corrected, refine %.3f -> %.3f m/s, search %.3f, grid %.3f m/s\n",
-			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
-			stats.best_refined_total_dv, best_search_objective, best_grid_objective);
+		fprintf(stderr, "Powered objective regression failed: %d valid, %d corrected, refine %.3f -> %.3f m/s, search %.3f, grid %.3f, unpowered %.3f m/s\n",
+			results.powered_routes_valid, results.powered_routes_corrected,
+			results.best_powered_initial_total_dv, results.best_powered_refined_total_dv,
+			best_search_objective, best_grid_objective,
+			best_unpowered_baseline);
 	else
-		printf("Powered-flyby objective regression passed: %d valid, %d SOI-corrected, refine %.3f -> %.3f m/s, best search %.3f vs grid %.3f m/s\n",
-			stats.routes_valid, stats.routes_corrected, stats.best_initial_total_dv,
-			stats.best_refined_total_dv, best_search_objective, best_grid_objective);
+		printf("Powered-flyby objective regression passed: %d valid, %d SOI-corrected, refine %.3f -> %.3f m/s, best search %.3f vs grid %.3f and unpowered %.3f m/s\n",
+			results.powered_routes_valid, results.powered_routes_corrected,
+			results.best_powered_initial_total_dv, results.best_powered_refined_total_dv,
+			best_search_objective, best_grid_objective,
+			best_unpowered_baseline);
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	return objective_did_not_increase;
