@@ -289,7 +289,7 @@ cleanup:
 }
 
 static int initialize_candidate(PoweredRouteCandidate *candidate, struct ItinStep *arrival,
-		struct ItinStep **departures, int num_departures, double baseline_dv) {
+		struct ItinStep **departures, int num_departures) {
 	size_t num_steps = 0;
 	for(struct ItinStep *step = arrival; step != NULL; step = step->prev) {
 		if(step->body == NULL) return 0;
@@ -337,7 +337,6 @@ static int initialize_candidate(PoweredRouteCandidate *candidate, struct ItinSte
 	candidate->mutable_start = 1;
 	for(size_t i = 0; i + 1 < num_steps; i++)
 		if(nodes[i]->num_next_nodes > 1) candidate->mutable_start = i + 1;
-	candidate->original_total_dv = baseline_dv;
 	candidate->best_total_dv = DBL_MAX;
 	return candidate->mutable_start < num_steps;
 }
@@ -354,6 +353,12 @@ static void free_candidate(PoweredRouteCandidate *candidate) {
 	memset(candidate, 0, sizeof(*candidate));
 }
 
+static void destroy_candidate(PoweredRouteCandidate *candidate) {
+	if(candidate == NULL) return;
+	free_candidate(candidate);
+	free(candidate);
+}
+
 static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data) {
 	OSV *trial_states = malloc(candidate->num_steps * sizeof(*trial_states));
 	Lambert3 *trial_legs = malloc((candidate->num_steps - 1) * sizeof(*trial_legs));
@@ -362,8 +367,10 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 		free(trial_legs);
 		return 0;
 	}
-	candidate->best_total_dv = evaluate_route(candidate, calc_data, candidate->times,
-		candidate->best_states, candidate->best_legs);
+	if(!isfinite(candidate->best_total_dv) || candidate->best_total_dv >= DBL_MAX) {
+		candidate->best_total_dv = evaluate_route(candidate, calc_data, candidate->times,
+			candidate->best_states, candidate->best_legs);
+	}
 	if(!isfinite(candidate->best_total_dv) || candidate->best_total_dv >= DBL_MAX) {
 		free(trial_states);
 		free(trial_legs);
@@ -540,20 +547,22 @@ static int replace_candidate_route(struct ItinStep **departures, PoweredRouteCan
 	return 1;
 }
 
-static void insert_top_route(int route_index, double cost, int max_routes, int *count,
-		int indices[POWERED_ROUTE_LIMIT], double costs[POWERED_ROUTE_LIMIT]) {
-	if(*count == max_routes && cost >= costs[*count - 1]) return;
-	int insert = *count < max_routes ? *count : max_routes - 1;
+static int insert_top_candidate(PoweredRouteCandidate *candidate, double cost,
+		int max_routes, int *count,
+		PoweredRouteCandidate *candidates[POWERED_ROUTE_LIMIT],
+		double costs[POWERED_ROUTE_LIMIT]) {
+	if(*count == max_routes && cost >= costs[*count - 1]) return 0;
+	int insert = *count < max_routes ? (*count)++ : max_routes - 1;
+	if(*count == max_routes && candidates[insert] != NULL)
+		destroy_candidate(candidates[insert]);
 	while(insert > 0 && cost < costs[insert - 1]) {
-		if(insert < max_routes) {
-			costs[insert] = costs[insert - 1];
-			indices[insert] = indices[insert - 1];
-		}
+		candidates[insert] = candidates[insert - 1];
+		costs[insert] = costs[insert - 1];
 		insert--;
 	}
+	candidates[insert] = candidate;
 	costs[insert] = cost;
-	indices[insert] = route_index;
-	if(*count < max_routes) (*count)++;
+	return 1;
 }
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
@@ -567,54 +576,59 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		num_itineraries += get_number_of_itineraries(departures[i]);
 	if(itinerary_search_cancelled(NULL)) return 0;
 	if(num_itineraries <= 0) return 0;
-	struct PorkchopPoint *points = create_porkchop_array_from_departures(departures, num_departures,
-		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
-	if(points == NULL) return 0;
+	struct ItinStep **arrivals = malloc((size_t)num_itineraries * sizeof(*arrivals));
+	if(arrivals == NULL) return 0;
+	int arrival_count = 0;
+	for(int i = 0; i < num_departures; i++)
+		store_itineraries_in_array(departures[i], arrivals, &arrival_count);
 
-	int top_indices[POWERED_ROUTE_LIMIT];
+	PoweredRouteCandidate **candidates = calloc((size_t)POWERED_ROUTE_LIMIT, sizeof(*candidates));
 	double top_costs[POWERED_ROUTE_LIMIT];
 	int top_count = 0;
 	int route_limit = max_routes < POWERED_ROUTE_LIMIT ? max_routes : POWERED_ROUTE_LIMIT;
-	for(int point_index = 0; point_index < num_itineraries && !itinerary_search_cancelled(NULL); point_index++) {
-		if(get_num_of_itin_layers(get_first(points[point_index].arrival)) < 3) continue;
-		double arrival_dv = arrival_delta_v(&calc_data->dv_filter,
-			points[point_index].arrival->body, points[point_index].arrival->v_arr,
-			points[point_index].arrival->v_body, calc_data->dv_filter.arr_periapsis);
-		double total_dv = points[point_index].dv_dep + points[point_index].dv_dsm +
-			points[point_index].dv_flyby + arrival_dv;
-		if(isfinite(total_dv))
-			insert_top_route(point_index, total_dv, route_limit, &top_count, top_indices, top_costs);
-	}
-	PoweredRouteCandidate *candidates = calloc((size_t)top_count, sizeof(*candidates));
 	if(candidates == NULL) {
-		free(points);
+		free(arrivals);
 		return 0;
 	}
-	int candidates_optimized = 0;
-	for(int candidate_index = 0; candidate_index < top_count && !itinerary_search_cancelled(NULL); candidate_index++) {
-		PoweredRouteCandidate *candidate = &candidates[candidates_optimized];
-		if(!initialize_candidate(candidate, points[top_indices[candidate_index]].arrival,
-			departures, num_departures, top_costs[candidate_index])) {
-			free_candidate(candidate);
+	int routes_considered = 0;
+	int routes_valid = 0;
+	for(int point_index = 0; point_index < arrival_count && !itinerary_search_cancelled(NULL); point_index++) {
+		if(get_num_of_itin_layers(get_first(arrivals[point_index])) < 3) continue;
+		routes_considered++;
+		PoweredRouteCandidate *candidate = calloc(1, sizeof(*candidate));
+		if(candidate == NULL) continue;
+		if(!initialize_candidate(candidate, arrivals[point_index], departures, num_departures)) {
+			destroy_candidate(candidate);
 			continue;
 		}
-		if(optimize_candidate(candidate, calc_data)) {
-			candidates_optimized++;
-			if(stats != NULL) stats->routes_valid++;
-		} else free_candidate(candidate);
+		candidate->best_total_dv = evaluate_route(candidate, calc_data, candidate->times,
+			candidate->best_states, candidate->best_legs);
+		if(!isfinite(candidate->best_total_dv) || candidate->best_total_dv >= DBL_MAX) {
+			destroy_candidate(candidate);
+			continue;
+		}
+		candidate->original_total_dv = candidate->best_total_dv;
+		routes_valid++;
+		if(!insert_top_candidate(candidate, candidate->best_total_dv, route_limit,
+			&top_count, candidates, top_costs)) destroy_candidate(candidate);
 	}
-	free(points);
+	free(arrivals);
+	if(stats != NULL) {
+		stats->routes_considered = routes_considered;
+		stats->routes_valid = routes_valid;
+	}
 	if(itinerary_search_cancelled(NULL)) {
-		for(int candidate_index = 0; candidate_index < candidates_optimized; candidate_index++)
-			free_candidate(&candidates[candidate_index]);
+		for(int candidate_index = 0; candidate_index < top_count; candidate_index++)
+			destroy_candidate(candidates[candidate_index]);
 		free(candidates);
 		return 0;
 	}
 
 	int improvements = 0;
-	for(int i = 0; i < candidates_optimized && !itinerary_search_cancelled(NULL); i++) {
-		PoweredRouteCandidate *candidate = &candidates[i];
-		if(replace_candidate_route(departures, candidate)) {
+	int candidate_index = 0;
+	for(; candidate_index < top_count && !itinerary_search_cancelled(NULL); candidate_index++) {
+		PoweredRouteCandidate *candidate = candidates[candidate_index];
+		if(optimize_candidate(candidate, calc_data) && replace_candidate_route(departures, candidate)) {
 			if(stats != NULL) stats->routes_corrected++;
 			double saving = candidate->original_total_dv - candidate->best_total_dv;
 			if(saving > POWERED_IMPROVEMENT_THRESHOLD) {
@@ -623,11 +637,13 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 					stats->best_delta_v_saving = saving;
 			}
 		}
-		free_candidate(candidate);
+		destroy_candidate(candidate);
+		candidates[candidate_index] = NULL;
 	}
+	for(int i = candidate_index; i < top_count; i++)
+		destroy_candidate(candidates[i]);
 	free(candidates);
 	if(stats != NULL) {
-		stats->routes_considered = top_count;
 		stats->routes_improved = improvements;
 	}
 	return improvements;
