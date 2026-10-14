@@ -4,11 +4,13 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "tools/thread_pool.h"
 
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
 #define POWERED_TIMING_START_COUNT 3
+#define POWERED_MULTI_START_ROUTE_LIMIT 200
 
 static int itinerary_search_cancelled(void *context) {
 	(void)context;
@@ -438,7 +440,8 @@ static int refine_candidate_from_start(PoweredRouteCandidate *candidate,
 	return !itinerary_search_cancelled(NULL);
 }
 
-static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data) {
+static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
+		int timing_start_count) {
 	size_t num_steps = candidate->num_steps;
 	double *seed_times = malloc(num_steps * sizeof(*seed_times));
 	double *best_times = malloc(num_steps * sizeof(*best_times));
@@ -469,11 +472,11 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 		seed_times[0] + calc_data->max_duration);
 	int valid_start_found = 0;
 
-	for(int start_index = 0; start_index < POWERED_TIMING_START_COUNT &&
+	for(int start_index = 0; start_index < timing_start_count &&
 		!itinerary_search_cancelled(NULL); start_index++) {
 		memcpy(trial.times, seed_times, num_steps * sizeof(*trial.times));
 		if(start_index > 0) {
-			double fraction = (double)start_index / POWERED_TIMING_START_COUNT;
+			double fraction = (double)start_index / (timing_start_count - 1);
 			int valid_start = 1;
 			for(size_t i = candidate->mutable_start; i < num_steps; i++) {
 				double lower = trial.times[i - 1] + POWERED_MIN_LEG_DAYS;
@@ -706,6 +709,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	}
 	int routes_considered = 0;
 	int routes_valid = 0;
+	clock_t exact_scoring_start = clock();
 	for(int point_index = 0; point_index < arrival_count && !itinerary_search_cancelled(NULL); point_index++) {
 		if(get_num_of_itin_layers(get_first(arrivals[point_index])) < 3) continue;
 		routes_considered++;
@@ -739,6 +743,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	if(stats != NULL) {
 		stats->routes_considered = routes_considered;
 		stats->routes_valid = routes_valid;
+		stats->exact_scoring_seconds = (double)(clock() - exact_scoring_start) / CLOCKS_PER_SEC;
 	}
 	if(itinerary_search_cancelled(NULL)) {
 		for(int candidate_index = 0; candidate_index < top_count; candidate_index++)
@@ -749,9 +754,13 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 	int improvements = 0;
 	int candidate_index = 0;
+	clock_t timing_refinement_start = clock();
 	for(; candidate_index < top_count && !itinerary_search_cancelled(NULL); candidate_index++) {
 		PoweredRouteCandidate *candidate = candidates[candidate_index];
-		if(optimize_candidate(candidate, calc_data) && replace_candidate_route(departures, candidate)) {
+		int timing_start_count = candidate_index < POWERED_MULTI_START_ROUTE_LIMIT ?
+			POWERED_TIMING_START_COUNT : 1;
+		if(optimize_candidate(candidate, calc_data, timing_start_count) &&
+			replace_candidate_route(departures, candidate)) {
 			if(stats != NULL) {
 				stats->routes_corrected++;
 				if(candidate->best_total_dv < stats->best_refined_total_dv)
@@ -772,6 +781,8 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	free(candidates);
 	if(stats != NULL) {
 		stats->routes_improved = improvements;
+		stats->timing_refinement_seconds =
+			(double)(clock() - timing_refinement_start) / CLOCKS_PER_SEC;
 	}
 	return improvements;
 }

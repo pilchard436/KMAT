@@ -271,6 +271,7 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	for(int i = 0; i < results.num_deps; i++)
 		store_itineraries_in_array(results.departures[i], arrivals, &arrival_count);
 	int has_valid_powered_route = 0;
+	int has_speed_changing_powered_route = 0;
 	for(int i = 0; i < arrival_count && !has_valid_powered_route; i++) {
 		for(struct ItinStep *step = arrivals[i]->prev; step != NULL && step->prev != NULL;
 			step = step->prev) {
@@ -279,12 +280,22 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 			double minimum_periapsis = flyby_body->radius + flyby_body->atmo_alt + 1e4;
 			if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body,
 				flyby_body, minimum_periapsis, &flyby_result) &&
-				isfinite(flyby_result.burn_delta_v)) has_valid_powered_route = 1;
+				isfinite(flyby_result.burn_delta_v)) {
+				has_valid_powered_route = 1;
+				Vector3 incoming_excess = subtract_vec3(step->v_arr, step->v_body);
+				Vector3 outgoing_excess = subtract_vec3(step->next[0]->v_dep, step->v_body);
+				double excess_speed_change = fabs(mag_vec3(outgoing_excess) - mag_vec3(incoming_excess));
+				if(excess_speed_change > 1.0 && flyby_result.burn_delta_v > POWERED_TEST_DV_TOLERANCE)
+					has_speed_changing_powered_route = 1;
+			}
 			break;
 		}
 	}
 	free(arrivals);
-	if(!has_valid_powered_route) goto cleanup;
+	if(!has_valid_powered_route || !has_speed_changing_powered_route) {
+		fprintf(stderr, "Powered search did not return a valid flyby with |delta V-infinity| > 1 m/s\n");
+		goto cleanup;
+	}
 
 	double best_search_objective = DBL_MAX;
 	int optimized_itinerary_count = 0;

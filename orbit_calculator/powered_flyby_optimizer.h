@@ -15,6 +15,8 @@ typedef struct PoweredFlybyOptimizationStats {
 	double best_unpowered_seed_total_dv;
 	double best_initial_total_dv;
 	double best_refined_total_dv;
+	double exact_scoring_seconds;
+	double timing_refinement_seconds;
 } PoweredFlybyOptimizationStats;
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
