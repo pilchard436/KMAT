@@ -21,3 +21,9 @@
 - [ ] Measure and improve convergence-related route rejections in the iterative SOI/Lambert match. Distinguish numerical nonconvergence from physical infeasibility.
 - [ ] Add categorized route rejection counts for SOI geometry, convergence, configured date/time limits, departure delta-v, arrival delta-v, and total delta-v.
 - [ ] Use the full-profile UI-free search to quantify which otherwise feasible routes each internal cutoff excludes.
+
+
+Make scoring consistent. Use the same full evaluator to score every candidate being compared. Keep the unpowered result as the baseline, and report the powered candidate’s full Δv and component breakdown. Don’t call a route better just because it has a lower periapsis burn.
+Stop treating the approximate ranking as a rejection rule. Use it to order work, but retain route diversity and avoid dropping candidates unless the estimate is a proven lower bound. The fixed top-100 cutoff is another potential source of missed winners.
+Improve timing optimization per route. Start from multiple diverse date vectors, search encounter dates jointly, then locally refine the best. A coarse exhaustive date grid on a small test case can serve as the reference; a guarantee for continuous timing would require a global method with valid bounds.
+Test the objective, not route counts. On a small fixed sequence, compare the optimizer’s result with the minimum from the exhaustive grid. Assert feasibility and equal constraints, and confirm the best powered total is no worse than the feasible unpowered baseline.
