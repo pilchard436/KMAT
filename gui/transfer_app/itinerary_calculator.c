@@ -7,6 +7,7 @@
 #include "tools/file_io.h"
 #include "tools/itinerary_date_limits.h"
 #include "tools/itinerary_reference_defaults.h"
+#include "tools/thread_pool.h"
 #include <math.h>
 
 
@@ -658,7 +659,8 @@ void save_itineraries_ic(struct ItinStep **departures, int num_deps, int num_nod
 	store_itineraries_in_bfile(departures, num_nodes, num_deps, num_itins, ic_calc_data, ic_system, filepath, get_current_bin_file_type());
 }
 
-gboolean end_ic_calc_thread() {
+static gboolean end_ic_calc_thread(gpointer user_data) {
+	(void)user_data;
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 1);
 
@@ -670,7 +672,7 @@ gboolean end_ic_calc_thread() {
 	return G_SOURCE_REMOVE;
 }
 
-void ic_calc_thread() {
+static void prepare_ic_calc_data_from_widgets() {
 	char *string;
 
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_mindepdate));
@@ -729,17 +731,23 @@ void ic_calc_thread() {
 	seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
 	ic_calc_data.seq_info.to_target = seq_info;
 
-	ic_results = search_for_itineraries(ic_calc_data);
+}
 
-	// GUI stuff needs to happen in main thread
-	g_idle_add((GSourceFunc)end_ic_calc_thread, NULL);
+static gpointer ic_calc_thread(gpointer user_data) {
+	(void)user_data;
+	ic_results = search_for_itineraries(ic_calc_data);
+	g_idle_add(end_ic_calc_thread, NULL);
+	return NULL;
 }
 
 G_MODULE_EXPORT void on_calc_ic() {
 	if(ic_system == NULL) return;
+	prepare_ic_calc_data_from_widgets();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 0);
-	g_thread_new("calc_thread", (GThreadFunc) ic_calc_thread, NULL);
+	prepare_thread_pool_counters();
 	init_sc_ic_progress_window();
+	GThread *calc_thread = g_thread_new("calc_thread", (GThreadFunc) ic_calc_thread, NULL);
+	if(calc_thread != NULL) g_thread_unref(calc_thread);
 }
 
 G_MODULE_EXPORT void on_ic_system_change() {

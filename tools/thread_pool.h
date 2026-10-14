@@ -22,14 +22,17 @@ struct Thread_Pool {
 
 
 /**
- * @brief Creates, initializes and runs a thread pool with 64 threads and sets counters to 0
+ * @brief Creates, initializes, and runs up to 32 workers, reserving one logical processor when possible.
  *
  * @param thread_method Pointer to the thread method function
  * @param thread_args   Pointer to the arguments for the thread method
- * @return A populated Thread_Pool structure with 64 threads
+ * @return A populated Thread_Pool structure with the selected worker count
  */
 struct Thread_Pool use_thread_pool32(void *thread_method(void*), void *thread_args);
 struct Thread_Pool use_thread_pool01(void *thread_method(void*), void *thread_args);
+
+// Initialize/reset counters before exposing thread-pool controls to another thread.
+void prepare_thread_pool_counters(void);
 
 /**
  * @brief Gets the current specified thread counter value

@@ -26,6 +26,8 @@ typedef struct Itin_Calc_Results {
 typedef struct Transfer_Calc_Status {
 	int num_itins;
 	int num_deps;
+	int num_deps_started;
+	int num_deps_active;
 	double jd_diff;
 	double progress;
 } Transfer_Calc_Status;

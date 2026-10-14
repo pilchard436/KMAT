@@ -34,6 +34,17 @@ struct Thread_Progress_and_Prop_Info {
 	double jd_max_dep;
 } thread_progress_and_prop_info;
 
+static void show_departure_progress(double total_departures) {
+	int completed = get_thread_counter(1);
+	int started = get_thread_counter(0);
+	int active = get_thread_counter(4);
+	if(total_departures > 0 && started > total_departures) started = (int)total_departures;
+	char status[128];
+	snprintf(status, sizeof(status), "Departure dates: %d/%d complete, %d started, %d active",
+		completed, (int)total_departures, started, active);
+	show_progress(status, completed, total_departures);
+}
+
 static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *calc_data) {
 	struct PorkchopPoint point = create_porkchop_point(arrival,
 		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
@@ -111,16 +122,15 @@ void *calc_itins_from_departure(void *args) {
 
 	// index in departure array (iterated over)
 	int index = get_incr_thread_counter(0);
-	// increase finished counter to 1 (first finished should reflect a num of finished of 1)
+	double jd_diff = jd_max_dep - jd_min_dep + 1;
 
 	double jd_dep = jd_min_dep + index;
 	struct ItinStep *curr_step;
 	OSV osv_body0, osv_body1;
 
-	// used for progress feedback
-	double jd_diff = jd_max_dep-jd_min_dep+1;
-
 	while(jd_dep <= jd_max_dep && get_thread_counter(3) == 0) {
+		incr_thread_counter_by_amount(4, 1);
+		show_departure_progress(jd_diff);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 		Itin_Search_Profile *profile = &thread_args->profiles[index];
 		struct timeval phase_start, phase_end;
@@ -168,6 +178,7 @@ void *calc_itins_from_departure(void *args) {
 			double max_min_duration_diff = max_duration - min_duration;
 
 			for(int j = 0; j < NUM_INITIAL_TRANSFERS_PER_BODY; j++) {
+				if(get_thread_counter(3) > 0) break;
 				double jd_arr = jd_dep + min_duration + max_min_duration_diff * j/(NUM_INITIAL_TRANSFERS_PER_BODY - 1);
 
 				if(jd_arr > jd_max_arr) break;
@@ -231,7 +242,7 @@ void *calc_itins_from_departure(void *args) {
 		set_itin_search_lambert_counter(&profile->recursive_lambert_calls);
 		gettimeofday(&phase_start, NULL);
 #endif
-		if(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
+		if(get_thread_counter(3) == 0 && itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
 			int num_of_end_nodes = find_copy_and_store_end_nodes(curr_step, arr_body);
 
 			// remove end nodes that do not satisfy dv requirements
@@ -239,7 +250,7 @@ void *calc_itins_from_departure(void *args) {
 			if(curr_step->num_next_nodes > 0) {
 				continue_to_next_steps_and_check_for_valid_itins(curr_step, num_of_end_nodes, &calc_data->seq_info.to_target, jd_max_arr, max_total_duration, &dv_filter);
 			}
-		} else {
+		} else if(get_thread_counter(3) == 0) {
 			if(num_steps > 2) {
 				int itin_del = 0;
 				int init_num_next_nodes = curr_step->num_next_nodes;
@@ -257,9 +268,10 @@ void *calc_itins_from_departure(void *args) {
 		set_itin_search_flyby_profile(NULL, 0, NULL);
 #endif
 
-		double progress = get_incr_thread_counter(1)+1;	// +1 because it gets the last value, not the incremented value
-		show_progress("Transfer Calculation progress", progress, jd_diff);
 		incr_thread_counter_by_amount(2, get_number_of_itineraries(get_first(curr_step)));
+		if(get_thread_counter(3) == 0) get_incr_thread_counter(1);
+		incr_thread_counter_by_amount(4, -1);
+		show_departure_progress(jd_diff);
 		index = get_incr_thread_counter(0);
 		jd_dep = jd_min_dep + index;
 	}
@@ -276,8 +288,7 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	int num_deps = (int) (calc_data.jd_max_dep-calc_data.jd_min_dep+1);
 
 	struct ItinStep **departures = (struct ItinStep**) malloc(num_deps * sizeof(struct ItinStep*));
-	for(int i = 0; i < num_deps; i++) departures[i] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
-	for(int i = 0; i < num_deps; i++) departures[i]->num_next_nodes = 0;
+	for(int i = 0; i < num_deps; i++) departures[i] = calloc(1, sizeof(struct ItinStep));
 
 
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -318,13 +329,17 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		for(int i = 0; i < target->num_flyby_bodies; i++)
 			printf(" %s", target->flyby_bodies[i]->name);
 		printf("\n");
+		printf("Powered flyby seed budget: %d candidates per body search\n",
+			ITIN_FLYBY_CANDIDATE_BUDGET);
 	}
 
 	show_progress("Transfer Calculation progress", 0, 1);
 	struct Thread_Pool thread_pool;
 	thread_pool = use_thread_pool32(calc_itins_from_departure, &thread_args);
 	join_thread_pool(thread_pool);
-	show_progress("Transfer Calculation progress", 1, 1);
+	struct Transfer_Calc_Status final_status = get_current_transfer_calc_status();
+	show_progress(get_thread_counter(3) > 0 ? "Transfer Calculation canceled" :
+		"Transfer Calculation progress", final_status.progress, 1);
 	printf("\n");
 	#ifdef KMAT_ENABLE_SEARCH_PROFILE
 	double initial_grid_seconds = 0;
@@ -345,15 +360,20 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		unsigned long long searches = 0;
 		unsigned long long left_evaluations = 0;
 		unsigned long long right_evaluations = 0;
+		unsigned long long seed_checks = 0;
+		unsigned long long candidate_budget_drops = 0;
 		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++) {
 			ItinFlybyProfileStats stats = profiles[departure_index].flyby_stats[body_index];
 			searches += stats.searches;
 			left_evaluations += stats.left_evaluations;
 			right_evaluations += stats.right_evaluations;
+			seed_checks += stats.seed_checks;
+			candidate_budget_drops += stats.candidate_budget_drops;
 		}
 		if(searches > 0)
-			printf("Flyby %s: %llu searches, %llu left / %llu right root evaluations\n",
-				profile_bodies[body_index]->name, searches, left_evaluations, right_evaluations);
+			printf("Flyby %s: %llu windows, %llu time samples, %llu SOI seed checks, %llu candidates dropped by budget\n",
+				profile_bodies[body_index]->name, searches, left_evaluations + right_evaluations,
+				seed_checks, candidate_budget_drops);
 	}
 	free(profiles);
 	free(flyby_profiles);
@@ -408,11 +428,17 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 struct Transfer_Calc_Status get_current_transfer_calc_status() {
 	double jd_diff = thread_progress_and_prop_info.jd_max_dep-thread_progress_and_prop_info.jd_min_dep+1;
 	int num_deps = get_thread_counter(1);
+	int num_deps_started = get_thread_counter(0);
+	int num_deps_active = get_thread_counter(4);
+	if(jd_diff > 0 && num_deps_started > jd_diff) num_deps_started = (int)jd_diff;
+	double progress = jd_diff > 0 ? fmin(1, (double)num_deps / jd_diff) : 0;
 
 	return (struct Transfer_Calc_Status) {
 		.num_itins = get_thread_counter(2),
 		.num_deps = num_deps,
+		.num_deps_started = num_deps_started,
+		.num_deps_active = num_deps_active,
 		.jd_diff = jd_diff,
-		.progress = (double)num_deps/jd_diff
+		.progress = progress
 	};
 }

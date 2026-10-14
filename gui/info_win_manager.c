@@ -1,6 +1,7 @@
 #include "info_win_manager.h"
 #include "orbit_calculator/transfer_calc.h"
 #include "tools/thread_pool.h"
+#include "tools/tool_funcs.h"
 
 
 GObject *prog_window;
@@ -9,6 +10,8 @@ GObject *lb_prog_info;
 
 GObject *msg_window;
 GObject *lb_mw_msg;
+static gint64 progress_started_at;
+static gint64 last_console_progress_at;
 
 
 void init_info_windows(GtkBuilder *builder) {
@@ -28,18 +31,41 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 		return G_SOURCE_REMOVE;  // Stop the timeout
 	}
 	struct Transfer_Calc_Status calc_status = get_current_transfer_calc_status();
-	gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
-	char s[200];
-	if(get_thread_counter(3) == 0)
-		sprintf(s, "Departure dates analyzed: %d / %d\nItineraries found: %d", calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
+	gint64 now = g_get_monotonic_time();
+	double elapsed_seconds = (double)(now - progress_started_at) / G_USEC_PER_SEC;
+	if(calc_status.progress < 1)
+		gtk_progress_bar_pulse(GTK_PROGRESS_BAR(tf_prog_bar));
 	else
-		sprintf(s, "Departures dates analyzed: %d / %d\nItineraries found: %d\nEnding Calculations...", calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
+	char s[256];
+	if(get_thread_counter(3) == 0)
+		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nStarted: %d; active: %d\nItineraries found: %d",
+			elapsed_seconds,
+			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_deps_started,
+			calc_status.num_deps_active, calc_status.num_itins);
+	else
+		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nStarted: %d; active: %d\nItineraries found: %d",
+			elapsed_seconds,
+			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_deps_started,
+			calc_status.num_deps_active, calc_status.num_itins);
 	gtk_label_set_text(GTK_LABEL(lb_prog_info), s);
+	if(now - last_console_progress_at >= G_USEC_PER_SEC) {
+		char console_status[160];
+		g_snprintf(console_status, sizeof(console_status),
+			"Search %.0f s: %d/%d dates complete, %d active",
+			elapsed_seconds, calc_status.num_deps, (int)calc_status.jd_diff,
+			calc_status.num_deps_active);
+		show_progress(console_status, calc_status.progress, 1);
+		last_console_progress_at = now;
+	}
 
 	return G_SOURCE_CONTINUE;  // Continue updating
 }
 
 void init_sc_ic_progress_window() {
+	gtk_progress_bar_set_pulse_step(GTK_PROGRESS_BAR(tf_prog_bar), 0.08);
+	progress_started_at = g_get_monotonic_time();
+	last_console_progress_at = progress_started_at;
 	gtk_widget_set_visible(GTK_WIDGET(prog_window), 1);
 	// update progress window every 0.1s
 	g_timeout_add(100, update_sc_ic_progress_window, NULL);
