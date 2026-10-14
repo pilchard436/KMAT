@@ -4,6 +4,8 @@
 #include "orbit_calculator/transfer_calc.h"
 #include <stddef.h>
 
+#define POWERED_ROUTE_REFINEMENT_LIMIT 500
+
 typedef struct PoweredFlybyOptimizationStats {
 	int routes_considered;
 	int routes_valid;

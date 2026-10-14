@@ -129,7 +129,7 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 
 	PoweredFlybyOptimizationStats stats;
 	optimize_powered_flyby_routes(results.departures, results.num_deps,
-		&calc_data, 100, &stats);
+		&calc_data, POWERED_ROUTE_REFINEMENT_LIMIT, &stats);
 	double best_search_objective = DBL_MAX;
 	int optimized_itinerary_count = 0;
 	for(int i = 0; i < results.num_deps; i++)
@@ -186,6 +186,87 @@ cleanup:
 	free(results.departures);
 	return 0;
 }
+
+static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
+		const char *departure_name, const char *arrival_name,
+		const char **flyby_names, int num_flybys, double jd_min_dep, double jd_max_dep,
+		double jd_max_arr, double max_duration, double max_total_dv,
+		double max_departure_dv, double max_satellite_dv,
+		double departure_periapsis, double arrival_periapsis) {
+	Body *departure_body = get_body_by_name((char *)departure_name, system);
+	Body *arrival_body = get_body_by_name((char *)arrival_name, system);
+	Body **flyby_bodies = malloc((size_t)num_flybys * sizeof(*flyby_bodies));
+	if(departure_body == NULL || arrival_body == NULL || flyby_bodies == NULL) {
+		fprintf(stderr, "%s benchmark: missing body or allocation failure\n", label);
+		free(flyby_bodies);
+		return 0;
+	}
+	for(int i = 0; i < num_flybys; i++) {
+		flyby_bodies[i] = get_body_by_name((char *)flyby_names[i], system);
+		if(flyby_bodies[i] == NULL) {
+			fprintf(stderr, "%s benchmark: missing flyby body %s\n", label, flyby_names[i]);
+			free(flyby_bodies);
+			return 0;
+		}
+	}
+
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = jd_min_dep;
+	calc_data.jd_max_dep = jd_max_dep;
+	calc_data.jd_max_arr = jd_max_arr;
+	calc_data.max_duration = max_duration;
+	calc_data.step_dep_date = 1;
+	calc_data.num_deps_per_date = 500;
+	calc_data.max_num_waiting_orbits = 0;
+	calc_data.calc_acc = (Calc_Acc){.lambert = 1, .fb_finder = 1};
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = max_total_dv,
+		.max_depdv = max_departure_dv,
+		.max_satdv = max_satellite_dv,
+		.dep_periapsis = departure_periapsis,
+		.arr_periapsis = arrival_periapsis,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET,
+		.system = system,
+		.dep_body = departure_body,
+		.arr_body = arrival_body,
+		.flyby_bodies = flyby_bodies,
+		.num_flyby_bodies = num_flybys
+	};
+	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	printf("\n=== %s saved-settings benchmark ===\n", label);
+	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	printf("%s benchmark result: %d departure roots, %d nodes, %d itineraries\n",
+		label, results.num_deps, results.num_nodes, results.num_itins);
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	free(flyby_bodies);
+	return results.num_deps > 0 && results.num_itins > 0;
+}
+
+static int run_saved_mission_benchmarks(void) {
+	char system_path[] = "../Celestial_Systems/solar_system.cfg";
+	CelestSystem *system = load_celestial_system_from_cfg_file(system_path);
+	if(system == NULL) {
+		fprintf(stderr, "Failed to load benchmark system: %s\n", system_path);
+		return EXIT_FAILURE;
+	}
+	const char *jupiter_flybys[] = {"EARTH", "MARS", "JUPITER"};
+	const char *saturn_flybys[] = {"EARTH", "MARS", "JUPITER", "SATURN"};
+	int jupiter_valid = run_saved_mission_benchmark(system, "Jupiter",
+		"EARTH", "JUPITER", jupiter_flybys, 3,
+		2461327.50, 2461692.50, 2463325.50, 1998.0,
+		6939, 6939, 0, 190e3, 1600e3);
+	int saturn_valid = run_saved_mission_benchmark(system, "Saturn",
+		"EARTH", "SATURN", saturn_flybys, 4,
+		2461326.50, 2461691.50, 2466098.50, 4407.0,
+		7282, 7282, 0, 190e3, 2050e3);
+	free_celestial_system(system);
+	return jupiter_valid && saturn_valid ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 static int run_full_profile(void) {
 	char system_path[] = "../Celestial_Systems/solar_system_ephem.cfg";
 	CelestSystem *system = load_celestial_system_from_cfg_file(system_path);
@@ -250,6 +331,8 @@ static int run_full_profile(void) {
 }
 
 int main(int argc, char **argv) {
+	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
+		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {

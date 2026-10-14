@@ -6,7 +6,6 @@
 #include <string.h>
 #include "tools/thread_pool.h"
 
-#define POWERED_ROUTE_LIMIT 100
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
 
@@ -568,8 +567,8 @@ static int replace_candidate_route(struct ItinStep **departures, PoweredRouteCan
 
 static int insert_top_candidate(PoweredRouteCandidate *candidate, double cost,
 		int max_routes, int *count,
-		PoweredRouteCandidate *candidates[POWERED_ROUTE_LIMIT],
-		double costs[POWERED_ROUTE_LIMIT]) {
+		PoweredRouteCandidate *candidates[POWERED_ROUTE_REFINEMENT_LIMIT],
+		double costs[POWERED_ROUTE_REFINEMENT_LIMIT]) {
 	if(*count == max_routes && cost >= costs[*count - 1]) return 0;
 	int insert = *count < max_routes ? (*count)++ : max_routes - 1;
 	if(*count == max_routes && candidates[insert] != NULL)
@@ -604,10 +603,11 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	for(int i = 0; i < num_departures; i++)
 		store_itineraries_in_array(departures[i], arrivals, &arrival_count);
 
-	PoweredRouteCandidate **candidates = calloc((size_t)POWERED_ROUTE_LIMIT, sizeof(*candidates));
-	double top_costs[POWERED_ROUTE_LIMIT];
+	PoweredRouteCandidate **candidates = calloc((size_t)POWERED_ROUTE_REFINEMENT_LIMIT, sizeof(*candidates));
+	double top_costs[POWERED_ROUTE_REFINEMENT_LIMIT];
 	int top_count = 0;
-	int route_limit = max_routes < POWERED_ROUTE_LIMIT ? max_routes : POWERED_ROUTE_LIMIT;
+	int route_limit = max_routes < POWERED_ROUTE_REFINEMENT_LIMIT ?
+		max_routes : POWERED_ROUTE_REFINEMENT_LIMIT;
 	if(candidates == NULL) {
 		free(arrivals);
 		return 0;

@@ -415,11 +415,13 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 		if(get_thread_counter(3) == 0) {
 			PoweredFlybyOptimizationStats powered_stats;
-			optimize_powered_flyby_routes(departures, num_deps, &calc_data, 100, &powered_stats);
-			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best total dV saving %.2f m/s\n",
+			optimize_powered_flyby_routes(departures, num_deps, &calc_data,
+				POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best saving %.2f m/s, best full dV %.3f -> %.3f m/s\n",
 				powered_stats.routes_improved, powered_stats.routes_considered,
 				powered_stats.routes_valid, powered_stats.routes_corrected,
-				powered_stats.best_delta_v_saving);
+				powered_stats.best_delta_v_saving, powered_stats.best_initial_total_dv,
+				powered_stats.best_refined_total_dv);
 		}
 		valid_departures = 0;
 		for(int i = 0; i < num_deps; i++) {
