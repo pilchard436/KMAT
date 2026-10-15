@@ -35,7 +35,16 @@ struct Thread_Progress_and_Prop_Info {
 	double jd_max_dep;
 	int total_initial_samples;
 	int has_post_processing;
+	double search_start_time;
+	double search_end_time;
+	double max_progress;
 } thread_progress_and_prop_info;
+
+static double progress_clock(void) {
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	return now.tv_sec + now.tv_usec / 1e6;
+}
 
 #define INITIAL_SAMPLE_PROGRESS_COUNTER 5
 
@@ -366,7 +375,8 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		.jd_min_dep = calc_data.jd_min_dep,
 		.jd_max_dep = calc_data.jd_max_dep,
 		.total_initial_samples = num_deps * initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY,
-		.has_post_processing = calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET
+		.has_post_processing = calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET,
+		.search_start_time = progress_clock()
 	};
 	printf("Search window: departure JD %.2f..%.2f, max arrival JD %.2f, max duration %.2f days\n",
 		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.jd_max_arr, calc_data.max_duration);
@@ -525,14 +535,29 @@ struct Transfer_Calc_Status get_current_transfer_calc_status() {
 	double progress = 0.75 * initial_sample_progress + 0.25 * completed_date_progress;
 	if(completed_date_progress >= 1) progress = 1;
 	int post_processing = thread_progress_and_prop_info.has_post_processing && completed_date_progress >= 1;
-	if(post_processing) {
-		// Scoring and refinement follow the date search, so the search only fills 70% of the bar.
-		int post_total = get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER);
-		double post_progress = post_total > 0 ?
-			fmin(1, (double)get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) / post_total) : 0;
-		progress = 0.7 + 0.3 * post_progress;
-	} else if(thread_progress_and_prop_info.has_post_processing) {
-		progress *= 0.7;
+	if(thread_progress_and_prop_info.has_post_processing) {
+		// Share of the bar for scoring/refinement, predicted from the route count and elapsed search time.
+		double now = progress_clock();
+		if(post_processing && thread_progress_and_prop_info.search_end_time == 0)
+			thread_progress_and_prop_info.search_end_time = now;
+		double search_fraction = post_processing ? 1 : fmax(progress, 0.05);
+		double search_seconds = (post_processing ? thread_progress_and_prop_info.search_end_time : now) -
+			thread_progress_and_prop_info.search_start_time;
+		double predicted_post_seconds = ((double)get_thread_counter(2) / search_fraction +
+			POWERED_PROGRESS_REFINE_UNITS) * POWERED_PROGRESS_SECONDS_PER_UNIT;
+		double predicted_search_seconds = search_seconds / search_fraction;
+		double post_share = predicted_post_seconds / (predicted_search_seconds + predicted_post_seconds);
+		if(post_processing) {
+			int post_total = get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER);
+			double post_progress = post_total > 0 ?
+				fmin(1, (double)get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) / post_total) : 0;
+			progress = (1 - post_share) + post_share * post_progress;
+		} else {
+			progress *= 1 - post_share;
+		}
+		// Estimates shift as the search proceeds; the bar must never move backwards.
+		progress = fmax(progress, thread_progress_and_prop_info.max_progress);
+		thread_progress_and_prop_info.max_progress = progress;
 	}
 
 	return (struct Transfer_Calc_Status) {

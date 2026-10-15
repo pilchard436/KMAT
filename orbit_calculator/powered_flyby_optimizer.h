@@ -13,6 +13,12 @@
 #define POWERED_PROGRESS_DONE_COUNTER 6
 #define POWERED_PROGRESS_TOTAL_COUNTER 7
 
+/* One progress unit is the cost of scoring one route (about 0.8 ms); refining one route is about 12 units. */
+#define POWERED_PROGRESS_SECONDS_PER_UNIT 0.0008
+#define POWERED_REFINE_PROGRESS_WEIGHT 12
+#define POWERED_PROGRESS_REFINE_UNITS (POWERED_REFINE_PROGRESS_WEIGHT * \
+	(POWERED_REPAIR_SLOTS + POWERED_ROUTE_REFINEMENT_LIMIT + POWERED_CHALLENGE_SLOTS))
+
 typedef struct PoweredRejectionAuditGroup {
 	unsigned long long population;
 	int sampled, feasible, improved, beats_retained_best, beats_retained_worst;
