@@ -58,6 +58,7 @@ double calc_total_dv_pa(void);
 double calc_periapsis_height_pa(void);
 
 void update_pa();
+static void update_pa_after_group_visibility_change(void);
 void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
 void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
@@ -362,16 +363,21 @@ static gboolean build_group_overview_batch(gpointer user_data) {
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_button), pa_groups[group_idx].show_group);
 		g_signal_connect(check_button, "clicked", G_CALLBACK(on_change_itin_group_visibility), &pa_groups[group_idx]);
 		pa_groups[group_idx].cb_pa_show_group = check_button;
-		gtk_widget_set_tooltip_text(check_button, route_tooltip->str);
+		set_stable_tooltip(check_button, route_tooltip->str);
 		gtk_grid_attach(GTK_GRID(grid_pa_groups), check_button, 1, row, 1, 1);
 		gtk_widget_show(check_button);
 
 		GtkWidget *route_label_widget = gtk_label_new(route_label->str);
-		gtk_widget_set_tooltip_text(route_label_widget, route_tooltip->str);
 		gtk_widget_set_halign(route_label_widget, GTK_ALIGN_START);
 		set_css_class_for_widget(route_label_widget, "pag-group-itin");
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_widget, 3, row, 1, 1);
-		gtk_widget_show(route_label_widget);
+		// Labels have no window of their own, so an event box is needed to get hover events.
+		GtkWidget *route_label_box = gtk_event_box_new();
+		gtk_event_box_set_visible_window(GTK_EVENT_BOX(route_label_box), FALSE);
+		gtk_widget_set_halign(route_label_box, GTK_ALIGN_START);
+		gtk_container_add(GTK_CONTAINER(route_label_box), route_label_widget);
+		set_stable_tooltip(route_label_box, route_tooltip->str);
+		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_box, 3, row, 1, 1);
+		gtk_widget_show_all(route_label_box);
 
 		GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
 		gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, 2, row, 1, 1);
@@ -493,7 +499,27 @@ G_MODULE_EXPORT void on_change_itin_group_visibility(GtkWidget* widget, gpointer
 	struct PorkchopGroup *group = (struct PorkchopGroup *) data;
 	int visibility = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
 	group->show_group = visibility;
-	update_pa();
+	update_pa_after_group_visibility_change();
+}
+
+static void set_all_visible_groups_shown(int show) {
+	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
+		struct PorkchopGroup *group = &pa_groups[group_idx];
+		if(!group->has_itin_inside_filter) continue;
+		group->show_group = show;
+		// set_active emits "toggled", not "clicked", so this does not re-enter the handler.
+		if(group->cb_pa_show_group != NULL)
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(group->cb_pa_show_group), show);
+	}
+	update_pa_after_group_visibility_change();
+}
+
+G_MODULE_EXPORT void on_pa_select_all_groups(GtkWidget* widget, gpointer data) {
+	set_all_visible_groups_shown(1);
+}
+
+G_MODULE_EXPORT void on_pa_deselect_all_groups(GtkWidget* widget, gpointer data) {
+	set_all_visible_groups_shown(0);
 }
 
 // Comparison function for group qsort
@@ -691,6 +717,14 @@ void update_pa() {
 	update_pa_porkchop_diagram();
 	update_pa_itinerary_preview();
 	update_group_overview();
+	reset_min_max_feedback(1);
+}
+
+// Rebuilding the group list here would reset its scroll position.
+static void update_pa_after_group_visibility_change(void) {
+	update_best_itin();
+	update_pa_porkchop_diagram();
+	update_pa_itinerary_preview();
 	reset_min_max_feedback(1);
 }
 
