@@ -86,6 +86,12 @@ void draw_itinerary_step_point(Camera *camera, Vector3 r) {
 	}
 }
 
+// Powered flybys change excess speed, so only the periapsis clearance decides viability.
+static int is_flyby_leg_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
+	PoweredFlybyResult result;
+	return calculate_powered_flyby(v_arr, v_dep, v_body, body, body->radius + body->atmo_alt + 1e4, &result);
+}
+
 void set_trajectory_color(cairo_t *cr, int trajectory_is_in_the_past, int trajectory_is_viable) {
 	if(trajectory_is_in_the_past) {
 		if(trajectory_is_viable) cairo_set_source_rgb(cr, 0, 0.6, 0.4);
@@ -107,7 +113,7 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 		double dt = tf->next[0]->date - tf->date;
 
 		if(tf->prev != NULL) {
-			trajectory_is_viable = is_flyby_viable(tf->v_arr, tf->next[0]->v_dep, tf->v_body, tf->body, 10);
+			trajectory_is_viable = is_flyby_leg_viable(tf->v_arr, tf->next[0]->v_dep, tf->v_body, tf->body);
 		}
 
 		if(current_time >= tf->date && current_time < tf->next[0]->date) {
@@ -204,7 +210,7 @@ void draw_trajectory_2d(cairo_t *cr, Vector2 center, double scale, struct ItinSt
 	double dt = (tf->date-prev->date)*24*60*60;
 
 	if(prev->prev != NULL && prev->body != NULL) {
-		if(!is_flyby_viable(tf->prev->v_arr, tf->v_dep, tf->prev->v_body, tf->body, 10)) cairo_set_source_rgb(cr, 1, 0, 0);
+		if(!is_flyby_leg_viable(tf->prev->v_arr, tf->v_dep, tf->prev->v_body, tf->body)) cairo_set_source_rgb(cr, 1, 0, 0);
 	}
 
 	int steps = 1000;

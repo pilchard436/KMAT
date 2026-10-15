@@ -8,7 +8,7 @@
 thread_t threads32[32];
 thread_t threads01[1];
 
-#define NUM_COUNTER 6
+#define NUM_COUNTER 8
 
 int counter[NUM_COUNTER];
 thread_mutex_t counter_lock[NUM_COUNTER];

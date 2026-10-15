@@ -38,12 +38,16 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 	g_snprintf(progress_text, sizeof(progress_text), "%.0f%%", calc_status.progress * 100);
 	gtk_progress_bar_set_text(GTK_PROGRESS_BAR(tf_prog_bar), progress_text);
 	char s[256];
-	if(get_thread_counter(3) == 0)
-		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
+	if(get_thread_counter(3) != 0)
+		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
+			elapsed_seconds,
+			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
+	else if(calc_status.post_processing)
+		sprintf(s, "Scoring and refining routes: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
 			elapsed_seconds,
 			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
 	else
-		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
+		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
 			elapsed_seconds,
 			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
 	gtk_label_set_text(GTK_LABEL(lb_prog_info), s);

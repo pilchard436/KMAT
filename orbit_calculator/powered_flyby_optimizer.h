@@ -10,6 +10,9 @@
 #define POWERED_REPAIR_SLOTS 64
 #define POWERED_CHALLENGE_SLOTS POWERED_AUDIT_SAMPLE_SIZE
 
+#define POWERED_PROGRESS_DONE_COUNTER 6
+#define POWERED_PROGRESS_TOTAL_COUNTER 7
+
 typedef struct PoweredRejectionAuditGroup {
 	unsigned long long population;
 	int sampled, feasible, improved, beats_retained_best, beats_retained_worst;

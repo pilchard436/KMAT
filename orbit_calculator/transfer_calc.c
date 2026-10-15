@@ -34,6 +34,7 @@ struct Thread_Progress_and_Prop_Info {
 	double jd_min_dep;
 	double jd_max_dep;
 	int total_initial_samples;
+	int has_post_processing;
 } thread_progress_and_prop_info;
 
 #define INITIAL_SAMPLE_PROGRESS_COUNTER 5
@@ -364,7 +365,8 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
 		.jd_min_dep = calc_data.jd_min_dep,
 		.jd_max_dep = calc_data.jd_max_dep,
-		.total_initial_samples = num_deps * initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY
+		.total_initial_samples = num_deps * initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY,
+		.has_post_processing = calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET
 	};
 	printf("Search window: departure JD %.2f..%.2f, max arrival JD %.2f, max duration %.2f days\n",
 		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.jd_max_arr, calc_data.max_duration);
@@ -522,6 +524,16 @@ struct Transfer_Calc_Status get_current_transfer_calc_status() {
 		completed_date_progress;
 	double progress = 0.75 * initial_sample_progress + 0.25 * completed_date_progress;
 	if(completed_date_progress >= 1) progress = 1;
+	int post_processing = thread_progress_and_prop_info.has_post_processing && completed_date_progress >= 1;
+	if(post_processing) {
+		// Scoring and refinement follow the date search, so the search only fills 70% of the bar.
+		int post_total = get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER);
+		double post_progress = post_total > 0 ?
+			fmin(1, (double)get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) / post_total) : 0;
+		progress = 0.7 + 0.3 * post_progress;
+	} else if(thread_progress_and_prop_info.has_post_processing) {
+		progress *= 0.7;
+	}
 
 	return (struct Transfer_Calc_Status) {
 		.num_itins = get_thread_counter(2),
@@ -529,6 +541,7 @@ struct Transfer_Calc_Status get_current_transfer_calc_status() {
 		.num_deps_started = num_deps_started,
 		.num_deps_active = num_deps_active,
 		.jd_diff = jd_diff,
-		.progress = progress
+		.progress = progress,
+		.post_processing = post_processing
 	};
 }
