@@ -657,18 +657,236 @@ static int run_full_profile(void) {
 	return EXIT_SUCCESS;
 }
 
+#define COVERAGE_GRID_STEP_DAYS 4.0
+#define COVERAGE_NEAR_OPTIMAL 0.50
+#define COVERAGE_PROMINENCE 0.03
+#define COVERAGE_BASIN_DAYS 8.0
+#define COVERAGE_TIGHT 0.02
+#define COVERAGE_REPORTED_FAMILIES 15
+
+typedef struct CoverageRoute {
+	double flyby_offset, arrival_offset, objective;
+} CoverageRoute;
+
+static int compare_coverage_routes(const void *left, const void *right) {
+	double a = ((const CoverageRoute *)left)->objective;
+	double b = ((const CoverageRoute *)right)->objective;
+	return (a > b) - (a < b);
+}
+
+static const double *coverage_sort_grid;
+
+static int compare_grid_cells(const void *left, const void *right) {
+	double a = coverage_sort_grid[*(const int *)left];
+	double b = coverage_sort_grid[*(const int *)right];
+	return (a > b) - (a < b);
+}
+
+// Informational: compares the search with a dense grid of the exact objective on one small mission.
+static int run_coverage_reference(CelestSystem *system, Body *departure_body, Body *flyby_body,
+		Body *arrival_body, double departure_jd, double hohmann_duration) {
+	Body *flyby_bodies[] = {flyby_body, arrival_body};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd;
+	calc_data.jd_max_arr = departure_jd + 1.5 * hohmann_duration;
+	calc_data.max_duration = calc_data.jd_max_arr - departure_jd;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9, .max_depdv = 1e9, .max_satdv = 1e9,
+		.dep_periapsis = departure_body->atmo_alt + 50000,
+		.arr_periapsis = arrival_body->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body,
+		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 2
+	};
+	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	Itin_Calc_Results results = search_for_itineraries(calc_data);
+
+	int exit_code = EXIT_FAILURE;
+	CoverageRoute *found = NULL, *minima = NULL;
+	double *grid = NULL;
+	int found_count = 0, minima_count = 0;
+	int total_itineraries = 0;
+	for(int i = 0; i < results.num_deps; i++)
+		total_itineraries += get_number_of_itineraries(results.departures[i]);
+	found = malloc((size_t)(total_itineraries > 0 ? total_itineraries : 1) * sizeof(*found));
+	struct ItinStep **arrivals = malloc((size_t)(total_itineraries > 0 ? total_itineraries : 1) * sizeof(*arrivals));
+	if(found == NULL || arrivals == NULL) { free(arrivals); goto cleanup; }
+	for(int i = 0; i < results.num_deps; i++) {
+		int stored = 0;
+		store_itineraries_in_array(results.departures[i], arrivals, &stored);
+		for(int j = 0; j < stored; j++) {
+			struct ItinStep *leaf = arrivals[j];
+			if(leaf->prev == NULL || leaf->prev->prev == NULL || leaf->prev->prev->prev != NULL ||
+				leaf->prev->body != flyby_body) continue;
+			double objective = score_powered_arrival_route(leaf, &calc_data, flyby_body);
+			if(!isfinite(objective) || objective >= DBL_MAX) continue;
+			found[found_count++] = (CoverageRoute){leaf->prev->date - departure_jd,
+				leaf->date - departure_jd, objective};
+		}
+	}
+	free(arrivals);
+
+	const double step = COVERAGE_GRID_STEP_DAYS;
+	int n = (int)floor((calc_data.max_duration - POWERED_TEST_MIN_LEG_DAYS) / step) + 1;
+	grid = malloc((size_t)n * n * sizeof(*grid));
+	if(n <= 0 || grid == NULL) goto cleanup;
+	Body *bodies[] = {departure_body, flyby_body, arrival_body};
+	unsigned long long evaluations = 0;
+	int feasible_cells = 0;
+	double reference_best = DBL_MAX;
+	for(int i = 0; i < n; i++) {
+		for(int j = 0; j < n; j++) {
+			double flyby_offset = POWERED_TEST_MIN_LEG_DAYS + i * step;
+			double arrival_offset = POWERED_TEST_MIN_LEG_DAYS + j * step;
+			grid[(size_t)i * n + j] = DBL_MAX;
+			if(arrival_offset < flyby_offset + POWERED_TEST_MIN_LEG_DAYS ||
+				arrival_offset > calc_data.max_duration) continue;
+			double times[] = {departure_jd, departure_jd + flyby_offset, departure_jd + arrival_offset};
+			double objective = evaluate_powered_flyby_route_objective(&calc_data, bodies, times, 3);
+			evaluations++;
+			if(!isfinite(objective) || objective >= DBL_MAX) continue;
+			grid[(size_t)i * n + j] = objective;
+			feasible_cells++;
+			if(objective < reference_best) reference_best = objective;
+		}
+	}
+	if(feasible_cells == 0) goto cleanup;
+
+	// A family is a valley of the objective surface: two minima stay separate only if the saddle
+	// between them rises at least COVERAGE_PROMINENCE above the shallower valley floor.
+	int cells = n * n;
+	int *order = malloc((size_t)feasible_cells * sizeof(*order));
+	int *parent = malloc((size_t)cells * sizeof(*parent));
+	char *seen = calloc((size_t)cells, 1);
+	minima = malloc((size_t)feasible_cells * sizeof(*minima));
+	if(order == NULL || parent == NULL || seen == NULL || minima == NULL) {
+		free(order); free(parent); free(seen);
+		goto cleanup;
+	}
+	int ordered = 0;
+	for(int c = 0; c < cells; c++) {
+		parent[c] = c;
+		if(grid[c] < DBL_MAX) order[ordered++] = c;
+	}
+	coverage_sort_grid = grid;
+	qsort(order, (size_t)ordered, sizeof(*order), compare_grid_cells);
+	double near_optimal_limit = reference_best * (1 + COVERAGE_NEAR_OPTIMAL);
+	for(int k = 0; k < ordered; k++) {
+		int cell = order[k];
+		int roots[8], root_count = 0;
+		for(int di = -1; di <= 1; di++)
+			for(int dj = -1; dj <= 1; dj++) {
+				int ni = cell / n + di, nj = cell % n + dj;
+				if((di == 0 && dj == 0) || ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+				int neighbour = ni * n + nj;
+				if(!seen[neighbour]) continue;
+				int root = neighbour;
+				while(parent[root] != root) {
+					parent[root] = parent[parent[root]];
+					root = parent[root];
+				}
+				int known = 0;
+				for(int r = 0; r < root_count; r++) known |= roots[r] == root;
+				if(!known) roots[root_count++] = root;
+			}
+		seen[cell] = 1;
+		if(root_count == 0) continue;
+		int oldest = roots[0];
+		for(int r = 1; r < root_count; r++)
+			if(grid[roots[r]] < grid[oldest]) oldest = roots[r];
+		parent[cell] = oldest;
+		for(int r = 0; r < root_count; r++) {
+			if(roots[r] == oldest) continue;
+			double floor_value = grid[roots[r]];
+			if(grid[cell] - floor_value >= COVERAGE_PROMINENCE * floor_value && floor_value <= near_optimal_limit)
+				minima[minima_count++] = (CoverageRoute){
+					POWERED_TEST_MIN_LEG_DAYS + (roots[r] / n) * step,
+					POWERED_TEST_MIN_LEG_DAYS + (roots[r] % n) * step, floor_value};
+			parent[roots[r]] = oldest;
+		}
+	}
+	for(int c = 0; c < cells; c++)
+		if(seen[c] && parent[c] == c && grid[c] <= near_optimal_limit)
+			minima[minima_count++] = (CoverageRoute){POWERED_TEST_MIN_LEG_DAYS + (c / n) * step,
+				POWERED_TEST_MIN_LEG_DAYS + (c % n) * step, grid[c]};
+	free(order); free(parent); free(seen);
+	qsort(minima, (size_t)minima_count, sizeof(*minima), compare_coverage_routes);
+	double search_best = DBL_MAX;
+	for(int i = 0; i < found_count; i++)
+		if(found[i].objective < search_best) search_best = found[i].objective;
+	printf("Coverage reference (Earth-Venus-Jupiter, one departure): grid step %.1f d, %llu evaluations, %d feasible cells\n",
+		step, evaluations, feasible_cells);
+	printf("Reference best %.1f m/s; search returned %d routes of this sequence, best %.1f m/s\n",
+		reference_best, found_count, search_best);
+	printf("Powered seeds added %llu, encounter searches skipped after budget %llu\n",
+		results.powered_seed_stats.seeds_added, results.powered_seed_stats.searches_budget_skipped);
+	{
+		// Mirrors the first-leg duration window used by the search (calc_itins_from_departure).
+		OSV dep_state = osv_from_elements(departure_body->orbit, departure_jd);
+		OSV flyby_state = osv_from_elements(flyby_body->orbit, departure_jd);
+		double r0 = mag_vec3(dep_state.r), r1 = mag_vec3(flyby_state.r);
+		double hohmann_days = calc_hohmann_transfer(r0, r1, system->cb).dur / 86400;
+		double ratio = r1 / r0;
+		double window_days = (4 * (ratio - 0.85) * (ratio - 0.85) + 1.5) * hohmann_days;
+		if(window_days / hohmann_days > 3) window_days = 3 * hohmann_days;
+		printf("First-leg grid to %s covers %.0f to %.0f days after departure\n",
+			flyby_body->name, 0.4 * hohmann_days, window_days);
+	}
+	int in_basin = 0, tight = 0;
+	for(int i = 0; i < minima_count; i++) {
+		double best_in_basin = DBL_MAX;
+		int routes_in_basin = 0;
+		for(int k = 0; k < found_count; k++) {
+			if(fabs(found[k].flyby_offset - minima[i].flyby_offset) > COVERAGE_BASIN_DAYS ||
+				fabs(found[k].arrival_offset - minima[i].arrival_offset) > COVERAGE_BASIN_DAYS) continue;
+			routes_in_basin++;
+			if(found[k].objective < best_in_basin) best_in_basin = found[k].objective;
+		}
+		int covered = routes_in_basin > 0;
+		int is_tight = covered && best_in_basin <= minima[i].objective * (1 + COVERAGE_TIGHT);
+		in_basin += covered;
+		tight += is_tight;
+		if(i < COVERAGE_REPORTED_FAMILIES) {
+			if(covered)
+				printf("  family %2d: flyby +%4.0f d, arrival +%4.0f d, reference %.1f m/s, search %.1f m/s (%d routes) %s\n",
+					i + 1, minima[i].flyby_offset, minima[i].arrival_offset, minima[i].objective,
+					best_in_basin, routes_in_basin, is_tight ? "COVERED" : "found, not refined to within 2%");
+			else
+				printf("  family %2d: flyby +%4.0f d, arrival +%4.0f d, reference %.1f m/s, search returned none  MISSED\n",
+					i + 1, minima[i].flyby_offset, minima[i].arrival_offset, minima[i].objective);
+		}
+	}
+	printf("Families within %.0f%% of the reference best: %d; basin covered %d/%d; within %.0f%% of reference %d/%d\n",
+		COVERAGE_NEAR_OPTIMAL * 100, minima_count, in_basin, minima_count,
+		COVERAGE_TIGHT * 100, tight, minima_count);
+	exit_code = EXIT_SUCCESS;
+
+cleanup:
+	free(found);
+	free(grid);
+	free(minima);
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	return exit_code;
+}
+
 int main(int argc, char **argv) {
 	if(argc > 1 && strcmp(argv[argc - 1], "--audit-rejections") == 0) {
 		audit_requested = 1;
 		set_powered_rejection_audit_enabled(1);
 		argc--;
 	}
+	int coverage_requested = argc == 2 && strcmp(argv[1], "--coverage-reference") == 0;
+	if(coverage_requested) argc = 1;
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
 		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks] [--audit-rejections]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks|--coverage-reference] [--audit-rejections]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -694,6 +912,12 @@ int main(int argc, char **argv) {
 		mag_vec3(departure_state.r), mag_vec3(arrival_state.r), system->cb).dur / 86400;
 	double min_transfer_duration = 0.4 * hohmann_duration;
 	double max_arrival_jd = departure_jd + min_transfer_duration + 0.25;
+	if(coverage_requested) {
+		int coverage_result = run_coverage_reference(system, departure_body, flyby_body,
+			arrival_body, departure_jd, hohmann_duration);
+		free_celestial_system(system);
+		return coverage_result;
+	}
 	int legacy_nodes, legacy_itins, izzo_nodes, izzo_itins;
 
 	int legacy_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,

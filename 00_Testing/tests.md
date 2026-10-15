@@ -73,6 +73,16 @@ rejected routes are repaired, recovered routes reach refinement, and counts stay
 consistent (recovered at most attempted, attempted at most rejected). The unit
 suite also checks that a 0.5 m/s excess-speed change keeps a powered burn.
 
+Search coverage reference (informational, not part of ctest): run
+`KMATSearchIntegration --coverage-reference` from `build`. It scores a dense grid
+(4-day step) of flyby and arrival dates for Earth-Venus-Jupiter with the exact
+objective, merges the grid into valley families (a saddle must rise 3% above the
+shallower valley floor to separate two), keeps families within 50% of the best,
+and reports which ones the search returns routes for (8-day window). Measured on
+the default fixture: 6 families, 3 covered, and the first-leg grid reaches 59 to
+229 days. Raising the seed budget or restricting refinement to local steps did not
+cover more, so coverage there is limited by first-leg reach, not seed budget.
+
 Local Windows RelWithDebInfo measurements, profiling enabled:
 
 | Metric | Branch HEAD before edits | Budgeted implementation |
