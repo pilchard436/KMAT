@@ -38,3 +38,81 @@
 - itinerary is valid (Periapsides etc.)
 ## Tests:
 - Load number of different .itin files
+
+# Budgeted powered-flyby search (2026-10-15)
+
+The opt-in rejected-route audit and its measured recovery rates are documented
+in [rejection_audit.md](rejection_audit.md). Run its focused regression with
+`ctest --test-dir build --output-on-failure -R KMATRejectionAudit`.
+
+Build and run the focused checks from the repository root:
+
+```powershell
+cmake --build build --target KMAT KMATSearchIntegration KMATUnitTests -j 6
+ctest --test-dir build --output-on-failure -R '^(KMATUnitTests|KMATSearchIntegration)$' --timeout 60
+```
+
+The unit fixture checks that an infeasible cheapest estimate falls back to a later
+date, duplicates do not consume shortlist capacity, and a wholly infeasible bucket
+stops within three evaluations. The search integration checks distinct
+speed-changing dates before optimization, both Lambert solvers, and full mission
+objective quality against a coarse grid and an unpowered baseline.
+
+The full-year profile also requires that no itinerary is pruned by the final leaf
+filter after optimization (`powered_itineraries_pruned == 0`), that repair stays
+within its 64-route cap, and that the cutoff challenge refines between 1 and 32
+routes. Production runs print a `Rejected-route repair:` line with initial
+rejections, sampled/recovered/competing repairs, and cutoff-challenge counts.
+
+The quick Earth-Venus-Jupiter run recomputes each returned route's objective from
+its encounter dates and compares it with the objective implied by the stored node
+velocities; the worst mismatch must stay within 0.1 m/s. This catches stale
+velocities from route write-back: reintroducing the old suffix-only write-back
+raises the mismatch from 0.000 to about 849,000 m/s. The same run requires that
+rejected routes are repaired, recovered routes reach refinement, and counts stay
+consistent (recovered at most attempted, attempted at most rejected). The unit
+suite also checks that a 0.5 m/s excess-speed change keeps a powered burn.
+
+Local Windows RelWithDebInfo measurements, profiling enabled:
+
+| Metric | Branch HEAD before edits | Budgeted implementation |
+| --- | ---: | ---: |
+| Bounded integration wall time | 12.12 s | 6.68-8.03 s |
+| Completed candidate routes | 824 | 646 |
+| Valid SOI-scored routes | 539 | 428 |
+| Best full objective | 26570.869 m/s | 26570.869 m/s |
+| Initial Lambert calls | 712 | 712 |
+| Recursive Lambert calls | 42296 | 42169 |
+
+The updated run used 1749 seed feasibility evaluations, 512 powered seeds including
+eight extra branches, 15332 full route objective evaluations, and 33 routes with
+multiple timing starts. It reported 1237 feasible bucket alternatives omitted by
+branching budgets, 396 encounters that skipped powered sampling after exhausting
+the departure budget, and zero exhausted per-route refinement budgets. The smaller
+candidate set is an explicit runtime/coverage tradeoff; the best objective is
+preserved on this fixture. Both focused CTest targets passed;
+the unit executable reports 93 checks. These are individual local timings, not a
+statistical performance guarantee.
+
+The full-year ephemeris profile (`KMATSearchIntegration --full-profile`) completed
+in 61.65 seconds after adding the total powered-seed budget. It passed constraints
+for every returned route, with 6763 nodes, 3346 itineraries, 500 corrected routes,
+and best corrected objective 4712.109 m/s. It used 847510 initial and 129132019
+recursive Lambert solves. Scoring took 1.53 seconds and timing refinement 4.87
+seconds. It added 187392 powered seeds across 366 departure dates, skipped powered
+sampling at 1764811 encounters after budget exhaustion, and reported 423371
+feasible bucket alternatives omitted by branching budgets.
+
+Baseline HEAD and the intermediate version with only an extra-branch budget were
+both stopped at approximately 166 seconds without completing a departure date.
+The full-profile harness checks returned route constraints and a finite,
+within-budget corrected objective instead of requiring a fixed route count.
+The new budgets do not bound the existing near-unpowered recursive search, and
+these results do not prove exhaustive coverage or preserve every baseline route.
+The broad `KMATIntegrationTests` application suite was stopped after exceeding a
+minute on the intermediate version and is not claimed as passing.
+
+The final saved mission benchmarks (`KMATSearchIntegration --mission-benchmarks`)
+both passed in 46.53 seconds combined: Jupiter returned 4191 itineraries in 13.19
+seconds, with best corrected objective 4623.567 m/s; Saturn returned 3090
+itineraries in 33.29 seconds, with best corrected objective 4718.541 m/s.

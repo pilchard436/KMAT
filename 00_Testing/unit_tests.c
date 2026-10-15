@@ -7,11 +7,42 @@
 #include "tools/itinerary_date_limits.h"
 #include "tools/itinerary_reference_defaults.h"
 #include "gui/transfer_app/porkchop_analyzer_model.h"
+#include "orbit_calculator/powered_seed_selection.h"
 
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+
+static double seed_fixture_cost(const PoweredFlybySeed *seed, void *context) {
+    if(context != NULL) return HUGE_VAL;
+    /* The cheapest estimate is infeasible; the next date is physically usable. */
+    return seed->dt == 10 ? HUGE_VAL : 42;
+}
+
+static int check_seed_fallback(void) {
+    PoweredSeedBucket bucket = {0};
+    retain_powered_seed(&bucket, (PoweredFlybySeed){.dt = 30, .estimated_burn = 3});
+    retain_powered_seed(&bucket, (PoweredFlybySeed){.dt = 10, .estimated_burn = 1});
+    retain_powered_seed(&bucket, (PoweredFlybySeed){.dt = 20, .estimated_burn = 2});
+    retain_powered_seed(&bucket, (PoweredFlybySeed){.dt = 10, .estimated_burn = 1});
+    retain_powered_seed(&bucket, (PoweredFlybySeed){.dt = 40, .estimated_burn = 4});
+    PoweredFlybySeed selected;
+    double cost;
+    unsigned long long evaluations = 0;
+    if(bucket.count != 3 || !select_powered_seed(&bucket, seed_fixture_cost, NULL,
+            &selected, &cost, &evaluations) || selected.dt != 20 || cost != 42 || evaluations != 2) {
+        printf("FAIL: powered seed fallback must survive an infeasible cheapest estimate\n");
+        return 1;
+    }
+    evaluations = 0;
+    if(select_powered_seed(&bucket, seed_fixture_cost, &bucket,
+            &selected, &cost, &evaluations) || evaluations != POWERED_SEEDS_PER_BUCKET) {
+        printf("FAIL: infeasible seed bucket must stop at its evaluation bound\n");
+        return 1;
+    }
+    return 0;
+}
 
 static int expect_near(const char *name, double actual, double expected, double tolerance) {
     if (fabs(actual - expected) <= tolerance) return 0;
@@ -59,8 +90,8 @@ static int cancel_requested(void *context) {
 int main(void) {
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
-    const int total_checks = 92;
-    int failures = 0;
+    const int total_checks = 94;
+    int failures = check_seed_fallback();
 
     failures += expect_int("Izzo is the default Lambert solver", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
     set_lambert_solver_method(LAMBERT_METHOD_LEGACY);
@@ -173,6 +204,13 @@ int main(void) {
     failures += expect_int("equal-speed powered-flyby model is feasible", equal_speed_flyby_valid, 1);
     failures += expect_near("equal-speed powered flyby requires effectively zero burn",
                             powered_flyby_result.burn_delta_v, 0, 1e-3);
+    Vector3 near_equal_speed_outgoing_vinf = vec3(6000.5 * cos(flyby_turn_angle),
+        6000.5 * sin(flyby_turn_angle), 0);
+    int near_equal_speed_flyby_valid = calculate_powered_flyby(incoming_vinf,
+        near_equal_speed_outgoing_vinf, vec3(0, 0, 0), &powered_flyby_body,
+        flyby_minimum_radius, &powered_flyby_result);
+    failures += expect_int("sub-1 m/s speed difference retains a powered burn",
+        near_equal_speed_flyby_valid && powered_flyby_result.burn_delta_v > 1e-3, 1);
     double flyby_inclination = deg2rad(20);
     Vector3 unequal_speed_outgoing_vinf = vec3(6500 * cos(flyby_turn_angle),
         6500 * sin(flyby_turn_angle) * cos(flyby_inclination),

@@ -13,6 +13,60 @@
 #define POWERED_TEST_MIN_LEG_DAYS 10.0
 #define POWERED_TEST_GRID_RELATIVE_TOLERANCE 0.10
 
+static int audit_requested;
+
+static int validate_rejection_audit(int require_recovery) {
+	if(!audit_requested) return 1;
+	PoweredRejectionAudit audit = get_powered_rejection_audit();
+	if(!audit.completed) return 0;
+	PoweredRejectionAuditGroup groups[] = {audit.initial_failure, audit.refinement_cutoff};
+	for(int i = 0; i < 2; i++) {
+		PoweredRejectionAuditGroup group = groups[i];
+		int expected = group.population < POWERED_AUDIT_SAMPLE_SIZE ? (int)group.population : POWERED_AUDIT_SAMPLE_SIZE;
+		if(group.sampled != expected || group.feasible > group.sampled ||
+			group.beats_retained_best > group.feasible || group.beats_retained_worst > group.feasible ||
+			group.evaluations > (unsigned long long)group.sampled * POWERED_AUDIT_OBJECTIVES_PER_ROUTE) return 0;
+		if(group.feasible > 0 && (!isfinite(group.best_delta_v) || group.best_delta_v >= DBL_MAX)) return 0;
+	}
+	if(require_recovery && audit.initial_failure.feasible == 0) return 0;
+	return 1;
+}
+
+static int check_speed_changing_seed_generation(CelestSystem *system, Body *departure,
+		Body *flyby, Body *target, double departure_jd) {
+	OSV dep = osv_from_elements(departure->orbit, departure_jd);
+	struct ItinStep root = {.body = departure, .date = departure_jd};
+	PoweredSeedSearchStats stats = {0};
+	begin_powered_seed_search(&stats);
+	int found_diverse_seeds = 0;
+	for(int days = 120; days <= 600 && !found_diverse_seeds; days += 120) {
+		OSV encounter = osv_from_elements(flyby->orbit, departure_jd + days);
+		Lambert3 inbound = calc_lambert3_selected(dep.r, encounter.r, days * 86400.0, system->cb);
+		if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
+			inbound.success == LAMBERT_MAX_ITERATIONS) continue;
+		struct ItinStep step = {.body = flyby, .date = departure_jd + days,
+			.r = encounter.r, .v_arr = inbound.v1, .v_body = encounter.v, .prev = &root};
+		find_viable_flybys(&step, system, target, 100 * 86400.0, 1000 * 86400.0);
+		int speed_changing = 0;
+		for(int i = 0; i < step.num_next_nodes; i++) {
+			struct ItinStep *next = step.next[i];
+			double difference = fabs(mag_vec3(subtract_vec3(step.v_arr, step.v_body)) -
+				mag_vec3(subtract_vec3(next->v_dep, step.v_body)));
+			if(difference > 1.0) speed_changing++;
+			free_itinerary(next);
+		}
+		free(step.next);
+		found_diverse_seeds = speed_changing >= 2;
+	}
+	begin_powered_seed_search(NULL);
+	if(!found_diverse_seeds || stats.alternatives_added == 0) {
+		fprintf(stderr, "Powered seed generation failed to retain distinct speed-changing dates\n");
+		return 0;
+	}
+	printf("Powered seed generation retained distinct speed-changing dates before route optimization\n");
+	return 1;
+}
+
 static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
         double min_departure_jd, double max_arrival_jd, enum LambertSolverMethod solver,
         int *num_nodes, int *num_itins) {
@@ -236,6 +290,35 @@ static double find_unpowered_grid_baseline(CelestSystem *system, Body *departure
 	return best_baseline;
 }
 
+// Compares the objective implied by each stored node with one recomputed from encounter dates alone.
+static void measure_stored_objective_mismatch(const Itin_Calc_Results *results,
+		const Itin_Calc_Data *calc_data, Body *flyby_body, double *worst_mismatch,
+		int *unscorable_routes, int *checked_routes) {
+	*worst_mismatch = 0;
+	*unscorable_routes = 0;
+	*checked_routes = 0;
+	for(int i = 0; i < results->num_deps; i++) {
+		int count = get_number_of_itineraries(results->departures[i]);
+		struct ItinStep **leaves = malloc((size_t)count * sizeof(*leaves));
+		if(leaves == NULL) { *worst_mismatch = DBL_MAX; return; }
+		int stored = 0;
+		store_itineraries_in_array(results->departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			struct PorkchopPoint point = create_porkchop_point(leaves[j],
+				calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
+			double stored_objective = point.dv_dep + point.dv_dsm + point.dv_flyby;
+			double recomputed = score_powered_arrival_route(leaves[j], calc_data, flyby_body);
+			(*checked_routes)++;
+			if(!isfinite(stored_objective) || !isfinite(recomputed) || recomputed >= DBL_MAX) {
+				(*unscorable_routes)++;
+				continue;
+			}
+			*worst_mismatch = fmax(*worst_mismatch, fabs(stored_objective - recomputed));
+		}
+		free(leaves);
+	}
+}
+
 static int run_powered_flyby_objective_regression(CelestSystem *system,
 		Body *departure_body, Body *flyby_body, Body *arrival_body,
 		double departure_jd, double hohmann_duration) {
@@ -264,6 +347,16 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	if(results.num_deps <= 0 || results.num_itins <= 0) goto cleanup;
+	if(!validate_rejection_audit(1)) {
+		fprintf(stderr, "Rejected-route audit failed recovery or sampling/work-budget checks\n");
+		goto cleanup;
+	}
+	if(results.powered_seed_stats.seeds_added > POWERED_SEEDS_PER_DEPARTURE ||
+		results.powered_seed_stats.alternatives_added > POWERED_EXTRA_SEEDS_PER_DEPARTURE ||
+		results.powered_seed_stats.searches_budget_skipped == 0) {
+		fprintf(stderr, "Powered search failed its per-departure budget/exhaustion checks\n");
+		goto cleanup;
+	}
 
 	struct ItinStep **arrivals = malloc((size_t)results.num_itins * sizeof(*arrivals));
 	if(arrivals == NULL) goto cleanup;
@@ -271,20 +364,32 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	for(int i = 0; i < results.num_deps; i++)
 		store_itineraries_in_array(results.departures[i], arrivals, &arrival_count);
 	int has_valid_powered_route = 0;
-	for(int i = 0; i < arrival_count && !has_valid_powered_route; i++) {
+	int has_speed_changing_powered_route = 0;
+	for(int i = 0; i < arrival_count && !has_speed_changing_powered_route; i++) {
+		struct ItinStep *outbound = arrivals[i];
 		for(struct ItinStep *step = arrivals[i]->prev; step != NULL && step->prev != NULL;
-			step = step->prev) {
+			outbound = step, step = step->prev) {
 			if(step->body != flyby_body) continue;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby_body->radius + flyby_body->atmo_alt + 1e4;
-			if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body,
+			if(calculate_powered_flyby(step->v_arr, outbound->v_dep, step->v_body,
 				flyby_body, minimum_periapsis, &flyby_result) &&
-				isfinite(flyby_result.burn_delta_v)) has_valid_powered_route = 1;
-			break;
+				isfinite(flyby_result.burn_delta_v)) {
+				has_valid_powered_route = 1;
+				Vector3 incoming_excess = subtract_vec3(step->v_arr, step->v_body);
+				Vector3 outgoing_excess = subtract_vec3(outbound->v_dep, step->v_body);
+				double excess_speed_change = fabs(mag_vec3(outgoing_excess) - mag_vec3(incoming_excess));
+				if(excess_speed_change > 1.0 && flyby_result.burn_delta_v > POWERED_TEST_DV_TOLERANCE)
+					has_speed_changing_powered_route = 1;
+			}
+			if(has_speed_changing_powered_route) break;
 		}
 	}
 	free(arrivals);
-	if(!has_valid_powered_route) goto cleanup;
+	if(!has_valid_powered_route || !has_speed_changing_powered_route) {
+		fprintf(stderr, "Powered search did not return a valid flyby with |delta V-infinity| > 1 m/s\n");
+		goto cleanup;
+	}
 
 	double best_search_objective = DBL_MAX;
 	int optimized_itinerary_count = 0;
@@ -300,6 +405,30 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 			if(objective < best_search_objective) best_search_objective = objective;
 		}
 		free(optimized_arrivals);
+	}
+	{
+		double worst_mismatch;
+		int unscorable, checked;
+		measure_stored_objective_mismatch(&results, &calc_data, flyby_body, &worst_mismatch, &unscorable, &checked);
+		// Stale node velocities (the old suffix-only write-back) show up as a large mismatch here.
+		if(checked == 0 || checked - unscorable == 0 || worst_mismatch > POWERED_TEST_DV_TOLERANCE) {
+			fprintf(stderr, "Stored itinerary data disagrees with the date-based objective: %d checked, %d unscorable, worst mismatch %.6f m/s\n",
+				checked, unscorable, worst_mismatch);
+			goto cleanup;
+		}
+		if(results.powered_initial_rejections == 0 || results.powered_repairs_attempted == 0 ||
+			results.powered_repairs_recovered == 0 || results.powered_repairs_competing == 0 ||
+			results.powered_repairs_recovered > results.powered_repairs_attempted ||
+			(unsigned long long)results.powered_repairs_attempted > results.powered_initial_rejections ||
+			results.powered_repairs_competing > results.powered_repairs_recovered) {
+			fprintf(stderr, "Rejected-route repair failed its recovery checks: %llu rejections, %d attempted, %d recovered, %d competing\n",
+				results.powered_initial_rejections, results.powered_repairs_attempted,
+				results.powered_repairs_recovered, results.powered_repairs_competing);
+			goto cleanup;
+		}
+		printf("Stored itinerary data matches the date-based objective (%d routes, worst mismatch %.6f m/s); repaired %d of %d rejected routes\n",
+			checked - unscorable, worst_mismatch, results.powered_repairs_recovered,
+			results.powered_repairs_attempted);
 	}
 	double grid_flyby_offsets[] = {120, 240, 360, 480, 600};
 	double grid_arrival_offsets[] = {700, 850, 1000, 1150, 1300, 1400};
@@ -489,14 +618,38 @@ static int run_full_profile(void) {
 	};
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	int valid = validate_rejection_audit(0) && results.num_itins > 0 && results.powered_routes_corrected > 0 &&
+		results.powered_itineraries_pruned == 0 &&
+		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
+		results.powered_repairs_recovered <= results.powered_repairs_attempted &&
+		results.powered_challenges_refined > 0 && results.powered_challenges_refined <= POWERED_CHALLENGE_SLOTS &&
+		isfinite(results.best_powered_refined_total_dv) &&
+		results.best_powered_refined_total_dv <= calc_data.dv_filter.max_totdv;
+	for(int i = 0; i < results.num_deps; i++) {
+		int count = get_number_of_itineraries(results.departures[i]);
+		struct ItinStep **leaves = malloc((size_t)count * sizeof(*leaves));
+		if(leaves == NULL) { valid = 0; continue; }
+		int stored = 0;
+		store_itineraries_in_array(results.departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			struct PorkchopPoint point = create_porkchop_point(leaves[j],
+				calc_data.dv_filter.dep_periapsis, calc_data.dv_filter.arr_periapsis);
+			double total = point.dv_dep + point.dv_flyby + point.dv_dsm;
+			if(leaves[j]->body != arrival_body || !isfinite(total) ||
+				total > calc_data.dv_filter.max_totdv + POWERED_TEST_DV_TOLERANCE ||
+				point.dv_dep > calc_data.dv_filter.max_depdv + POWERED_TEST_DV_TOLERANCE ||
+				point.dv_dsm > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
+				point.dep_date < calc_data.jd_min_dep || point.dep_date > calc_data.jd_max_dep ||
+				leaves[j]->date > calc_data.jd_max_arr || point.dur > calc_data.max_duration)
+				valid = 0;
+		}
+		free(leaves);
+	}
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	free_celestial_system(system);
-	const int expected_nodes = 7575;
-	const int expected_itins = 3751;
-	if(results.num_nodes != expected_nodes || results.num_itins != expected_itins) {
-		fprintf(stderr, "SOI-pruned profile mismatch: got %d nodes/%d itineraries; expected %d/%d\n",
-			results.num_nodes, results.num_itins, expected_nodes, expected_itins);
+	if(!valid) {
+		fprintf(stderr, "Full-profile search failed route validity/quality checks\n");
 		return EXIT_FAILURE;
 	}
 	printf("UI-free full-profile search passed: %d nodes, %d itineraries\n",
@@ -505,12 +658,17 @@ static int run_full_profile(void) {
 }
 
 int main(int argc, char **argv) {
+	if(argc > 1 && strcmp(argv[argc - 1], "--audit-rejections") == 0) {
+		audit_requested = 1;
+		set_powered_rejection_audit_enabled(1);
+		argc--;
+	}
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
 		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks] [--audit-rejections]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -544,9 +702,11 @@ int main(int argc, char **argv) {
 		max_arrival_jd, LAMBERT_METHOD_IZZO, &izzo_nodes, &izzo_itins);
 	int powered_valid = run_powered_flyby_objective_regression(system, departure_body,
 		flyby_body, arrival_body, departure_jd, hohmann_duration);
+	int seeds_valid = check_speed_changing_seed_generation(system, departure_body,
+		flyby_body, arrival_body, departure_jd);
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || !powered_valid ||
+	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid ||
 		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
 		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
 			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);

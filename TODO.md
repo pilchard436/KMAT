@@ -1,92 +1,49 @@
-# TODO
+﻿# TODO
 
 ## Current Context
 
-- Powered flybys use patched-conic, two-body hyperbola propagation from SOI entry to periapsis and out to SOI exit. Route matching uses Lambert legs between SOI boundary states and iterates flyby timing and geometry.
-- Powered burns are applied at periapsis. The radial component is zero by construction; tangential and normal components are supported.
-- Preserve user-configured date and delta-v limits as the intentional route filters. Internal search approximations and iteration limits should not silently exclude otherwise feasible routes.
+- Powered flybys use patched-conic, two-body hyperbola propagation from SOI entry through periapsis to SOI exit. Lambert legs between SOI boundaries iterate timing and geometry.
+- Powered burns occur at periapsis; tangential and normal components are supported, with zero radial component.
+- User date and delta-v limits remain physical mission constraints. Search budgets limit exploration and must be reported separately from infeasibility.
+
+## Speed-Changing Powered-Flyby Branch
+
+- [x] Generate powered candidates independently of the near-equal excess-speed root search.
+- [x] Retain three distinct estimated candidates per date bucket, falling back when cheaper candidates fail feasibility.
+- [x] Rank feasible bucket winners by calculated periapsis burn, retaining distinct dates with a bounded expansion budget.
+- [x] Bound timing-refinement objective evaluations and allocate extra starts to competitive routes and distinct body sequences.
+- [x] Fix regression traversal to scan until a speed-changing encounter is found, using the actual outbound route leg.
+- [x] Add fallback-selection and pre-optimization speed-changing seed coverage checks.
+- [x] Add an opt-in rejected-route audit with bounded reservoir sampling and timing repair. See `00_Testing/rejection_audit.md`; this measures optimizer-stage losses, not seed-budget or DSM coverage.
+- [x] Run the full-year profile with route-constraint and corrected-objective checks; the budgeted search completed in 61.7 seconds locally. Baseline HEAD was stopped at 166 seconds before any departure completed. This establishes practical runtime on this fixture, not exhaustive coverage.
+- [x] Repair a bounded, stratified sample of initially rejected routes and let recovered routes compete for refinement by repaired full-mission cost.
+- [x] Give 32 sampled cutoff-excluded routes extra refinement slots to challenge the 500-route cutoff.
+- [x] Write corrected routes as a full chain with `v_dep` on every node; the old suffix-only write-back left stale velocities and the final filter pruned the routes.
+- [ ] One-DSM-per-leg exploration, starting with a controlled case comparing total mission delta-v against no DSM.
+
+### Current Search Budgets
+
+- Four date buckets, three shortlist candidates per bucket; at most twelve full powered-flyby feasibility evaluations per encounter/next-body search.
+- At most 512 powered seeds per departure date, normally one per encounter/next-body search, with a second from another bucket while an eight-extra-branches budget remains. Both budgets reset independently for each departure date. Once 512 seeds are added, subsequent encounters keep the existing near-unpowered root search and skip powered sampling.
+- Bucket sampling retains the existing two subdivisions per conjunction/opposition interval. This is finite sampling, not exhaustive date coverage.
+- At most 500 routes receive timing refinement. Each receives at most 96 objective evaluations, excluding its initial SOI evaluation.
+- Up to 200 routes receive three timing starts if their initial objective is within 10% of the best selected initial objective or they introduce a different body sequence. Other routes use one start; all share the same per-route evaluation cap.
+- Up to 64 initially rejected routes (one reservoir slot per departure-date bin and body-sequence hash) get at most 144 timing-repair evaluations each, moving only their own dates. Recovered routes rank with the 500 by repaired cost; user limits are unchanged.
+- 32 routes sampled from those excluded by the cutoff are refined beyond the 500.
+- Logs report seed feasibility evaluations, added seeds, extra branches, skipped feasible bucket alternatives, encounters that skip powered sampling after budget exhaustion, objective evaluations, exhausted refinement budgets, and scoring/refinement wall time. Existing optional profiling reports Lambert calls.
+- These budgets bound additional branching and per-route refinement, not total recursive search runtime. Full feasibility scoring still visits all generated complete candidates.
 
 ## Parking Orbit
 
-- [ ] Add configuration for all six classical orbital elements: semi-major axis, eccentricity, inclination, RAAN, argument of periapsis, and true anomaly.
-- [ ] Add a separate parking-orbit editor window that can be opened from the main page.
-- [ ] Add a figure that updates to visualize the orbit as its elements change.
+- [ ] Add all six classical elements: semi-major axis, eccentricity, inclination, RAAN, argument of periapsis, and true anomaly.
+- [ ] Add a separate parking-orbit editor accessible from the main page.
+- [ ] Add a figure that updates as the elements change.
 
-## Powered-Flyby Search Coverage
+## Remaining Powered-Flyby Search Coverage
 
-- [ ] Review the `fabs(diff_vinf) < 1 m/s` flyby-generation gate in `orbit_calculator/itin_tool.c`. Generate powered-flyby candidates without requiring near-equal incoming and outgoing excess speeds.
-- [ ] Review the hardcoded 10-day minimum transfer-leg duration in `orbit_calculator/powered_flyby_optimizer.c`. Do not let it act as an undocumented user constraint.
-- [ ] Review the top-100 powered-route refinement limit. Ensure candidates outside the refinement set are not silently lost or misrepresented as fully SOI-corrected.
-- [ ] Review SOI periapsis and sampling bounds in `external/orbitlib/src/transfer.c`, including the 10 km clearance, 95%-of-SOI periapsis ceiling, 64-point search, and refinement limits. Avoid rejecting feasible geometry because of a coarse or arbitrary bound.
-- [ ] Measure and improve convergence-related route rejections in the iterative SOI/Lambert match. Distinguish numerical nonconvergence from physical infeasibility.
-- [ ] Add categorized route rejection counts for SOI geometry, convergence, configured date/time limits, departure delta-v, arrival delta-v, and total delta-v.
-- [ ] Use the full-profile UI-free search to quantify which otherwise feasible routes each internal cutoff excludes.
-
-
-
-The limitation is the route search: find_viable_flybys() only generates candidates when the incoming and outgoing excess-speed magnitudes differ by less than 1 m/s. So KMAT can model an unequal-speed powered flyby, but the main search does not seed routes that require a substantial 
-𝑉
-∞
-V 
-∞
-​
-  speed change.
-
-Don’t search for speed difference itself. Search over encounter dates, and at each date evaluate whether a powered flyby can connect the incoming and outgoing 
-V
-∞
-V 
-∞
-​
-  vectors.
-
-In KMAT’s find_viable_flybys(), for each sampled Lambert departure date:
-
-Compute incoming 
-V
-∞
-=
-v
-arr
-−
-v
-body
-V 
-∞
-​
- =v 
-arr
-​
- −v 
-body
-​
-  and outgoing 
-V
-∞
-=
-v
-Lambert
-,
-0
-−
-v
-body
-V 
-∞
-​
- =v 
-Lambert,0
-​
- −v 
-body
-​
-  at the current flyby body.
-Pass both vectors to calculate_powered_flyby(). It checks flyby geometry and SOI feasibility, and computes the required periapsis burn and radius. Don’t reject a candidate just because the magnitudes differ by more than 1 m/s.
-Retain several feasible dates across the search window, then rank/refine them using full mission Δv: departure burn + all powered-flyby burns + arrival/DSM burns.
-A speed-changing flyby is worth keeping only if its periapsis cost leads to a better feasible total mission objective. Validate the search with a small case where the incoming/outgoing 
-V
-∞
-V 
-∞
-​
-  magnitudes differ by more than 1 m/s and compare its result to a coarse date grid.
+- [ ] Review the undocumented 10-day minimum leg duration in search and SOI refinement.
+- [ ] Ensure routes outside the 500-route timing-refinement set are not misrepresented as SOI-corrected. Increasing a cap does not resolve this distinction.
+- [ ] Review the 10 km clearance, 95%-of-SOI periapsis ceiling, 64-point radius search, and refinement limits in external/orbitlib/src/transfer.c.
+- [ ] Distinguish SOI/Lambert nonconvergence from physical infeasibility and improve convergence-related route rejection.
+- [ ] Add rejection counts for SOI geometry, convergence, configured date/time limits, departure delta-v, arrival delta-v, and total delta-v.
+- [ ] Quantify coverage lost to each sampling/budget cutoff using the UI-free profile and objective-grid comparisons.

@@ -1,9 +1,22 @@
 #include "itin_tool.h"
 #include "double_swing_by.h"
+#include "powered_seed_selection.h"
 #include "tools/thread_pool.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define POWERED_FLYBY_SEED_SUBDIVISIONS 2
+
+static _Thread_local int extra_seed_budget;
+static _Thread_local int powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
+static _Thread_local PoweredSeedSearchStats *seed_search_stats;
+
+void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
+	extra_seed_budget = POWERED_EXTRA_SEEDS_PER_DEPARTURE;
+	powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
+	seed_search_stats = stats;
+}
 
 static int itinerary_search_cancelled(void *context) {
 	(void)context;
@@ -61,6 +74,68 @@ void calc_time_to_next_conjunction_and_opposition(Vector3 r0, OSV osv0_next, Bod
 	*next_opposition_dt = dt_opp;
 }
 
+static int evaluate_powered_flyby_seed(struct ItinStep *tf, CelestSystem *system,
+		Body *next_body, double dt, int right_side, PoweredFlybySeed *seed) {
+	double epoch = tf->date + dt / 86400;
+	seed->dt = dt;
+	seed->estimated_burn = HUGE_VAL;
+	seed->target_state = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(next_body->orbit, epoch) :
+		osv_from_ephem(next_body->ephem, next_body->num_ephems, epoch, system->cb);
+	if(!isfinite(seed->target_state.r.x) || !isfinite(seed->target_state.r.y) ||
+		!isfinite(seed->target_state.r.z) || !isfinite(seed->target_state.v.x) ||
+		!isfinite(seed->target_state.v.y) || !isfinite(seed->target_state.v.z)) return 0;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	ItinFlybyProfileStats *profile_stats = get_flyby_profile_stats(next_body);
+	if(profile_stats != NULL) {
+		if(right_side) profile_stats->right_evaluations++;
+		else profile_stats->left_evaluations++;
+	}
+	if(itin_search_lambert_counter != NULL) (*itin_search_lambert_counter)++;
+#else
+	(void)right_side;
+#endif
+	seed->transfer = calc_lambert3_selected_cancellable(tf->r, seed->target_state.r,
+		dt, system->cb, itinerary_search_cancelled, NULL);
+	if(itinerary_search_cancelled(NULL) ||
+		seed->transfer.success == LAMBERT_FAIL_NAN ||
+		seed->transfer.success == LAMBERT_FAIL_ECC ||
+		seed->transfer.success == LAMBERT_MAX_ITERATIONS ||
+		!isfinite(seed->transfer.v0.x) || !isfinite(seed->transfer.v0.y) ||
+		!isfinite(seed->transfer.v0.z) || !isfinite(seed->transfer.v1.x) ||
+		!isfinite(seed->transfer.v1.y) || !isfinite(seed->transfer.v1.z)) return 0;
+
+	Vector3 incoming = subtract_vec3(tf->v_arr, tf->v_body);
+	Vector3 outgoing = subtract_vec3(seed->transfer.v0, tf->v_body);
+	double incoming_speed = mag_vec3(incoming);
+	double outgoing_speed = mag_vec3(outgoing);
+	seed->diff_vinf = outgoing_speed - incoming_speed;
+	double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+	if(!(incoming_speed > 0) || !(outgoing_speed > 0) || !isfinite(seed->diff_vinf) ||
+		!(tf->body->mu > 0) ||
+		!(minimum_periapsis > 0)) return 0;
+	double periapsis_in_speed = sqrt(incoming_speed * incoming_speed +
+		2 * tf->body->mu / minimum_periapsis);
+	double periapsis_out_speed = sqrt(outgoing_speed * outgoing_speed +
+		2 * tf->body->mu / minimum_periapsis);
+	double direction_cosine = dot_vec3(incoming, outgoing) / (incoming_speed * outgoing_speed);
+	direction_cosine = fmax(-1, fmin(1, direction_cosine));
+	double estimate_squared = periapsis_in_speed * periapsis_in_speed +
+		periapsis_out_speed * periapsis_out_speed -
+		2 * periapsis_in_speed * periapsis_out_speed * direction_cosine;
+	seed->estimated_burn = sqrt(fmax(0, estimate_squared));
+	return isfinite(seed->estimated_burn);
+}
+
+static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
+	struct ItinStep *tf = context;
+	if(itinerary_search_cancelled(NULL)) return HUGE_VAL;
+	PoweredFlybyResult flyby;
+	if(!calculate_powered_flyby(tf->v_arr, seed->transfer.v0, tf->v_body,
+		tf->body, tf->body->radius + tf->body->atmo_alt + 1e4, &flyby)) return HUGE_VAL;
+	return flyby.burn_delta_v;
+}
+
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
 	if(itinerary_search_cancelled(NULL)) return;
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -87,43 +162,67 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 	
 	// x: dt, y: diff_vinf
 	DataArray2 *data = data_array2_create();
-	int max_new_steps = 100;
+	/* Preserve the existing 99 root candidates even when an extra seed is allowed. */
+	int max_root_steps = 99;
+	int max_new_steps = max_root_steps + 2;
 	struct ItinStep *new_steps[max_new_steps];
 	int counter = 0;
+	int seed_budget = extra_seed_budget > 0 ? 2 : 1;
+	if(seed_budget > powered_seed_budget) seed_budget = powered_seed_budget;
+	if(seed_budget == 0 && seed_search_stats) seed_search_stats->searches_budget_skipped++;
+	int interval_subdivisions = POWERED_FLYBY_SEED_SUBDIVISIONS;
+	PoweredSeedBucket seed_buckets[POWERED_SEED_BUCKETS] = {0};
+	double seed_time_range = max_dt - min_dt;
 
 	double t0 = tf->date;
 	double last_dt, dt, t1, diff_vinf;
 
-	Vector3 v_init = subtract_vec3(tf->v_arr, tf->v_body);
-	double v_init_magnitude = mag_vec3(v_init);
-
-	while(dt0 < max_dt && counter < max_new_steps && !itinerary_search_cancelled(NULL)) {
+	while(dt0 < max_dt && counter < max_root_steps &&
+		!itinerary_search_cancelled(NULL)) {
 		int right_side = 0;	// 0 = left, 1 = right
+		double interval_start = fmax(dt0, min_dt);
+		double interval_end = fmin(dt1, max_dt);
+		PoweredFlybySeed interval_samples[POWERED_FLYBY_SEED_SUBDIVISIONS + 1] = {0};
+		int interval_sample_valid[POWERED_FLYBY_SEED_SUBDIVISIONS + 1] = {0};
+		if(seed_budget > 0 && tf->prev != NULL && interval_end >= interval_start && seed_time_range > 0) {
+			for(int sample_index = 0; sample_index <= interval_subdivisions &&
+				!itinerary_search_cancelled(NULL); sample_index++) {
+				double fraction = (double)sample_index / interval_subdivisions;
+				double sample_dt = interval_start + fraction * (interval_end - interval_start);
+				PoweredFlybySeed *seed = &interval_samples[sample_index];
+				if(!evaluate_powered_flyby_seed(tf, system, next_body, sample_dt,
+				sample_index >= interval_subdivisions / 2, seed)) continue;
+				interval_sample_valid[sample_index] = 1;
+				int bucket = (int)(((sample_dt - min_dt) / seed_time_range) *
+					POWERED_SEED_BUCKETS);
+				if(bucket < 0) bucket = 0;
+				if(bucket >= POWERED_SEED_BUCKETS) bucket = POWERED_SEED_BUCKETS - 1;
+				retain_powered_seed(&seed_buckets[bucket], *seed);
+			}
+		}
 
-		for(int i = 0; i < 100 && !itinerary_search_cancelled(NULL); i++) {
+		for(int i = 0; i < 100 && counter < max_root_steps &&
+			!itinerary_search_cancelled(NULL); i++) {
 			if(i == 0) dt = dt0;
 			if(dt < min_dt) dt = min_dt;
 			if(dt > max_dt) dt = max_dt;
-#ifdef KMAT_ENABLE_SEARCH_PROFILE
-			if(profile_stats != NULL) {
-				if(right_side) profile_stats->right_evaluations++;
-				else profile_stats->left_evaluations++;
-			}
-#endif
-
 			t1 = t0 + dt / 86400;
-
-			OSV osv_arr = system->prop_method == ORB_ELEMENTS ?
-				osv_from_elements(next_body->orbit, t1) :
-				osv_from_ephem(next_body->ephem, next_body->num_ephems, t1, system->cb);
-#ifdef KMAT_ENABLE_SEARCH_PROFILE
-			if(itin_search_lambert_counter != NULL) (*itin_search_lambert_counter)++;
-#endif
-			Lambert3 new_transfer = calc_lambert3_selected_cancellable(osv_dep.r, osv_arr.r,
-				dt, system->cb, itinerary_search_cancelled, NULL);
-			if(itinerary_search_cancelled(NULL)) break;
-			Vector3 v_dep = subtract_vec3(new_transfer.v0, tf->v_body);
-			diff_vinf = mag_vec3(v_dep) - v_init_magnitude;
+			PoweredFlybySeed root_sample;
+			int cached_sample = 0;
+			for(int sample_index = 0; sample_index <= interval_subdivisions; sample_index++) {
+				if(interval_sample_valid[sample_index] &&
+					fabs(interval_samples[sample_index].dt - dt) < 1e-9) {
+					root_sample = interval_samples[sample_index];
+					cached_sample = 1;
+					break;
+				}
+			}
+			if(!cached_sample && !evaluate_powered_flyby_seed(tf, system, next_body, dt,
+				right_side, &root_sample)) break;
+			t1 = tf->date + root_sample.dt / 86400;
+			OSV osv_arr = root_sample.target_state;
+			Lambert3 new_transfer = root_sample.transfer;
+			diff_vinf = root_sample.diff_vinf;
 
 			if(fabs(diff_vinf) < 1) {
 				PoweredFlybyResult flyby_result;
@@ -166,6 +265,64 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 	}
 	
 	data_array2_free(data);
+
+	int seed_count = 0;
+	PoweredFlybySeed seed_candidates[POWERED_SEED_BUCKETS];
+	unsigned long long evaluations = 0;
+	for(int bucket = 0; bucket < POWERED_SEED_BUCKETS && !itinerary_search_cancelled(NULL); bucket++) {
+		/* Skip duplicate root dates before feasibility selection so a fallback gets a turn. */
+		PoweredSeedBucket distinct = {0};
+		for(int s = 0; s < seed_buckets[bucket].count; s++) {
+			PoweredFlybySeed seed = seed_buckets[bucket].seeds[s];
+			int duplicate = 0;
+			for(int i = 0; i < counter; i++)
+				if(fabs(new_steps[i]->date - (tf->date + seed.dt / 86400)) < 1e-9) duplicate = 1;
+			if(!duplicate) retain_powered_seed(&distinct, seed);
+		}
+		double actual_cost;
+		if(select_powered_seed(&distinct, feasible_seed_cost, tf,
+			&seed_candidates[seed_count], &actual_cost, &evaluations)) {
+			seed_candidates[seed_count++].actual_burn = actual_cost;
+		}
+	}
+	if(seed_search_stats) seed_search_stats->evaluations += evaluations;
+	for(int i = 1; i < seed_count; i++) {
+		PoweredFlybySeed seed = seed_candidates[i];
+		int insert_index = i;
+		while(insert_index > 0 && seed.actual_burn < seed_candidates[insert_index - 1].actual_burn) {
+			seed_candidates[insert_index] = seed_candidates[insert_index - 1];
+			insert_index--;
+		}
+		seed_candidates[insert_index] = seed;
+	}
+	int powered_seeds_added = 0;
+	for(int seed_index = 0; seed_index < seed_count && powered_seeds_added < seed_budget &&
+		counter < max_new_steps && !itinerary_search_cancelled(NULL); seed_index++) {
+		double epoch = tf->date + seed_candidates[seed_index].dt / 86400;
+		int duplicate = 0;
+		for(int i = 0; i < counter; i++)
+			if(fabs(new_steps[i]->date - epoch) < 1e-9) duplicate = 1;
+		if(duplicate) continue;
+		struct ItinStep *new_step = calloc(1, sizeof(*new_step));
+		if(new_step == NULL) continue;
+		new_step->body = next_body;
+		new_step->date = epoch;
+		new_step->r = seed_candidates[seed_index].target_state.r;
+		new_step->v_dep = seed_candidates[seed_index].transfer.v0;
+		new_step->v_arr = seed_candidates[seed_index].transfer.v1;
+		new_step->v_body = seed_candidates[seed_index].target_state.v;
+		new_step->prev = tf;
+		new_steps[counter++] = new_step;
+		powered_seeds_added++;
+	}
+	if(powered_seeds_added > 1) {
+		extra_seed_budget -= powered_seeds_added - 1;
+		if(seed_search_stats) seed_search_stats->alternatives_added += powered_seeds_added - 1;
+	}
+	powered_seed_budget -= powered_seeds_added;
+	if(seed_search_stats) seed_search_stats->seeds_added += powered_seeds_added;
+	if(seed_search_stats && seed_count > powered_seeds_added)
+		seed_search_stats->alternatives_skipped += seed_count - powered_seeds_added;
 
 	if(counter > 0) {
 		if(tf->num_next_nodes == 0) tf->next = (struct ItinStep **) malloc(counter * sizeof(struct ItinStep *));
