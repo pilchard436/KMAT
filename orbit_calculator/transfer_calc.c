@@ -21,6 +21,7 @@ typedef struct Itin_Search_Profile {
 
 typedef struct Itin_Calc_Thread_Args {
 	struct ItinStep **departures;
+	PoweredSeedSearchStats *seed_stats;
 	Itin_Calc_Data *calc_data;
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	Itin_Search_Profile *profiles;
@@ -140,6 +141,7 @@ void *calc_itins_from_departure(void *args) {
 	OSV osv_body0, osv_body1;
 
 	while(jd_dep <= jd_max_dep && get_thread_counter(3) == 0) {
+		begin_powered_seed_search(&thread_args->seed_stats[index]);
 		incr_thread_counter_by_amount(4, 1);
 		show_departure_progress(jd_diff);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -296,6 +298,7 @@ void *calc_itins_from_departure(void *args) {
 		index = get_incr_thread_counter(0);
 		jd_dep = jd_min_dep + index;
 	}
+	begin_powered_seed_search(NULL);
 	return NULL;
 }
 
@@ -333,8 +336,18 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 #endif
 	Itin_Calc_Thread_Args thread_args = {
 		.departures = departures,
+		.seed_stats = calloc(num_deps, sizeof(PoweredSeedSearchStats)),
 		.calc_data = &calc_data
 	};
+	if(thread_args.seed_stats == NULL) {
+		for(int i = 0; i < num_deps; i++) free_itinerary(departures[i]);
+		free(departures);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		free(profiles);
+		free(flyby_profiles);
+#endif
+		return results;
+	}
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	thread_args.profiles = profiles;
 	thread_args.profile_bodies = profile_bodies;
@@ -368,6 +381,20 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	struct Thread_Pool thread_pool;
 	thread_pool = use_thread_pool32(calc_itins_from_departure, &thread_args);
 	join_thread_pool(thread_pool);
+	PoweredSeedSearchStats seed_stats = {0};
+	for(int i = 0; i < num_deps; i++) {
+		seed_stats.evaluations += thread_args.seed_stats[i].evaluations;
+		seed_stats.alternatives_added += thread_args.seed_stats[i].alternatives_added;
+		seed_stats.alternatives_skipped += thread_args.seed_stats[i].alternatives_skipped;
+		seed_stats.seeds_added += thread_args.seed_stats[i].seeds_added;
+		seed_stats.searches_budget_skipped += thread_args.seed_stats[i].searches_budget_skipped;
+	}
+	free(thread_args.seed_stats);
+	results.powered_seed_stats = seed_stats;
+	printf("Powered seeds: %llu feasibility evaluations, %llu extra branches, %llu feasible alternatives skipped by budget\n",
+		seed_stats.evaluations, seed_stats.alternatives_added, seed_stats.alternatives_skipped);
+	printf("Powered expansion budget: %llu seeds added, %llu encounters skipped powered sampling after budget exhaustion\n",
+		seed_stats.seeds_added, seed_stats.searches_budget_skipped);
 	struct Transfer_Calc_Status final_status = get_current_transfer_calc_status();
 	show_progress(get_thread_counter(3) > 0 ? "Transfer Calculation canceled" :
 		"Transfer Calculation progress", final_status.progress, 1);
@@ -432,7 +459,18 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 				powered_stats.best_delta_v_saving, powered_stats.best_initial_total_dv,
 				powered_stats.best_refined_total_dv, powered_stats.exact_scoring_seconds,
 				powered_stats.timing_refinement_seconds);
+			printf("Refinement budget: %llu objective evaluations, %d multi-start routes, %d route budgets exhausted\n",
+				powered_stats.objective_evaluations, powered_stats.multi_start_routes,
+				powered_stats.refinement_budgets_exhausted);
+			printf("Rejected-route repair: %llu initial rejections, %d sampled, %d recovered, %d entered refinement; cutoff challenge: %llu excluded, %d refined, %d beat the ranked worst\n",
+				powered_stats.initial_rejections, powered_stats.repairs_attempted,
+				powered_stats.repairs_recovered, powered_stats.repairs_competing,
+				powered_stats.challenge_population, powered_stats.challenges_refined,
+				powered_stats.challenges_beat_cutoff);
 		}
+		int itineraries_before_prune = 0;
+		for(int i = 0; i < num_deps; i++)
+			itineraries_before_prune += get_number_of_itineraries(departures[i]);
 		valid_departures = 0;
 		for(int i = 0; i < num_deps; i++) {
 			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
@@ -442,6 +480,10 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 			departures[valid_departures++] = departures[i];
 		}
 		num_deps = valid_departures;
+		int itineraries_after_prune = 0;
+		for(int i = 0; i < num_deps; i++)
+			itineraries_after_prune += get_number_of_itineraries(departures[i]);
+		results.powered_itineraries_pruned = itineraries_before_prune - itineraries_after_prune;
 	}
 
 	gettimeofday(&end, NULL);  // Record the ending time

@@ -56,6 +56,14 @@ struct PorkchopPoint {
 	double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
 };
 
+typedef struct PoweredSeedSearchStats {
+	unsigned long long evaluations, alternatives_added, alternatives_skipped;
+	unsigned long long seeds_added, searches_budget_skipped;
+} PoweredSeedSearchStats;
+#define POWERED_SEEDS_PER_DEPARTURE 512
+#define POWERED_EXTRA_SEEDS_PER_DEPARTURE 8
+void begin_powered_seed_search(PoweredSeedSearchStats *stats);
+
 
 enum LastTransferType {TF_FLYBY, TF_CAPTURE, TF_CIRC};
 

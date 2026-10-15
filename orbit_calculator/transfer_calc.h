@@ -22,9 +22,11 @@ typedef struct Itin_Calc_Results {
 	struct ItinStep **departures;
 	int num_deps, num_nodes, num_itins;
 	int powered_routes_valid, powered_routes_corrected;
+	int powered_itineraries_pruned;
 	double best_unpowered_seed_total_dv;
 	double best_powered_initial_total_dv;
 	double best_powered_refined_total_dv;
+	PoweredSeedSearchStats powered_seed_stats;
 } Itin_Calc_Results;
 
 typedef struct Transfer_Calc_Status {
