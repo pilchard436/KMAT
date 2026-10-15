@@ -90,7 +90,7 @@ static int cancel_requested(void *context) {
 int main(void) {
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
-    const int total_checks = 93;
+    const int total_checks = 94;
     int failures = check_seed_fallback();
 
     failures += expect_int("Izzo is the default Lambert solver", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
@@ -204,6 +204,13 @@ int main(void) {
     failures += expect_int("equal-speed powered-flyby model is feasible", equal_speed_flyby_valid, 1);
     failures += expect_near("equal-speed powered flyby requires effectively zero burn",
                             powered_flyby_result.burn_delta_v, 0, 1e-3);
+    Vector3 near_equal_speed_outgoing_vinf = vec3(6000.5 * cos(flyby_turn_angle),
+        6000.5 * sin(flyby_turn_angle), 0);
+    int near_equal_speed_flyby_valid = calculate_powered_flyby(incoming_vinf,
+        near_equal_speed_outgoing_vinf, vec3(0, 0, 0), &powered_flyby_body,
+        flyby_minimum_radius, &powered_flyby_result);
+    failures += expect_int("sub-1 m/s speed difference retains a powered burn",
+        near_equal_speed_flyby_valid && powered_flyby_result.burn_delta_v > 1e-3, 1);
     double flyby_inclination = deg2rad(20);
     Vector3 unequal_speed_outgoing_vinf = vec3(6500 * cos(flyby_turn_angle),
         6500 * sin(flyby_turn_angle) * cos(flyby_inclination),
