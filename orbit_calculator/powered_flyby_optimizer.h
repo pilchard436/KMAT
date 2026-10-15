@@ -7,6 +7,8 @@
 #define POWERED_ROUTE_REFINEMENT_LIMIT 500
 #define POWERED_AUDIT_SAMPLE_SIZE 32
 #define POWERED_AUDIT_OBJECTIVES_PER_ROUTE 192
+#define POWERED_REPAIR_SLOTS 64
+#define POWERED_CHALLENGE_SLOTS POWERED_AUDIT_SAMPLE_SIZE
 
 typedef struct PoweredRejectionAuditGroup {
 	unsigned long long population;

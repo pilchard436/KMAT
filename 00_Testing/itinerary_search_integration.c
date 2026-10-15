@@ -290,6 +290,35 @@ static double find_unpowered_grid_baseline(CelestSystem *system, Body *departure
 	return best_baseline;
 }
 
+// Compares the objective implied by each stored node with one recomputed from encounter dates alone.
+static void measure_stored_objective_mismatch(const Itin_Calc_Results *results,
+		const Itin_Calc_Data *calc_data, Body *flyby_body, double *worst_mismatch,
+		int *unscorable_routes, int *checked_routes) {
+	*worst_mismatch = 0;
+	*unscorable_routes = 0;
+	*checked_routes = 0;
+	for(int i = 0; i < results->num_deps; i++) {
+		int count = get_number_of_itineraries(results->departures[i]);
+		struct ItinStep **leaves = malloc((size_t)count * sizeof(*leaves));
+		if(leaves == NULL) { *worst_mismatch = DBL_MAX; return; }
+		int stored = 0;
+		store_itineraries_in_array(results->departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			struct PorkchopPoint point = create_porkchop_point(leaves[j],
+				calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
+			double stored_objective = point.dv_dep + point.dv_dsm + point.dv_flyby;
+			double recomputed = score_powered_arrival_route(leaves[j], calc_data, flyby_body);
+			(*checked_routes)++;
+			if(!isfinite(stored_objective) || !isfinite(recomputed) || recomputed >= DBL_MAX) {
+				(*unscorable_routes)++;
+				continue;
+			}
+			*worst_mismatch = fmax(*worst_mismatch, fabs(stored_objective - recomputed));
+		}
+		free(leaves);
+	}
+}
+
 static int run_powered_flyby_objective_regression(CelestSystem *system,
 		Body *departure_body, Body *flyby_body, Body *arrival_body,
 		double departure_jd, double hohmann_duration) {
@@ -376,6 +405,30 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 			if(objective < best_search_objective) best_search_objective = objective;
 		}
 		free(optimized_arrivals);
+	}
+	{
+		double worst_mismatch;
+		int unscorable, checked;
+		measure_stored_objective_mismatch(&results, &calc_data, flyby_body, &worst_mismatch, &unscorable, &checked);
+		// Stale node velocities (the old suffix-only write-back) show up as a large mismatch here.
+		if(checked == 0 || checked - unscorable == 0 || worst_mismatch > POWERED_TEST_DV_TOLERANCE) {
+			fprintf(stderr, "Stored itinerary data disagrees with the date-based objective: %d checked, %d unscorable, worst mismatch %.6f m/s\n",
+				checked, unscorable, worst_mismatch);
+			goto cleanup;
+		}
+		if(results.powered_initial_rejections == 0 || results.powered_repairs_attempted == 0 ||
+			results.powered_repairs_recovered == 0 || results.powered_repairs_competing == 0 ||
+			results.powered_repairs_recovered > results.powered_repairs_attempted ||
+			(unsigned long long)results.powered_repairs_attempted > results.powered_initial_rejections ||
+			results.powered_repairs_competing > results.powered_repairs_recovered) {
+			fprintf(stderr, "Rejected-route repair failed its recovery checks: %llu rejections, %d attempted, %d recovered, %d competing\n",
+				results.powered_initial_rejections, results.powered_repairs_attempted,
+				results.powered_repairs_recovered, results.powered_repairs_competing);
+			goto cleanup;
+		}
+		printf("Stored itinerary data matches the date-based objective (%d routes, worst mismatch %.6f m/s); repaired %d of %d rejected routes\n",
+			checked - unscorable, worst_mismatch, results.powered_repairs_recovered,
+			results.powered_repairs_attempted);
 	}
 	double grid_flyby_offsets[] = {120, 240, 360, 480, 600};
 	double grid_arrival_offsets[] = {700, 850, 1000, 1150, 1300, 1400};
@@ -567,6 +620,9 @@ static int run_full_profile(void) {
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	int valid = validate_rejection_audit(0) && results.num_itins > 0 && results.powered_routes_corrected > 0 &&
 		results.powered_itineraries_pruned == 0 &&
+		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
+		results.powered_repairs_recovered <= results.powered_repairs_attempted &&
+		results.powered_challenges_refined > 0 && results.powered_challenges_refined <= POWERED_CHALLENGE_SLOTS &&
 		isfinite(results.best_powered_refined_total_dv) &&
 		results.best_powered_refined_total_dv <= calc_data.dv_filter.max_totdv;
 	for(int i = 0; i < results.num_deps; i++) {

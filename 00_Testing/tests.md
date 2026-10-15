@@ -59,10 +59,19 @@ speed-changing dates before optimization, both Lambert solvers, and full mission
 objective quality against a coarse grid and an unpowered baseline.
 
 The full-year profile also requires that no itinerary is pruned by the final leaf
-filter after optimization (`powered_itineraries_pruned == 0`), which guards the
-corrected-route write-back. Production runs print a `Rejected-route repair:` line
-with initial rejections, sampled/recovered/competing repairs, and cutoff-challenge
-counts.
+filter after optimization (`powered_itineraries_pruned == 0`), that repair stays
+within its 64-route cap, and that the cutoff challenge refines between 1 and 32
+routes. Production runs print a `Rejected-route repair:` line with initial
+rejections, sampled/recovered/competing repairs, and cutoff-challenge counts.
+
+The quick Earth-Venus-Jupiter run recomputes each returned route's objective from
+its encounter dates and compares it with the objective implied by the stored node
+velocities; the worst mismatch must stay within 0.1 m/s. This catches stale
+velocities from route write-back: reintroducing the old suffix-only write-back
+raises the mismatch from 0.000 to about 849,000 m/s. The same run requires that
+rejected routes are repaired, recovered routes reach refinement, and counts stay
+consistent (recovered at most attempted, attempted at most rejected). The unit
+suite also checks that a 0.5 m/s excess-speed change keeps a powered burn.
 
 Local Windows RelWithDebInfo measurements, profiling enabled:
 

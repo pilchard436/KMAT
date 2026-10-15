@@ -450,6 +450,11 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 				POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
 			results.powered_routes_valid = powered_stats.routes_valid;
 			results.powered_routes_corrected = powered_stats.routes_corrected;
+			results.powered_initial_rejections = powered_stats.initial_rejections;
+			results.powered_repairs_attempted = powered_stats.repairs_attempted;
+			results.powered_repairs_recovered = powered_stats.repairs_recovered;
+			results.powered_repairs_competing = powered_stats.repairs_competing;
+			results.powered_challenges_refined = powered_stats.challenges_refined;
 			results.best_unpowered_seed_total_dv = powered_stats.best_unpowered_seed_total_dv;
 			results.best_powered_initial_total_dv = powered_stats.best_initial_total_dv;
 			results.best_powered_refined_total_dv = powered_stats.best_refined_total_dv;
