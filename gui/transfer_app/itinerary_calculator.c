@@ -115,7 +115,7 @@ static void connect_date_adjust_buttons(GtkBuilder *builder, const char *prefix,
 		int direction = i < 3 ? -1 : 1;
 		g_object_set_data(G_OBJECT(button), "interval", (gpointer)intervals[i]);
 		g_object_set_data(G_OBJECT(button), "direction", GINT_TO_POINTER(direction));
-		gtk_widget_set_tooltip_text(button, tooltips[i]);
+		set_stable_tooltip(button, tooltips[i]);
 		gtk_button_set_relief(GTK_BUTTON(button), GTK_RELIEF_NONE);
 		gtk_widget_set_size_request(button, 18, 16);
 		set_css_class_for_widget(button, "date-adjust-button");
@@ -138,11 +138,11 @@ static void update_month_adjust_button_labels(enum DateType date_type) {
 	for(guint i = 0; i < G_N_ELEMENTS(minus_buttons); i++) {
 		if(minus_buttons[i] != NULL) {
 			gtk_button_set_label(GTK_BUTTON(minus_buttons[i]), minus_label);
-			gtk_widget_set_tooltip_text(minus_buttons[i], date_type == DATE_ISO ? "Subtract one month" : "Subtract 30 days");
+			set_stable_tooltip(minus_buttons[i], date_type == DATE_ISO ? "Subtract one month" : "Subtract 30 days");
 		}
 		if(plus_buttons[i] != NULL) {
 			gtk_button_set_label(GTK_BUTTON(plus_buttons[i]), plus_label);
-			gtk_widget_set_tooltip_text(plus_buttons[i], date_type == DATE_ISO ? "Add one month" : "Add 30 days");
+			set_stable_tooltip(plus_buttons[i], date_type == DATE_ISO ? "Add one month" : "Add 30 days");
 		}
 	}
 }

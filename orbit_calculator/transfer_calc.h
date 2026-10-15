@@ -39,6 +39,7 @@ typedef struct Transfer_Calc_Status {
 	int num_deps_active;
 	double jd_diff;
 	double progress;
+	int post_processing;
 } Transfer_Calc_Status;
 
 Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data);

@@ -231,6 +231,73 @@ void create_combobox_dropdown_text_renderer(GObject *combo_box, GtkAlign align) 
 	if(align == GTK_ALIGN_CENTER) g_object_set(renderer, "xalign", 0.5, NULL);
 }
 
+typedef struct StableTooltip {
+	GtkWidget *popover;
+	GtkWidget *label;
+	guint timer_id;
+} StableTooltip;
+
+static void hide_stable_tooltip(StableTooltip *tip) {
+	if(tip->timer_id != 0) {
+		g_source_remove(tip->timer_id);
+		tip->timer_id = 0;
+	}
+	gtk_widget_hide(tip->popover);
+}
+
+static gboolean show_stable_tooltip(gpointer data) {
+	StableTooltip *tip = data;
+	tip->timer_id = 0;
+	gtk_widget_show_all(tip->popover);
+	return G_SOURCE_REMOVE;
+}
+
+static gboolean on_stable_tooltip_enter(GtkWidget *widget, GdkEventCrossing *event, gpointer data) {
+	StableTooltip *tip = data;
+	// Grab-related crossings follow a click and must not reopen the tooltip.
+	if(event->mode == GDK_CROSSING_NORMAL && tip->timer_id == 0)
+		tip->timer_id = g_timeout_add(500, show_stable_tooltip, tip);
+	return FALSE;
+}
+
+static gboolean on_stable_tooltip_hide(GtkWidget *widget, GdkEvent *event, gpointer data) {
+	hide_stable_tooltip(data);
+	return FALSE;
+}
+
+static void on_stable_tooltip_unmap(GtkWidget *widget, gpointer data) {
+	hide_stable_tooltip(data);
+}
+
+static void on_stable_tooltip_widget_destroy(GtkWidget *widget, gpointer data) {
+	StableTooltip *tip = data;
+	if(tip->timer_id != 0) g_source_remove(tip->timer_id);
+	gtk_widget_destroy(tip->popover);
+	g_free(tip);
+}
+
+void set_stable_tooltip(GtkWidget *widget, const char *text) {
+	StableTooltip *tip = g_object_get_data(G_OBJECT(widget), "stable-tooltip");
+	gtk_widget_set_tooltip_text(widget, NULL);
+	if(tip == NULL) {
+		tip = g_new0(StableTooltip, 1);
+		tip->popover = gtk_popover_new(widget);
+		gtk_popover_set_modal(GTK_POPOVER(tip->popover), FALSE);
+		gtk_popover_set_position(GTK_POPOVER(tip->popover), GTK_POS_BOTTOM);
+		gtk_container_set_border_width(GTK_CONTAINER(tip->popover), 6);
+		tip->label = gtk_label_new(NULL);
+		gtk_container_add(GTK_CONTAINER(tip->popover), tip->label);
+		gtk_widget_add_events(widget, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK);
+		g_signal_connect(widget, "enter-notify-event", G_CALLBACK(on_stable_tooltip_enter), tip);
+		g_signal_connect(widget, "leave-notify-event", G_CALLBACK(on_stable_tooltip_hide), tip);
+		g_signal_connect(widget, "button-press-event", G_CALLBACK(on_stable_tooltip_hide), tip);
+		g_signal_connect(widget, "unmap", G_CALLBACK(on_stable_tooltip_unmap), tip);
+		g_signal_connect(widget, "destroy", G_CALLBACK(on_stable_tooltip_widget_destroy), tip);
+		g_object_set_data(G_OBJECT(widget), "stable-tooltip", tip);
+	}
+	gtk_label_set_text(GTK_LABEL(tip->label), text);
+}
+
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry) {
 	GtkListStore *store = GTK_LIST_STORE(gtk_combo_box_get_model(combo_box));
 	GtkTreeIter iter;

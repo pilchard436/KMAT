@@ -47,3 +47,12 @@
 - [ ] Distinguish SOI/Lambert nonconvergence from physical infeasibility and improve convergence-related route rejection.
 - [ ] Add rejection counts for SOI geometry, convergence, configured date/time limits, departure delta-v, arrival delta-v, and total delta-v.
 - [ ] Quantify coverage lost to each sampling/budget cutoff using the UI-free profile and objective-grid comparisons.
+
+## Integration Tests
+
+- [ ] Replace the all-bodies fixtures in `KMAT --test` (tests 4 and 5 took about 197 s and 506 s) with realistic body sets; `KMATIntegrationTests` currently hits the 1500 s ctest timeout.
+- [ ] Give each integration test an explicit time budget and fail on overrun instead of relying on the ctest default.
+- [ ] Check result quality, not only constraint validity: best delta-v against a reference, and that several distinct near-optimal routes are returned.
+- [ ] Add per-test timing output and a recorded baseline so slowdowns are caught.
+- [ ] Cover the `.itin`/`.itins` file tests, which are not part of the 10 reported tests.
+- [ ] Add a UI-free check for the porkchop group list (select/deselect all, toggle keeps scroll position).

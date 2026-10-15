@@ -931,8 +931,12 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	int routes_considered = 0;
 	int routes_valid = 0;
 	objective_calls = 0;
+	int progress_total = arrival_count + POWERED_REFINE_PROGRESS_WEIGHT *
+		(POWERED_REPAIR_SLOTS + route_limit + POWERED_CHALLENGE_SLOTS);
+	incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, progress_total);
 	double exact_scoring_start = wall_seconds();
 	for(int point_index = 0; point_index < arrival_count && !itinerary_search_cancelled(NULL); point_index++) {
+		if((point_index & 255) == 255) incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, 256);
 		if(get_num_of_itin_layers(get_first(arrivals[point_index])) < 3) continue;
 		routes_considered++;
 		PoweredRouteCandidate *candidate = calloc(1, sizeof(*candidate));
@@ -975,6 +979,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		PoweredRouteCandidate *candidate = repair_pool->slots[slot];
 		if(candidate == NULL) continue;
 		repair_pool->slots[slot] = NULL;
+		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats != NULL) stats->repairs_attempted++;
 		objective_budget = POWERED_REPAIR_OBJECTIVES_PER_ROUTE - 1;
 		repair_candidate_timing(candidate, calc_data, &repair_pool->random, 0);
@@ -1046,6 +1051,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		multi_start_routes += extra_starts;
 		objective_budget = POWERED_OBJECTIVES_PER_ROUTE;
 		int optimized = optimize_candidate(candidate, calc_data, timing_start_count);
+		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats && objective_budget == 0) stats->refinement_budgets_exhausted++;
 		objective_budget = -1;
 		if(optimized &&
@@ -1074,6 +1080,9 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	for(int i = 0; i < top_count; i++)
 		destroy_candidate(candidates[i]);
 	free(candidates);
+	if(progress_total > get_thread_counter(POWERED_PROGRESS_DONE_COUNTER))
+		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER,
+			progress_total - get_thread_counter(POWERED_PROGRESS_DONE_COUNTER));
 	if(stats != NULL) {
 		stats->routes_improved = improvements;
 		stats->timing_refinement_seconds = wall_seconds() - timing_refinement_start;
