@@ -29,9 +29,10 @@ typedef struct PoweredLegDsm {
 	int enabled;
 	double eta;
 	Vector3 delta_v;
-	/* Instead of delta_v: the maneuver happens at this fixed position and time fraction eta. */
+	/* Instead of delta_v: the maneuver happens at this fixed position and epoch (JD). */
 	int use_position;
 	Vector3 position;
+	double date;
 } PoweredLegDsm;
 
 typedef struct PoweredRejectionAuditGroup {

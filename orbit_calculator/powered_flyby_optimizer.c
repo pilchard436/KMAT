@@ -151,17 +151,19 @@ static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, Celes
 	const PoweredLegDsm *spec = candidate->dsms != NULL ? &candidate->dsms[index] : NULL;
 	if(spec == NULL || !spec->enabled) return 1;
 	if(spec->use_position) {
-		if(!(spec->eta > 0 && spec->eta < 1) || !is_finite_vector(spec->position)) return 0;
+		// The leg's epochs are SOI-adjusted, so the maneuver is given by absolute date.
+		double eta = (spec->date - departure_epoch) / duration_days;
+		if(!(eta > 0 && eta < 1) || !is_finite_vector(spec->position)) return 0;
 		Lambert3 first = calc_lambert3_selected_cancellable(departure_position, spec->position,
-			spec->eta * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+			eta * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
 		Lambert3 second = calc_lambert3_selected_cancellable(spec->position, arrival_position,
-			(1 - spec->eta) * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+			(1 - eta) * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
 		if(itinerary_search_cancelled(NULL) || !is_valid_lambert(first) || !is_valid_lambert(second)) return 0;
 		leg->v0 = first.v0;
 		leg->v1 = second.v1;
 		if(dsm != NULL) {
 			dsm->used = 1;
-			dsm->date = departure_epoch + spec->eta * duration_days;
+			dsm->date = spec->use_position ? spec->date : departure_epoch + spec->eta * duration_days;
 			dsm->position = spec->position;
 			dsm->velocity_before = first.v1;
 			dsm->velocity_after = second.v0;
@@ -468,8 +470,7 @@ int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep 
 		if(node->body != NULL) { route_index++; continue; }
 		size_t leg = route_index - 1;
 		if(dsms[leg].enabled) goto cleanup;
-		dsms[leg] = (PoweredLegDsm){.enabled = 1, .use_position = 1, .position = node->r,
-			.eta = (node->date - times[leg]) / (times[leg + 1] - times[leg])};
+		dsms[leg] = (PoweredLegDsm){.enabled = 1, .use_position = 1, .position = node->r, .date = node->date};
 	}
 
 	Itin_Calc_Data calc_data = {0};
