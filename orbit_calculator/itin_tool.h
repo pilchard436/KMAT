@@ -174,8 +174,9 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 // and 10 km); 0 if it can be flown as a gravity assist or the step is not a flyby. A positive value means the
 // unpowered trajectory would enter the planet or its atmosphere and the route only works with the flyby burn.
 double flyby_periapsis_shortfall(struct ItinStep *step);
-// 1 if the flyby step cannot be flown even with a burn and its unpowered periapsis lies below the body's surface.
-int flyby_hits_surface(struct ItinStep *step);
+// 1 if the flown periapsis of a flyby step is below the minimum safe radius (surface plus atmosphere): no burn can fix it.
+int flyby_below_min_safe(struct ItinStep *step);
+int count_flybys_below_min_safe(struct ItinStep *step_in_route);
 // Number of flybys in the route with a shortfall, and the largest shortfall in metres (largest may be NULL).
 int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall);
 

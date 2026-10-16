@@ -379,7 +379,11 @@ void update_transfer_panel() {
 		sprintf(s_dv, "%6.0f m/s", calc_total_dv());
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
 		// Route warnings go on their own red, bold lines under the total.
-		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), tp_route_unconverged ? "Approximate: the flyby solution did not settle" : "");
+		char s_warning[96];
+		int below_safe = count_flybys_below_min_safe(curr_transfer_tp) > 0;
+		g_snprintf(s_warning, sizeof(s_warning), "%s%s%s", tp_route_unconverged ? "Approximate: the flyby solution did not settle" : "",
+			tp_route_unconverged && below_safe ? "\n" : "", below_safe ? "Flyby hits planet" : "");
+		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), s_warning);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
 			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
 			itinerary_step_parameters_to_string(s_tfprop_labels, s_tfprop_values, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, curr_transfer_tp);

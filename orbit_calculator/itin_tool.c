@@ -1254,14 +1254,21 @@ double flyby_periapsis_shortfall(struct ItinStep *step) {
 	return unpowered < minimum_radius ? minimum_radius - unpowered : 0;
 }
 
-int flyby_hits_surface(struct ItinStep *step) {
+int flyby_below_min_safe(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
-	// The burn raises the periapsis, so only a flyby the burn cannot fix is a crash.
+	// A burn can raise the periapsis, so the flown periapsis is below safe only when the burn cannot fix it.
 	PoweredFlybyResult flyby;
 	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
 			step->body->radius + step->body->atmo_alt + 1e4, &flyby)) return 0;
 	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
-	return isfinite(unpowered) && unpowered < step->body->radius;
+	return isfinite(unpowered) && unpowered < step->body->radius + step->body->atmo_alt;
+}
+
+int count_flybys_below_min_safe(struct ItinStep *step_in_route) {
+	int count = 0;
+	for(struct ItinStep *step = get_first(step_in_route); step != NULL; step = step->next != NULL ? step->next[0] : NULL)
+		count += flyby_below_min_safe(step);
+	return count;
 }
 
 int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall) {
