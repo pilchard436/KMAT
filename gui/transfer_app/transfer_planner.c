@@ -6,6 +6,7 @@
 #include "gui/css_loader.h"
 #include "tools/file_io.h"
 #include "gui/info_win_manager.h"
+#include "orbit_calculator/powered_flyby_optimizer.h"
 
 #include <string.h>
 #include <gtk/gtk.h>
@@ -215,7 +216,8 @@ void update_itinerary() {
 		tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
 	}
 	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
-	calc_itin_v_vectors_from_dates_and_r(get_first(curr_transfer_tp), tp_system);
+	if(!resolve_itinerary_with_powered_flybys(tp_system, get_first(curr_transfer_tp), tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type))
+		calc_itin_v_vectors_from_dates_and_r(get_first(curr_transfer_tp), tp_system);
 	update();
 }
 

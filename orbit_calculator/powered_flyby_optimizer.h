@@ -29,6 +29,9 @@ typedef struct PoweredLegDsm {
 	int enabled;
 	double eta;
 	Vector3 delta_v;
+	/* Instead of delta_v: the maneuver happens at this fixed position and time fraction eta. */
+	int use_position;
+	Vector3 position;
 } PoweredLegDsm;
 
 typedef struct PoweredRejectionAuditGroup {
@@ -74,6 +77,12 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 	Body **bodies, const double *times, size_t num_steps);
+
+/* Re-solves a single stored route at its current dates with the powered-flyby model the search uses
+ * (SOI-corrected arcs), keeping maneuver nodes at their positions, and writes the velocities back.
+ * Returns 0 and leaves the route untouched if it has fewer than three encounters or does not converge. */
+int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
+	double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
 /* Same objective with optional per-leg DSMs (num_steps - 1 entries, NULL for none). DSM delta-v
  * counts toward the satellite delta-v limit, like every other deep-space maneuver. */

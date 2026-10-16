@@ -150,6 +150,25 @@ static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, Celes
 	if(dsm != NULL) dsm->used = 0;
 	const PoweredLegDsm *spec = candidate->dsms != NULL ? &candidate->dsms[index] : NULL;
 	if(spec == NULL || !spec->enabled) return 1;
+	if(spec->use_position) {
+		if(!(spec->eta > 0 && spec->eta < 1) || !is_finite_vector(spec->position)) return 0;
+		Lambert3 first = calc_lambert3_selected_cancellable(departure_position, spec->position,
+			spec->eta * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+		Lambert3 second = calc_lambert3_selected_cancellable(spec->position, arrival_position,
+			(1 - spec->eta) * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+		if(itinerary_search_cancelled(NULL) || !is_valid_lambert(first) || !is_valid_lambert(second)) return 0;
+		leg->v0 = first.v0;
+		leg->v1 = second.v1;
+		if(dsm != NULL) {
+			dsm->used = 1;
+			dsm->date = departure_epoch + spec->eta * duration_days;
+			dsm->position = spec->position;
+			dsm->velocity_before = first.v1;
+			dsm->velocity_after = second.v0;
+			dsm->delta_v = mag_vec3(subtract_vec3(second.v0, first.v1));
+		}
+		return 1;
+	}
 	if(!(spec->eta > 0 && spec->eta < 1) || !is_finite_vector(spec->delta_v)) return 0;
 
 	Vector3 departure_velocity = add_vec3(plain.v0, spec->delta_v);
@@ -409,6 +428,89 @@ double evaluate_powered_flyby_route_objective_with_dsm(const Itin_Calc_Data *cal
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 		Body **bodies, const double *times, size_t num_steps) {
 	return evaluate_powered_flyby_route_objective_with_dsm(calc_data, bodies, times, num_steps, NULL);
+}
+
+int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+	if(system == NULL || first == NULL || first->prev != NULL || first->body == NULL) return 0;
+	size_t num_nodes = 0, num_steps = 0;
+	struct ItinStep *last = first;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->num_next_nodes > 1) return 0;
+		num_nodes++;
+		num_steps += node->body != NULL;
+		last = node;
+	}
+	if(num_steps < 3 || last->body == NULL) return 0;
+
+	Body **bodies = malloc(num_steps * sizeof(*bodies));
+	double *times = malloc(num_steps * sizeof(*times));
+	PoweredLegDsm *dsms = calloc(num_steps - 1, sizeof(*dsms));
+	OSV *states = calloc(num_steps, sizeof(*states));
+	Lambert3 *legs = calloc(num_steps - 1, sizeof(*legs));
+	PoweredDsmResult *dsm_results = calloc(num_steps - 1, sizeof(*dsm_results));
+	int success = 0;
+	if(bodies == NULL || times == NULL || dsms == NULL || states == NULL || legs == NULL || dsm_results == NULL)
+		goto cleanup;
+
+	size_t route_index = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body == NULL) continue;
+		bodies[route_index] = node->body;
+		times[route_index] = node->date;
+		route_index++;
+	}
+	for(size_t i = 0; i + 1 < num_steps; i++)
+		if(!(times[i + 1] > times[i])) goto cleanup;
+
+	route_index = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body != NULL) { route_index++; continue; }
+		size_t leg = route_index - 1;
+		if(dsms[leg].enabled) goto cleanup;
+		dsms[leg] = (PoweredLegDsm){.enabled = 1, .use_position = 1, .position = node->r,
+			.eta = (node->date - times[leg]) / (times[leg + 1] - times[leg])};
+	}
+
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_max_arr = times[num_steps - 1] + 1;
+	calc_data.max_duration = times[num_steps - 1] - times[0] + 1;
+	calc_data.dv_filter = (struct Dv_Filter){.max_totdv = 1e12, .max_depdv = 1e12, .max_satdv = 1e12,
+		.dep_periapsis = dep_periapsis, .arr_periapsis = arr_periapsis, .last_transfer_type = last_transfer_type};
+	calc_data.seq_info.to_target.system = system;
+
+	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies, .times = times, .dsms = dsms};
+	if(evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results) >= DBL_MAX) goto cleanup;
+
+	route_index = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body == NULL) {
+			size_t leg = route_index - 1;
+			node->v_arr = dsm_results[leg].velocity_before;
+			node->v_dep = legs[leg].v0;
+			node->v_body = vec3(1, 0, 0);
+			continue;
+		}
+		node->r = states[route_index].r;
+		node->v_body = states[route_index].v;
+		if(route_index > 0) {
+			size_t leg = route_index - 1;
+			node->v_arr = legs[leg].v1;
+			node->v_dep = dsms[leg].enabled ? dsm_results[leg].velocity_after : legs[leg].v0;
+		}
+		route_index++;
+	}
+	success = 1;
+
+cleanup:
+	free(bodies);
+	free(times);
+	free(dsms);
+	free(states);
+	free(legs);
+	free(dsm_results);
+	(void)num_nodes;
+	return success;
 }
 
 static int dsm_search_frame(Vector3 position, Vector3 velocity, Vector3 axes[3]) {

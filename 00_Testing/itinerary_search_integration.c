@@ -775,7 +775,7 @@ static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *sys
 }
 
 static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
-	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0;
+	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0;
 #define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
 	int maneuver_budget = 30, plain_budget = 30;
 	for(int d = 0; d < num_departures; d++) {
@@ -800,6 +800,27 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 			double mismatch = itinerary_dv_mismatch(copy, dep, arr);
 			if(mismatch > 1e-3) OPERATION_PROBLEM("route %d.%d: step dv do not add up to the overview (%.4f m/s off)\n", d, j, mismatch);
 			if(itinerary_recompute_problem(copy, system)) OPERATION_PROBLEM("route %d.%d: recompute leaves non-finite nodes\n", d, j);
+			free_itinerary(copy);
+
+			// Re-solving at unchanged dates, as the planner does after an edit, must reproduce the stored delta-v.
+			copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+			int encounters = 0;
+			for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) encounters += s->body != NULL;
+			if(encounters >= 3) {
+				double before = 0, after = 0;
+				for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) before += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+				resolve_attempts++;
+				if(!resolve_itinerary_with_powered_flybys(system, copy, dep, arr, TF_FLYBY)) {
+					resolve_fallbacks++;
+					double shortest = DBL_MAX;
+					for(struct ItinStep *s = copy; s->next != NULL; s = s->next[0]) shortest = fmin(shortest, s->next[0]->date - s->date);
+					printf("  re-solve fell back on route %d.%d (maneuver %d, %d encounters, shortest leg %.1f days)\n", d, j, has_maneuver, encounters, shortest);
+				}
+				else {
+					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+					if(fabs(after - before) > 50.0) OPERATION_PROBLEM("route %d.%d: re-solve changed total dv from %.1f to %.1f m/s\n", d, j, before, after);
+				}
+			}
 			free_itinerary(copy);
 
 			for(int k = 0; k < nodes; k++) {
@@ -854,6 +875,9 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 		free(leaves);
 	}
 #undef OPERATION_PROBLEM
+	// A route that does not converge falls back to the plain recompute, which is fine for a few routes.
+	if(resolve_fallbacks * 100 > resolve_attempts * 30) { problems++; fprintf(stderr, "re-solve fell back on %d of %d routes\n", resolve_fallbacks, resolve_attempts); }
+	else printf("Planner re-solve: %d of %d stored routes re-solved to the stored delta-v (the rest fall back)\n", resolve_attempts - resolve_fallbacks, resolve_attempts);
 	if(problems == 0) printf("Itinerary operations check passed: %d routes (%d with maneuvers) survive structure, text, dv-sum, recompute, removal and date-change checks\n", routes, maneuver_routes);
 	else fprintf(stderr, "Itinerary operations check failed: %d problems on %d routes\n", problems, routes);
 	return problems == 0 && routes > 0;
