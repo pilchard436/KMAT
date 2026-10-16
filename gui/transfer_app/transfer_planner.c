@@ -276,6 +276,7 @@ void update_transfer_panel() {
 		date_to_string(date, date_string, 0);
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), date_string);
 		if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody)) < 0) update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), tp_system);
+		fix_tfbody = TRUE;
 		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), get_body_system_id(curr_transfer_tp->body, tp_system));
 		fix_tfbody = FALSE;
 		char s_dv[20];
@@ -484,7 +485,9 @@ G_MODULE_EXPORT void on_next_transfer(GtkWidget* widget, gpointer data) {
 
 G_MODULE_EXPORT void on_transfer_body_change(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_tp == NULL || fix_tfbody) return;
-	curr_transfer_tp->body = tp_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody))];
+	int body_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody));
+	if(body_index < 0 || body_index >= tp_system->num_bodies) return;
+	curr_transfer_tp->body = tp_system->bodies[body_index];
 	update_itinerary();
 }
 
