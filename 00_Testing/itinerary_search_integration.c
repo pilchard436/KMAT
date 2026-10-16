@@ -737,6 +737,8 @@ static int itinerary_text_problem(struct ItinStep *first, double dep_periapsis, 
 		labels[0] = values[0] = 0;
 		itinerary_step_parameters_to_string(labels, values, DATE_ISO, dep_periapsis, arr_periapsis, s);
 		if(guard_broken(labels, ITIN_STEP_TEXT_SIZE) || guard_broken(values, ITIN_STEP_TEXT_SIZE)) return 1;
+		// A maneuver is described by its three burn components.
+		if(s->body == NULL && (strstr(labels, "Prograde") == NULL || strstr(labels, "Radial") == NULL || strstr(labels, "Normal") == NULL)) return 4;
 	}
 	for(int detailed = 0; detailed < 2; detailed++) {
 		memset(overview, 0x5A, sizeof(overview));
@@ -744,6 +746,7 @@ static int itinerary_text_problem(struct ItinStep *first, double dep_periapsis, 
 		if(detailed) itinerary_detailed_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
 		else itinerary_short_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
 		if(guard_broken(overview, 10000) || strstr(overview, "nan") != NULL) return 2 + detailed;
+		if(strstr(overview, "Deep-Space Maneuver") != NULL && (strstr(overview, "tangential") == NULL || strstr(overview, "normal") == NULL)) return 5;
 	}
 	return 0;
 }
@@ -827,9 +830,22 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 				itinerary_recompute_problem(copy, system);
 				if(itinerary_text_problem(copy, dep, arr)) OPERATION_PROBLEM("route %d.%d: text problem after moving step %d\n", d, j, k);
 				if(moved->body == NULL) {
+					double slide = mag_vec3(subtract_vec3(moved->r, original_r)) / mag_vec3(original_r);
+					if(!(slide > 1e-6)) OPERATION_PROBLEM("route %d.%d: maneuver node did not move with its date\n", d, j);
 					set_itinerary_step_date(moved, system, original_date);
 					double shift = mag_vec3(subtract_vec3(moved->r, original_r)) / mag_vec3(original_r);
 					if(shift > 0.05) OPERATION_PROBLEM("route %d.%d: maneuver node moved %.3f of its radius after a date round trip\n", d, j, shift);
+				}
+				free_itinerary(copy);
+
+				// Moving a step past its successor must push the later steps back.
+				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+				moved = copy;
+				for(int n = 0; n < k; n++) moved = moved->next[0];
+				if(moved->prev != NULL && moved->next != NULL) {
+					set_itinerary_step_date(moved, system, moved->next[0]->date + 2.0);
+					problem = itinerary_structure_problem(copy);
+					if(problem) OPERATION_PROBLEM("route %d.%d: structure problem %d after moving step %d past its successor\n", d, j, problem, k);
 				}
 				free_itinerary(copy);
 			}
