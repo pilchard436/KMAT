@@ -656,21 +656,6 @@
                       </packing>
                     </child>
                     <child>
-                      <object class="GtkCheckButton" id="cb_ic_infinite_satdv">
-                        <property name="label" translatable="yes">Infinite Satellite dv</property>
-                        <property name="visible">True</property>
-                        <property name="can-focus">True</property>
-                        <property name="receives-default">False</property>
-                        <property name="halign">end</property>
-                        <property name="draw-indicator">True</property>
-                        <signal name="toggled" handler="on_ic_infinite_satdv_toggled" swapped="no"/>
-                      </object>
-                      <packing>
-                        <property name="left-attach">1</property>
-                        <property name="top-attach">2</property>
-                      </packing>
-                    </child>
-                    <child>
                       <!-- n-columns=1 n-rows=2 -->
                       <object class="GtkGrid">
                         <property name="visible">True</property>

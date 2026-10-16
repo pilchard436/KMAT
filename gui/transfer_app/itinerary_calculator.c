@@ -27,7 +27,6 @@ GObject *cb_ic_transfertype;
 static GtkWidget *cb_ic_allow_dsm;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
-static GtkWidget *cb_ic_infinite_satdv;
 GObject *vp_ic_fbbodies;
 GtkWidget *grid_ic_fbbodies;
 static GtkWidget *ic_latest_dep_minus_month_button;
@@ -41,7 +40,6 @@ CelestSystem *ic_system;
 
 double ic_dep_periapsis = 50e3;
 double ic_arr_periapsis = 50e3;
-#define INFINITE_DV_LIMIT 1e9
 
 GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid);
 
@@ -428,7 +426,6 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
-	cb_ic_infinite_satdv = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_infinite_satdv"));
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
 
 	ic_system = NULL;
@@ -708,8 +705,7 @@ static void prepare_ic_calc_data_from_widgets() {
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_depdv));
 	ic_calc_data.dv_filter.max_depdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_satdv));
-	ic_calc_data.dv_filter.max_satdv = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_infinite_satdv)) ?
-		INFINITE_DV_LIMIT : strtod(string, NULL);
+	ic_calc_data.dv_filter.max_satdv = strtod(string, NULL);
 	// Departure burn is capped by its own limit and every later burn by the satellite limit.
 	ic_calc_data.dv_filter.max_totdv = ic_calc_data.dv_filter.max_depdv + ic_calc_data.dv_filter.max_satdv;
 	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
@@ -757,11 +753,6 @@ G_MODULE_EXPORT void on_calc_ic() {
 	init_sc_ic_progress_window();
 	GThread *calc_thread = g_thread_new("calc_thread", (GThreadFunc) ic_calc_thread, NULL);
 	if(calc_thread != NULL) g_thread_unref(calc_thread);
-}
-
-G_MODULE_EXPORT void on_ic_infinite_satdv_toggled(GtkToggleButton *button, gpointer data) {
-	(void)data;
-	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_satdv), !gtk_toggle_button_get_active(button));
 }
 
 G_MODULE_EXPORT void on_ic_system_change() {
