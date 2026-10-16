@@ -135,12 +135,12 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 		tf = tf->next[0];
 	}
 
-	if(current_time <= get_first(tf)->date) {
+	if(current_time <= get_first(tf)->date && get_first(tf)->body != NULL) {
 		OSV osv_body = system->prop_method == ORB_ELEMENTS ?
 				   osv_from_elements(get_first(tf)->body->orbit, current_time) :
 				   osv_from_ephem(get_first(tf)->body->ephem, get_first(tf)->body->num_ephems, current_time, system->cb);
 		draw_itinerary_spacecraft(camera, osv_body.r);
-	} else if(current_time >= tf->date) {
+	} else if(current_time >= tf->date && tf->body != NULL) {
 		OSV osv_body = system->prop_method == ORB_ELEMENTS ?
 							  osv_from_elements(tf->body->orbit, current_time) :
 							  osv_from_ephem(tf->body->ephem, tf->body->num_ephems, current_time, system->cb);

@@ -382,6 +382,15 @@ void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 	update();
 }
 
+// A maneuver node slides along its incoming arc when its date changes.
+static void tp_set_current_step_date(double date) {
+	struct ItinStep *step = curr_transfer_tp;
+	if(step->body == NULL && step->prev != NULL)
+		step->r = propagate_osv_time((OSV){step->prev->r, step->v_dep}, tp_system->cb, (date - step->prev->date) * 86400).r;
+	step->date = date;
+	sort_transfer_dates(get_first(step));
+}
+
 G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 	const char *name = gtk_widget_get_name(widget);
 	// Date
@@ -410,8 +419,7 @@ G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 			return;
 		}
-		curr_transfer_tp->date = current_date_tp;
-		sort_transfer_dates(get_first(curr_transfer_tp));
+		tp_set_current_step_date(current_date_tp);
 	}
 
 	update_itinerary();
@@ -425,8 +433,7 @@ G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 			return;
 		}
-		curr_transfer_tp->date = current_date_tp;
-		sort_transfer_dates(get_first(curr_transfer_tp));
+		tp_set_current_step_date(current_date_tp);
 	}
 	
 	update_itinerary();
@@ -509,8 +516,6 @@ G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer da
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 		return;
 	}
-	if(curr_transfer_tp->body == NULL)
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate)))
 		current_date_tp = curr_transfer_tp->date;
 	// Releasing the lock changes nothing, and re-solving would replace the loaded route's velocities.
@@ -597,7 +602,9 @@ G_MODULE_EXPORT void on_remove_transfer(GtkWidget* widget, gpointer data) {
 	free(rem_transfer);
 	if(curr_transfer_tp != NULL) current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
-	update();
+	// Neighbouring arcs changed, so velocities must be re-solved.
+	if(curr_transfer_tp != NULL) update_itinerary();
+	else update();
 }
 
 int find_closest_transfer(struct ItinStep *step) {
