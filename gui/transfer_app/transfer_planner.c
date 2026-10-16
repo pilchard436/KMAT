@@ -189,20 +189,27 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 
 double calc_step_dv(struct ItinStep *step) {
 	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
+	// Same burns as the itinerary details: free-plane departure, powered flybys, DSMs, arrival insertion.
 	if(step->body == NULL) {
-		if(step->next == NULL || step->next[0]->next == NULL || step->prev == NULL)
-			return 0;
-		if(step->v_body.x == 0) return 0;
-		return mag_vec3(subtract_vec3(step->v_arr, step->next[0]->v_dep));
+		if(step->next == NULL || step->prev == NULL) return 0;
+		return mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
 	} else if(step->prev == NULL) {
-		double vinf = mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_body));
-		return dv_circ(step->body, altatmo2radius(step->body, tp_dep_periapsis), vinf);
+		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
+		DepartureBurn3D burn;
+		if(calculate_free_plane_departure_burn(vinf, step->body, alt2radius(step->body, tp_dep_periapsis), &burn))
+			return burn.burn_magnitude;
+		return dv_circ(step->body, alt2radius(step->body, tp_dep_periapsis), mag_vec3(vinf));
 	} else if(step->next == NULL) {
 		if(tp_last_transfer_type == TF_FLYBY) return 0;
 		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
-		if(tp_last_transfer_type == TF_CAPTURE) return dv_capture(step->body, altatmo2radius(step->body, tp_arr_periapsis), vinf);
-		else if(tp_last_transfer_type == TF_CIRC) return dv_circ(step->body, altatmo2radius(step->body, tp_arr_periapsis), vinf);
+		if(tp_last_transfer_type == TF_CAPTURE) return dv_capture(step->body, alt2radius(step->body, tp_arr_periapsis), vinf);
+		else if(tp_last_transfer_type == TF_CIRC) return dv_circ(step->body, alt2radius(step->body, tp_arr_periapsis), vinf);
+		return 0;
 	}
+	PoweredFlybyResult flyby;
+	double minimum_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
+		return flyby.burn_delta_v;
 	return 0;
 }
 
