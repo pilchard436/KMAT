@@ -275,9 +275,13 @@ void update_transfer_panel() {
 		char date_string[10];
 		date_to_string(date, date_string, 0);
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), date_string);
-		if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody)) < 0) update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), tp_system);
+		if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody)) < 0) {
+			update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), tp_system);
+			append_combobox_entry(GTK_COMBO_BOX(cb_tp_tfbody), "Deep-Space Maneuver");
+		}
 		fix_tfbody = TRUE;
-		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), get_body_system_id(curr_transfer_tp->body, tp_system));
+		int body_id = curr_transfer_tp->body != NULL ? get_body_system_id(curr_transfer_tp->body, tp_system) : tp_system->num_bodies;
+		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), body_id);
 		fix_tfbody = FALSE;
 		char s_dv[20];
 		sprintf(s_dv, "%6.0f m/s", calc_step_dv(curr_transfer_tp));
@@ -509,6 +513,11 @@ G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer da
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate)))
 		current_date_tp = curr_transfer_tp->date;
+	// Releasing the lock changes nothing, and re-solving would replace the loaded route's velocities.
+	if(curr_transfer_tp != NULL && !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate))) {
+		update();
+		return;
+	}
 	update_itinerary();
 }
 
@@ -698,7 +707,11 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	tp_update_bodies();
-	update_itinerary();
+	// Keep the saved velocities: re-solving from body centers would change a powered-flyby route's delta-v.
+	tp_dep_periapsis = get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
+	tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
+	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
+	update();
 	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
 	camera_zoom_to_fit_itinerary(tp_system_camera, curr_transfer_tp);
 	update_tp_system_view();
