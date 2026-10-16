@@ -1438,3 +1438,67 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	}
 	return improvements;
 }
+
+int optimize_itinerary_maneuvers(CelestSystem *system, struct ItinStep *first,
+double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+if(system == NULL || first == NULL || first->prev != NULL || first->body == NULL) return 0;
+size_t num_steps = 0;
+struct ItinStep *last = first;
+for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+if(node->num_next_nodes > 1) return 0;
+num_steps += node->body != NULL;
+last = node;
+}
+if(num_steps < 3 || last->body == NULL) return 0;
+
+Body **bodies = malloc(num_steps * sizeof(*bodies));
+double *times = malloc(num_steps * sizeof(*times));
+PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies, .times = times};
+candidate.best_states = calloc(num_steps, sizeof(*candidate.best_states));
+candidate.best_legs = calloc(num_steps - 1, sizeof(*candidate.best_legs));
+int success = 0;
+if(bodies == NULL || times == NULL || candidate.best_states == NULL || candidate.best_legs == NULL) goto cleanup;
+
+size_t route_index = 0;
+for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+if(node->body == NULL) continue;
+bodies[route_index] = node->body;
+times[route_index] = node->date;
+route_index++;
+}
+for(size_t i = 0; i + 1 < num_steps; i++)
+if(!(times[i + 1] > times[i])) goto cleanup;
+
+Itin_Calc_Data calc_data = {0};
+calc_data.jd_max_arr = times[num_steps - 1] + 1;
+calc_data.max_duration = times[num_steps - 1] - times[0] + 1;
+calc_data.dv_filter = (struct Dv_Filter){.max_totdv = 1e12, .max_depdv = 1e12, .max_satdv = 1e12,
+.dep_periapsis = dep_periapsis, .arr_periapsis = arr_periapsis, .last_transfer_type = last_transfer_type};
+calc_data.seq_info.to_target.system = system;
+
+candidate.best_total_dv = evaluate_route(&candidate, &calc_data, times, candidate.best_states, candidate.best_legs);
+if(candidate.best_total_dv >= DBL_MAX) goto cleanup;
+objective_budget = POWERED_DSM_OBJECTIVES_PER_ROUTE;
+optimize_candidate_dsm(&candidate, &calc_data);
+objective_budget = -1;
+
+// The old maneuver nodes are replaced by the optimized ones; the first node stays.
+struct ItinStep *suffix = make_optimized_suffix(&candidate);
+if(suffix != NULL) {
+struct ItinStep *old = first->next[0];
+first->next[0] = suffix;
+suffix->prev = first;
+old->prev = NULL;
+free_itinerary(old);
+success = 1;
+}
+
+cleanup:
+free(bodies);
+free(times);
+free(candidate.best_states);
+free(candidate.best_legs);
+free(candidate.dsms);
+free(candidate.dsm_results);
+return success;
+}

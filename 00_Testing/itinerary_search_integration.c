@@ -775,7 +775,7 @@ static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *sys
 }
 
 static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
-	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0;
+	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0;
 #define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
 	int maneuver_budget = 30, plain_budget = 30;
 	for(int d = 0; d < num_departures; d++) {
@@ -824,6 +824,22 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 				}
 			}
 			free_itinerary(copy);
+
+			// Re-optimizing maneuvers must leave a valid route that is not worse than before.
+			if(encounters >= 3 && maneuver_optimizations < 6) {
+				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+				double before = 0, after = 0;
+				for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) before += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+				if(optimize_itinerary_maneuvers(system, copy, dep, arr, TF_FLYBY)) {
+					maneuver_optimizations++;
+					problem = itinerary_structure_problem(copy);
+					if(problem) OPERATION_PROBLEM("route %d.%d: structure problem %d after optimizing maneuvers\n", d, j, problem);
+					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+					if(after > before * 1.05 + 50.0) OPERATION_PROBLEM("route %d.%d: maneuver optimization raised dv from %.1f to %.1f m/s\n", d, j, before, after);
+					if(itinerary_text_problem(copy, dep, arr)) OPERATION_PROBLEM("route %d.%d: text problem after optimizing maneuvers\n", d, j);
+				}
+				free_itinerary(copy);
+			}
 
 			for(int k = 0; k < nodes; k++) {
 				// Removing any step, including the first, last and maneuver nodes.

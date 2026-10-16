@@ -20,7 +20,7 @@
 	(POWERED_REPAIR_SLOTS + POWERED_ROUTE_REFINEMENT_LIMIT + POWERED_CHALLENGE_SLOTS))
 
 /* Opt-in deep-space maneuvers run only on this many of the best-ranked routes. */
-#define POWERED_DSM_ROUTE_LIMIT 20
+#define POWERED_DSM_ROUTE_LIMIT 50
 #define POWERED_DSM_OBJECTIVES_PER_ROUTE 900
 
 /* One impulsive maneuver on a leg: the leg's departure velocity changes by delta_v, the coast
@@ -83,6 +83,12 @@ double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
  * (SOI-corrected arcs), keeping maneuver nodes at their positions, and writes the velocities back.
  * Returns 0 and leaves the route untouched if it has fewer than three encounters or does not converge. */
 int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
+	double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
+
+/* Replaces the maneuver nodes of a single stored route (three or more encounters) by the best
+ * one-maneuver-per-leg solution at its current encounter dates; frees the old nodes after the first.
+ * Returns 0 and leaves the route untouched if it cannot be evaluated. */
+int optimize_itinerary_maneuvers(CelestSystem *system, struct ItinStep *first,
 	double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
 /* Same objective with optional per-leg DSMs (num_steps - 1 entries, NULL for none). DSM delta-v

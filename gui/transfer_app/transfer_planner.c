@@ -603,6 +603,18 @@ int find_closest_transfer(struct ItinStep *step) {
 G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data) {
 	if(tp_system == NULL) return;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
+	if(curr_transfer_tp != NULL && curr_transfer_tp->body == NULL) {
+		// On a maneuver node the button re-optimizes the route's maneuvers.
+		struct ItinStep *first = get_first(curr_transfer_tp);
+		if(optimize_itinerary_maneuvers(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type)) {
+			curr_transfer_tp = first;
+			for(struct ItinStep *step = first; step != NULL; step = step->next != NULL ? step->next[0] : NULL)
+				if(step->body == NULL) { curr_transfer_tp = step; break; }
+			current_date_tp = curr_transfer_tp->date;
+			update_itinerary();
+		}
+		return;
+	}
 	int success = find_closest_transfer(curr_transfer_tp);
 	if(success) update_itinerary();
 }
