@@ -65,6 +65,9 @@ typedef struct PoweredRouteCandidate {
 	PoweredDsmResult *dsm_results;
 	/* Optional starting flyby excess velocities per step (a stored, already converged solution). */
 	const Vector3 *seed_incoming, *seed_outgoing;
+	/* Accept the last iterate when the flyby iteration does not settle; converged_out reports which happened. */
+	int accept_unconverged;
+	int *converged_out;
 } PoweredRouteCandidate;
 
 typedef struct AuditReservoir {
@@ -351,7 +354,8 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 			break;
 		}
 	}
-	if(!valid_route || !converged || itinerary_search_cancelled(NULL)) {
+	if(candidate->converged_out != NULL) *candidate->converged_out = converged;
+	if(!valid_route || (!converged && !candidate->accept_unconverged) || itinerary_search_cancelled(NULL)) {
 		goto cleanup;
 	}
 
@@ -434,8 +438,9 @@ double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 	return evaluate_powered_flyby_route_objective_with_dsm(calc_data, bodies, times, num_steps, NULL);
 }
 
-int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
-		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+static int resolve_itinerary_internal(CelestSystem *system, struct ItinStep *first,
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type,
+		int accept_unconverged, int *converged_out) {
 	if(system == NULL || first == NULL || first->prev != NULL || first->body == NULL) return 0;
 	size_t num_nodes = 0, num_steps = 0;
 	struct ItinStep *last = first;
@@ -506,19 +511,28 @@ int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep 
 	Lambert3 *trial_legs = calloc(num_steps - 1, sizeof(*trial_legs));
 	PoweredDsmResult *trial_dsm = calloc(num_steps - 1, sizeof(*trial_dsm));
 	double resolved_dv = DBL_MAX;
+	int resolved_converged = 0;
 	for(int attempt = 0; attempt < 2 && trial_states != NULL && trial_legs != NULL && trial_dsm != NULL; attempt++) {
 		if(attempt == 0 && !seeded) continue;
 		candidate.seed_incoming = attempt == 0 ? seed_incoming : NULL;
 		candidate.seed_outgoing = attempt == 0 ? seed_outgoing : NULL;
+		int trial_converged = 0;
+		candidate.accept_unconverged = accept_unconverged;
+		candidate.converged_out = &trial_converged;
 		double trial_dv = evaluate_route_core(&candidate, &calc_data, times, trial_states, trial_legs, trial_dsm);
-		if(trial_dv < resolved_dv) {
+		// A converged result always beats an unconverged one; otherwise keep the cheaper.
+		int better = trial_dv < DBL_MAX && (resolved_dv >= DBL_MAX || (trial_converged && !resolved_converged) ||
+			(trial_converged == resolved_converged && trial_dv < resolved_dv));
+		if(better) {
 			resolved_dv = trial_dv;
+			resolved_converged = trial_converged;
 			memcpy(states, trial_states, num_steps * sizeof(*states));
 			memcpy(legs, trial_legs, (num_steps - 1) * sizeof(*legs));
 			memcpy(dsm_results, trial_dsm, (num_steps - 1) * sizeof(*dsm_results));
 		}
 	}
 	candidate.seed_incoming = candidate.seed_outgoing = NULL;
+	candidate.converged_out = NULL;
 	free(trial_states);
 	free(trial_legs);
 	free(trial_dsm);
@@ -545,6 +559,7 @@ int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep 
 		route_index++;
 	}
 	success = 1;
+	if(converged_out != NULL) *converged_out = resolved_converged;
 
 cleanup:
 	free(bodies);
@@ -555,6 +570,21 @@ cleanup:
 	free(dsm_results);
 	(void)num_nodes;
 	return success;
+}
+
+int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+	return resolve_itinerary_internal(system, first, dep_periapsis, arr_periapsis, last_transfer_type, 0, NULL);
+}
+
+int resolve_itinerary_with_powered_flybys_approximate(CelestSystem *system, struct ItinStep *first,
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type, int *converged) {
+	int strict_converged = 0;
+	if(resolve_itinerary_internal(system, first, dep_periapsis, arr_periapsis, last_transfer_type, 0, &strict_converged)) {
+		if(converged != NULL) *converged = 1;
+		return 1;
+	}
+	return resolve_itinerary_internal(system, first, dep_periapsis, arr_periapsis, last_transfer_type, 1, converged);
 }
 
 static int dsm_search_frame(Vector3 position, Vector3 velocity, Vector3 axes[3]) {

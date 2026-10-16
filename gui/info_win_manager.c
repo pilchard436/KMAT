@@ -81,9 +81,25 @@ G_MODULE_EXPORT void end_progress_calculation() {
 	get_incr_thread_counter(3);
 }
 
+static const void *msg_window_owner;
+
 void show_msg_window(char *msg) {
+	msg_window_owner = NULL;
 	gtk_label_set_text(GTK_LABEL(lb_mw_msg), msg);
 	gtk_widget_set_visible(GTK_WIDGET(msg_window), 1);
+}
+
+void show_msg_window_owned(char *msg, const void *owner) {
+	show_msg_window(msg);
+	msg_window_owner = owner;
+}
+
+int msg_window_shows_owner(const void *owner) {
+	return owner != NULL && owner == msg_window_owner && gtk_widget_get_visible(GTK_WIDGET(msg_window));
+}
+
+void update_msg_window_if_owned(char *msg, const void *owner) {
+	if(msg_window_shows_owner(owner)) gtk_label_set_text(GTK_LABEL(lb_mw_msg), msg);
 }
 
 G_MODULE_EXPORT gboolean on_hide_msg_window() {

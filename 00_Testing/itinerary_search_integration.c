@@ -1169,6 +1169,24 @@ static int check_departure_sweep_fixture(void) {
 			}
 		}
 	}
+	// A date the flyby iteration cannot settle on (second Earth flyby 13 days later) must still give an approximate result.
+	free_itinerary(first);
+	loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
+	first = get_first(loaded.itin);
+	struct ItinStep *second_earth = first->next[0]->next[0]->next[0];
+	update_itin_body_osvs(first, loaded.system);
+	set_itinerary_step_date(second_earth, loaded.system, second_earth->date + 13);
+	update_itin_body_osvs(first, loaded.system);
+	int approximate_converged = 1;
+	int approximate_ok = resolve_itinerary_with_powered_flybys_approximate(loaded.system, first, dep, arr, TF_FLYBY, &approximate_converged);
+	double approximate_total = 0;
+	for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL) approximate_total += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+	if(!approximate_ok || !isfinite(approximate_total) || approximate_total <= 0) {
+		fprintf(stderr, "Departure sweep: no approximate result for the second Earth flyby 13 days later\n");
+		valid = 0;
+	} else {
+		printf("Approximate re-solve of the second Earth flyby +13 days: converged %d, total dv %.0f m/s\n", approximate_converged, approximate_total);
+	}
 	free_itinerary(first);
 	if(loaded.system != NULL) free_celestial_system(loaded.system);
 	if(resolved < 30) {

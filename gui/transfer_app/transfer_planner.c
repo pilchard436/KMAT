@@ -188,6 +188,11 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 	update();
 }
 
+// Set when the flyby iteration did not settle and the shown delta-v is only the last iterate.
+static int tp_route_unconverged;
+// Identifies the itinerary details text in the shared message window.
+static char tp_details_owner;
+
 double calc_step_dv(struct ItinStep *step) {
 	return itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
 }
@@ -211,7 +216,7 @@ double calc_periapsis_height_tp() {
 }
 
 // Direct routes have no flyby, so plain Lambert arcs are exact; routes with flybys keep their stored velocities
-// if the powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
+// if even the approximate powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
 static int tp_resolve_route(void) {
 	struct ItinStep *first = get_first(curr_transfer_tp);
 	update_itin_body_osvs(first, tp_system);
@@ -219,9 +224,13 @@ static int tp_resolve_route(void) {
 	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) encounters += node->body != NULL;
 	if(encounters < 3) {
 		calc_itin_v_vectors_from_dates_and_r(first, tp_system);
+		tp_route_unconverged = 0;
 		return 1;
 	}
-	return resolve_itinerary_with_powered_flybys(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
+	int converged = 1;
+	int resolved = resolve_itinerary_with_powered_flybys_approximate(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type, &converged);
+	if(resolved) tp_route_unconverged = !converged;
+	return resolved;
 }
 
 void update_itinerary() {
@@ -252,6 +261,12 @@ void update() {
 	update_date_label();
 	update_transfer_panel();
 	update_tp_system_view();
+	// Keep an open itinerary details window in step with the route.
+	if(curr_transfer_tp != NULL && msg_window_shows_owner(&tp_details_owner)) {
+		char text[10000];
+		itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
+		update_msg_window_if_owned(text, &tp_details_owner);
+	}
 }
 
 void update_date_label() {
@@ -282,10 +297,10 @@ void update_transfer_panel() {
 		int body_id = curr_transfer_tp->body != NULL ? get_body_system_id(curr_transfer_tp->body, tp_system) : tp_system->num_bodies;
 		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), body_id);
 		fix_tfbody = FALSE;
-		char s_dv[20];
+		char s_dv[40];
 		sprintf(s_dv, "%6.0f m/s", calc_step_dv(curr_transfer_tp));
 		gtk_label_set_label(GTK_LABEL(lb_tp_transfer_dv), s_dv);
-		sprintf(s_dv, "%6.0f m/s", calc_total_dv());
+		sprintf(s_dv, tp_route_unconverged ? "%6.0f m/s (approx.)" : "%6.0f m/s", calc_total_dv());
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
 			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
@@ -599,7 +614,7 @@ G_MODULE_EXPORT void on_show_itin_overview() {
 	if(curr_transfer_tp == NULL) return;
 	char text[10000];
 	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
-	show_msg_window(text);
+	show_msg_window_owned(text, &tp_details_owner);
 }
 
 //G_MODULE_EXPORT void on_find_itinerary(GtkWidget* widget, gpointer data) {
@@ -667,6 +682,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(load_results.itin == NULL) return;
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
+	tp_route_unconverged = 0;
 	current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	tp_update_bodies();

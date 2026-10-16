@@ -85,6 +85,11 @@ double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep *first,
 	double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
+/* Same, but if the flyby iteration does not settle it writes back the last iterate and sets *converged to 0.
+ * Still returns 0, leaving the route untouched, if the route cannot be evaluated at all. */
+int resolve_itinerary_with_powered_flybys_approximate(CelestSystem *system, struct ItinStep *first,
+	double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type, int *converged);
+
 /* Replaces the maneuver nodes of a single stored route (three or more encounters) by the best
  * one-maneuver-per-leg solution at its current encounter dates; frees the old nodes after the first.
  * Returns 0 and leaves the route untouched if it cannot be evaluated. */
