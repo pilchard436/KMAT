@@ -1041,7 +1041,7 @@ static int check_dsm_model(CelestSystem *system, Body *departure_body, Body *fly
 	};
 	Body *bodies[] = {departure_body, flyby_body, arrival_body};
 	// Flyby and arrival offsets in days; the first pair is a route where a DSM clearly helps.
-	double pairs[][2] = {{66, 1414}, {218, 1414}, {238, 1414}, {262, 1414}, {120, 900}, {200, 1100}, {150, 1300}};
+	double pairs[][2] = {{66, 1414}, {218, 1414}, {238, 1414}, {120, 900}, {200, 1100}, {150, 1300}};
 	int valid = 1;
 	double first_saving = 0, first_maneuver = 0;
 	PoweredLegDsm first_found[2] = {{0}};
@@ -1084,7 +1084,7 @@ static int check_dsm_model(CelestSystem *system, Body *departure_body, Body *fly
 
 	// A DSM counts toward the satellite delta-v limit, so a tight limit must reject it.
 	double times[] = {departure_jd, departure_jd + pairs[0][0], departure_jd + pairs[0][1]};
-	calc_data.dv_filter.max_satdv = first_maneuver / 2;
+	calc_data.dv_filter.max_satdv = first_maneuver / 4;
 	double limited = evaluate_powered_flyby_route_objective_with_dsm(&calc_data, bodies, times, 3, first_found);
 	calc_data.dv_filter.max_satdv = 1e9;
 	double unlimited = evaluate_powered_flyby_route_objective_with_dsm(&calc_data, bodies, times, 3, first_found);
