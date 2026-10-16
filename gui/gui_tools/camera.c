@@ -93,6 +93,16 @@ Vector2 p3d_to_p2d(Camera *camera, Vector3 p3d) {
 	return (Vector2){px, py};
 }
 
+double camera_depth(Camera *camera, Vector3 p3d) {
+	return dot_vec3(subtract_vec3(p3d, camera->pos), camera->looking);
+}
+
+// Pixels covered by one metre at the given depth, matching p3d_to_p2d.
+double camera_pixels_per_meter(Camera *camera, double depth) {
+	double hw = camera->screen->width < camera->screen->height ? camera->screen->width : camera->screen->height;
+	return M_PI * 2 * (hw / 2.0) / depth;
+}
+
 void update_camera_position_from_angles(Camera *camera, double pos_pitch, double pos_yaw, double dist) {
 	Vector3 offset = (Vector3) {0, dist * cos(pos_pitch), dist * sin(pos_pitch)}; // yaw = 0 -> x: right, y: up/forward
 	camera->pos = add_vec3(camera->focus, rotate_vector_around_axis(offset, vec3(0, 0, 1), pos_yaw));

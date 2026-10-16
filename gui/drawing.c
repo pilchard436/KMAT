@@ -14,23 +14,34 @@ void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date)
 										osv_from_elements(body->orbit, jd_date) :
 									  	osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb);
 	Vector2 p2d_body = p3d_to_p2d(camera, osv_body.r);
-	cairo_arc(get_camera_screen_cairo(camera), p2d_body.x, p2d_body.y, 5, 0, 2 * M_PI);
+	// Never smaller than the marker dot, but the real size once zoomed in close.
+	double depth = camera_depth(camera, osv_body.r);
+	double marker_radius = 5;
+	if(depth > 0) marker_radius = fmax(marker_radius, body->radius * camera_pixels_per_meter(camera, depth));
+	cairo_arc(get_camera_screen_cairo(camera), p2d_body.x, p2d_body.y, marker_radius, 0, 2 * M_PI);
 	cairo_fill(get_camera_screen_cairo(camera));
+}
+
+// Cut where the segment passes behind the camera so it cannot streak across the screen.
+static void stroke_segment_3d(Camera *camera, Vector3 a, Vector3 b) {
+	const double near_depth = 1;
+	double za = camera_depth(camera, a), zb = camera_depth(camera, b);
+	if(za <= near_depth && zb <= near_depth) return;
+	if(za <= near_depth) a = add_vec3(a, scale_vec3(subtract_vec3(b, a), (near_depth - za) / (zb - za)));
+	else if(zb <= near_depth) b = add_vec3(b, scale_vec3(subtract_vec3(a, b), (near_depth - zb) / (za - zb)));
+	draw_stroke(get_camera_screen_cairo(camera), p3d_to_p2d(camera, a), p3d_to_p2d(camera, b));
 }
 
 void draw_orbit(Camera *camera, Orbit orbit) {
 	OSV osv = osv_from_orbit(orbit);
-	Vector2 p2d = p3d_to_p2d(camera, osv.r);
-
-	Vector2 last_p2d = p2d;
+	Vector3 last_r = osv.r;
 	double ta_step = deg2rad(0.5);
 
 	for(double dta = 0; dta < M_PI*2 + ta_step; dta += ta_step) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
-		p2d = p3d_to_p2d(camera, osv.r);
-		draw_stroke(get_camera_screen_cairo(camera), last_p2d, p2d);
-		last_p2d = p2d;
+		stroke_segment_3d(camera, last_r, osv.r);
+		last_r = osv.r;
 	}
 }
 
@@ -57,16 +68,14 @@ void draw_trajectory(Camera *camera, struct OSV osv0, double dt, struct Body *at
 	if(ta1 < ta0) ta1 += 2*M_PI;
 
 	OSV osv = osv0;
-	Vector2 p2d = p3d_to_p2d(camera, osv.r);
-	Vector2 last_p2d = p2d;
+	Vector3 last_r = osv.r;
 	double ta_step = (ta1 - ta0)/1000;
 
 	for(double dta = 0; dta <= (ta1 - ta0); dta += ta_step) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
-		p2d = p3d_to_p2d(camera, osv.r);
-		draw_stroke(get_camera_screen_cairo(camera), last_p2d, p2d);
-		last_p2d = p2d;
+		stroke_segment_3d(camera, last_r, osv.r);
+		last_r = osv.r;
 	}
 }
 
