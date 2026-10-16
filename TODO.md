@@ -47,6 +47,7 @@
 - [ ] Distinguish SOI/Lambert nonconvergence from physical infeasibility and improve convergence-related route rejection.
 - [ ] Add rejection counts for SOI geometry, convergence, configured date/time limits, departure delta-v, arrival delta-v, and total delta-v.
 - [ ] Quantify coverage lost to each sampling/budget cutoff using the UI-free profile and objective-grid comparisons.
+- [ ] Multi-flyby routes are under-searched at the default limits (Earth-Venus-Earth-Jupiter: best route 33,654 m/s vs 10,959 m/s reference; see `00_Testing/tests.md`). Allocate the seed budget fairly across first-leg nodes and levels instead of first-come in depth-first order, and revisit the first-leg window; measure with `--coverage-multi`.
 
 ## Integration Tests
 
