@@ -51,7 +51,7 @@ int is_porkchop_point_inside_dv_filter(struct PorkchopPoint porkchop_point, stru
 	double dv_sat = porkchop_point.dv_dsm;
 	dv_sat += dv_filter.last_transfer_type == TF_CIRC ? porkchop_point.dv_arr_circ : dv_filter.last_transfer_type == TF_CAPTURE ? porkchop_point.dv_arr_cap : 0;
 	if(porkchop_point.dv_dep > dv_filter.max_depdv) {is_inside_dv_filter = 0; printf("Departure dv too high: %f | %f\n", porkchop_point.dv_dep, dv_filter.max_depdv);}
-	if(dv_sat > dv_filter.max_satdv) {is_inside_dv_filter = 0; printf("Satellite dv too high: %f | %f\n", dv_sat, dv_filter.max_satdv);}
+	if(dv_sat + porkchop_point.dv_flyby > dv_filter.max_satdv) {is_inside_dv_filter = 0; printf("Satellite dv too high: %f | %f\n", dv_sat, dv_filter.max_satdv);}
 	if(porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter.max_totdv) {is_inside_dv_filter = 0; printf("Total dv too high: %f | %f\n", porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby, dv_filter.max_totdv);}
 	return is_inside_dv_filter;
 }

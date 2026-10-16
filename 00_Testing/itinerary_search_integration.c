@@ -639,7 +639,7 @@ static int run_full_profile(void) {
 			if(leaves[j]->body != arrival_body || !isfinite(total) ||
 				total > calc_data.dv_filter.max_totdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dv_dep > calc_data.dv_filter.max_depdv + POWERED_TEST_DV_TOLERANCE ||
-				point.dv_dsm > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
+				point.dv_dsm + point.dv_flyby > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dep_date < calc_data.jd_min_dep || point.dep_date > calc_data.jd_max_dep ||
 				leaves[j]->date > calc_data.jd_max_arr || point.dur > calc_data.max_duration)
 				valid = 0;

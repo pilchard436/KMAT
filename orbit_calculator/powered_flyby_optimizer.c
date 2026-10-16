@@ -358,7 +358,7 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 	double arrival_dv = arrival_delta_v(&calc_data->dv_filter, arrival_body,
 		legs[last_leg].v1, states[candidate->num_steps - 1].v,
 		calc_data->dv_filter.arr_periapsis);
-	if(arrival_dv + dsm_total_dv > calc_data->dv_filter.max_satdv) {
+	if(arrival_dv + dsm_total_dv + powered_flyby_dv > calc_data->dv_filter.max_satdv) {
 		goto cleanup;
 	}
 	total_dv = departure_dv + powered_flyby_dv + dsm_total_dv + arrival_dv;

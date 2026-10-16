@@ -560,7 +560,7 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				double dv_sat = porkchop_point.dv_dsm;
 				if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-						if(dv_sat > dv_filter->max_satdv ||
+						if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
@@ -692,7 +692,7 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 			double dv_sat = porkchop_point.dv_dsm;
 		if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 		if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-			if(dv_sat > dv_filter->max_satdv ||
+			if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 				porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);

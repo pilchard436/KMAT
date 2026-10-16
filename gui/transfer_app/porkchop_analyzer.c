@@ -442,7 +442,7 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 			/* duration */ pp.dur,
 			/* total dv */ pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
 			/* dep dv */ pp.dv_dep,
-			/* sat dv */ pp.dv_dsm + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
+			/* sat dv */ pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
 	};
 	double max[6];
 	memcpy(max, min, sizeof(max));
@@ -457,7 +457,7 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 			pp.dur,
 			pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
 			pp.dv_dep,
-			pp.dv_dsm + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
+			pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
 		};
 		for(int value_idx = 0; value_idx < 6; value_idx++) {
 			min[value_idx] = MIN(min[value_idx], values[value_idx]);
@@ -748,7 +748,7 @@ gboolean are_any_porkchop_points_in_filter(const double min[6], const double max
 			  pp.dur 				< min[PA_DUR] || pp.dur 				> max[PA_DUR] ||
 			  pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
 			  pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
-			  dv_sat 				< min[PA_SATDV] || dv_sat 				> max[PA_SATDV])) return TRUE;
+			  dv_sat + pp.dv_flyby 	< min[PA_SATDV] || dv_sat + pp.dv_flyby 	> max[PA_SATDV])) return TRUE;
 	}
 	return FALSE;
 }
@@ -804,7 +804,7 @@ void apply_filter() {
 			pp.dur 				< min[PA_DUR] 	|| pp.dur 				> max[PA_DUR] ||
 			pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
 			pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
-			dv_sat 				< min[PA_SATDV] || dv_sat 				> max[PA_SATDV]) pa_porkchop_points[i].inside_filter = 0;
+			dv_sat + pp.dv_flyby 	< min[PA_SATDV] || dv_sat + pp.dv_flyby 	> max[PA_SATDV]) pa_porkchop_points[i].inside_filter = 0;
 		else pa_porkchop_points[i].group->has_itin_inside_filter = 1;
 
 		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) rem_num_itins++;

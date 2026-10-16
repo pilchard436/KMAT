@@ -78,7 +78,7 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 	if(calc_data->dv_filter.last_transfer_type == TF_CAPTURE) satellite_dv += point.dv_arr_cap;
 	if(calc_data->dv_filter.last_transfer_type == TF_CIRC) satellite_dv += point.dv_arr_circ;
 	return point.dv_dep <= calc_data->dv_filter.max_depdv &&
-		satellite_dv <= calc_data->dv_filter.max_satdv &&
+		satellite_dv + point.dv_flyby <= calc_data->dv_filter.max_satdv &&
 		point.dv_dep + satellite_dv + point.dv_flyby <= calc_data->dv_filter.max_totdv;
 }
 
