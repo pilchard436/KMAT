@@ -63,6 +63,8 @@ typedef struct PoweredRouteCandidate {
 	double best_total_dv;
 	PoweredLegDsm *dsms;
 	PoweredDsmResult *dsm_results;
+	/* Optional starting flyby excess velocities per step (a stored, already converged solution). */
+	const Vector3 *seed_incoming, *seed_outgoing;
 } PoweredRouteCandidate;
 
 typedef struct AuditReservoir {
@@ -233,8 +235,8 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 	for(size_t i = 1; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		Body *body = candidate->bodies[i];
 		double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
-		incoming_excess[i] = subtract_vec3(legs[i - 1].v1, states[i].v);
-		outgoing_excess[i] = subtract_vec3(legs[i].v0, states[i].v);
+		incoming_excess[i] = candidate->seed_incoming != NULL ? candidate->seed_incoming[i] : subtract_vec3(legs[i - 1].v1, states[i].v);
+		outgoing_excess[i] = candidate->seed_outgoing != NULL ? candidate->seed_outgoing[i] : subtract_vec3(legs[i].v0, states[i].v);
 		if(!calculate_powered_flyby(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0),
 			body, minimum_periapsis, &flybys[i])) {
 			valid_route = 0;
@@ -481,7 +483,36 @@ int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep 
 	calc_data.seq_info.to_target.system = system;
 
 	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies, .times = times, .dsms = dsms};
-	if(evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results) >= DBL_MAX) goto cleanup;
+
+	// Start the flyby iteration from the stored, already converged velocities; fall back to plain arcs.
+	Vector3 *seed_incoming = calloc(num_steps, sizeof(*seed_incoming));
+	Vector3 *seed_outgoing = calloc(num_steps, sizeof(*seed_outgoing));
+	int seeded = seed_incoming != NULL && seed_outgoing != NULL;
+	size_t seed_index = 0;
+	for(struct ItinStep *node = first; node != NULL && seeded; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body == NULL) continue;
+		if(seed_index > 0 && seed_index + 1 < num_steps) {
+			OSV body_state;
+			if(node->next == NULL || !body_state_at(system, node->body, node->date, &body_state)) { seeded = 0; break; }
+			seed_incoming[seed_index] = subtract_vec3(node->v_arr, body_state.v);
+			seed_outgoing[seed_index] = subtract_vec3(node->next[0]->v_dep, body_state.v);
+			if(!is_finite_vector(seed_incoming[seed_index]) || !is_finite_vector(seed_outgoing[seed_index]) ||
+				!(mag_vec3(seed_incoming[seed_index]) > 0) || !(mag_vec3(seed_outgoing[seed_index]) > 0)) seeded = 0;
+		}
+		seed_index++;
+	}
+	double resolved_dv = DBL_MAX;
+	if(seeded) {
+		candidate.seed_incoming = seed_incoming;
+		candidate.seed_outgoing = seed_outgoing;
+		resolved_dv = evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results);
+		candidate.seed_incoming = candidate.seed_outgoing = NULL;
+	}
+	if(resolved_dv >= DBL_MAX)
+		resolved_dv = evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results);
+	free(seed_incoming);
+	free(seed_outgoing);
+	if(resolved_dv >= DBL_MAX) goto cleanup;
 
 	route_index = 0;
 	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
