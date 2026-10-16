@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define POWERED_TEST_DV_TOLERANCE 0.1
 #define POWERED_TEST_MIN_LEG_DAYS 10.0
@@ -947,7 +948,9 @@ static int run_multi_flyby_coverage(CelestSystem *system, Body *departure_body, 
 		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 3
 	};
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	time_t search_started = time(NULL);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	double search_seconds = difftime(time(NULL), search_started);
 
 	int exit_code = EXIT_FAILURE;
 	CoverageRoute *found = NULL, *valleys = NULL, *families = NULL;
@@ -1040,8 +1043,9 @@ static int run_multi_flyby_coverage(CelestSystem *system, Body *departure_body, 
 		coarse_step, evaluations, feasible_cells, valley_count);
 	printf("Reference best %.1f m/s; search returned %d routes of this sequence, best %.1f m/s\n",
 		reference_best, found_count, search_best);
-	printf("Powered seeds added %llu, encounter searches skipped after budget %llu\n",
-		results.powered_seed_stats.seeds_added, results.powered_seed_stats.searches_budget_skipped);
+	printf("Powered seeds added %llu, encounter searches skipped after budget %llu; search took %.0f s\n",
+		results.powered_seed_stats.seeds_added, results.powered_seed_stats.searches_budget_skipped,
+		search_seconds);
 	int in_basin = 0, tight = 0;
 	for(int i = 0; i < family_count; i++) {
 		double best_in_basin = DBL_MAX;
