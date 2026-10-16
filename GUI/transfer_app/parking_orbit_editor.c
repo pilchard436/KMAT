@@ -7,7 +7,7 @@
 #include <math.h>
 #include <stdlib.h>
 
-enum { PO_SMA, PO_ECC, PO_INC, PO_RAAN, PO_ARGP, PO_TA, PO_NUM };
+enum { PO_PERI, PO_APO, PO_INC, PO_RAAN, PO_ARGP, PO_TA, PO_NUM };
 
 extern double ic_dep_periapsis;
 Body *ic_get_departure_body(void);
@@ -22,7 +22,8 @@ static int po_loading;
 static const double DEG = M_PI / 180.0;
 
 static void po_write_entries(void) {
-	double values[PO_NUM] = {po_orbit.semi_major_axis / 1e3, po_orbit.eccentricity, po_orbit.inclination / DEG,
+	double values[PO_NUM] = {(parking_orbit_periapsis_radius(&po_orbit) - po_body->radius) / 1e3,
+		(parking_orbit_apoapsis_radius(&po_orbit) - po_body->radius) / 1e3, po_orbit.inclination / DEG,
 		po_orbit.raan / DEG, po_orbit.arg_periapsis / DEG, po_orbit.true_anomaly / DEG};
 	po_loading = 1;
 	for(int i = 0; i < PO_NUM; i++) {
@@ -41,7 +42,11 @@ static int po_read_entries(ParkingOrbit *out) {
 		v[i] = strtod(text, &end);
 		if(end == text || *end != '\0' || !isfinite(v[i])) return 0;
 	}
-	*out = (ParkingOrbit){.semi_major_axis = v[PO_SMA] * 1e3, .eccentricity = v[PO_ECC], .inclination = v[PO_INC] * DEG,
+	double periapsis_radius = po_body->radius + v[PO_PERI] * 1e3, apoapsis_radius = po_body->radius + v[PO_APO] * 1e3;
+	// An apoapsis below the periapsis gives a negative eccentricity, which the validity check rejects.
+	*out = (ParkingOrbit){.semi_major_axis = (periapsis_radius + apoapsis_radius) / 2,
+		.eccentricity = (apoapsis_radius - periapsis_radius) / (apoapsis_radius + periapsis_radius),
+		.inclination = v[PO_INC] * DEG,
 		.raan = v[PO_RAAN] * DEG, .arg_periapsis = v[PO_ARGP] * DEG, .true_anomaly = v[PO_TA] * DEG};
 	return 1;
 }
@@ -133,7 +138,7 @@ static void po_update(void) {
 	} else if(!po_read_entries(&parsed)) {
 		gtk_label_set_text(GTK_LABEL(po_status), "Invalid number in one of the fields.");
 	} else if(!parking_orbit_is_valid(&parsed, po_body)) {
-		g_snprintf(text, sizeof(text), "Invalid orbit: needs 0 <= e < 1 and a periapsis above the surface and atmosphere of %s.", po_body->name);
+		g_snprintf(text, sizeof(text), "Invalid orbit: the apoapsis must not be below the periapsis, and the periapsis must be above the surface and atmosphere of %s.", po_body->name);
 		gtk_label_set_text(GTK_LABEL(po_status), text);
 	} else {
 		po_orbit = parsed;
@@ -168,7 +173,7 @@ static void on_po_motion(GtkWidget *widget, GdkEventButton *event, gpointer ptr)
 }
 
 void init_parking_orbit_editor(GtkBuilder *builder) {
-	static const char *ids[PO_NUM] = {"tf_po_sma", "tf_po_ecc", "tf_po_inc", "tf_po_raan", "tf_po_argp", "tf_po_ta"};
+	static const char *ids[PO_NUM] = {"tf_po_peri", "tf_po_apo", "tf_po_inc", "tf_po_raan", "tf_po_argp", "tf_po_ta"};
 	po_window = GTK_WIDGET(gtk_builder_get_object(builder, "parking_orbit_window"));
 	for(int i = 0; i < PO_NUM; i++) po_entries[i] = GTK_WIDGET(gtk_builder_get_object(builder, ids[i]));
 	po_toggle = GTK_WIDGET(gtk_builder_get_object(builder, "cb_po_enable"));

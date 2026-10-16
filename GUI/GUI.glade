@@ -124,7 +124,7 @@ The departure burn is minimized over the orbit.</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
                     <property name="halign">end</property>
-                    <property name="label" translatable="yes">Semi-major axis (km):</property>
+                    <property name="label" translatable="yes">Periapsis altitude (km):</property>
                   </object>
                   <packing>
                     <property name="left-attach">0</property>
@@ -132,7 +132,7 @@ The departure burn is minimized over the orbit.</property>
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="tf_po_sma">
+                  <object class="GtkEntry" id="tf_po_peri">
                     <property name="visible">True</property>
                     <property name="can-focus">True</property>
                     <property name="width-chars">12</property>
@@ -148,7 +148,7 @@ The departure burn is minimized over the orbit.</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
                     <property name="halign">end</property>
-                    <property name="label" translatable="yes">Eccentricity:</property>
+                    <property name="label" translatable="yes">Apoapsis altitude (km):</property>
                   </object>
                   <packing>
                     <property name="left-attach">0</property>
@@ -156,7 +156,7 @@ The departure burn is minimized over the orbit.</property>
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="tf_po_ecc">
+                  <object class="GtkEntry" id="tf_po_apo">
                     <property name="visible">True</property>
                     <property name="can-focus">True</property>
                     <property name="width-chars">12</property>
