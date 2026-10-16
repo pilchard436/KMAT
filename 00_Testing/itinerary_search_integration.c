@@ -154,7 +154,7 @@ static int score_unpowered_grid_route(CelestSystem *system, Body **bodies,
 		!isfinite(outbound.v0.x) || !isfinite(outbound.v0.y) || !isfinite(outbound.v0.z)) return 0;
 	PoweredFlybyResult unpowered_flyby;
 	double minimum_periapsis = bodies[1]->radius + bodies[1]->atmo_alt + 1e4;
-	if(!calculate_powered_flyby(inbound.v1, outbound.v0, states[1].v,
+	if(!calculate_powered_flyby_robust(inbound.v1, outbound.v0, states[1].v,
 		bodies[1], minimum_periapsis, &unpowered_flyby) ||
 		unpowered_flyby.burn_delta_v > 1.0) return 0;
 	*objective = evaluate_powered_flyby_route_objective(calc_data, bodies, times, 3);
@@ -191,7 +191,7 @@ static void consider_unpowered_baseline(Body **bodies,
 		const Itin_Calc_Data *calc_data, double *best_baseline) {
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = bodies[1]->radius + bodies[1]->atmo_alt + 1e4;
-	if(!calculate_powered_flyby(inbound.v1, outbound.v0, flyby_state.v,
+	if(!calculate_powered_flyby_robust(inbound.v1, outbound.v0, flyby_state.v,
 		bodies[1], minimum_periapsis, &flyby) ||
 		flyby.burn_delta_v > POWERED_TEST_DV_TOLERANCE) return;
 	double times[] = {departure_jd, flyby_jd, arrival_jd};
@@ -373,7 +373,7 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 			if(step->body != flyby_body) continue;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby_body->radius + flyby_body->atmo_alt + 1e4;
-			if(calculate_powered_flyby(step->v_arr, outbound->v_dep, step->v_body,
+			if(calculate_powered_flyby_robust(step->v_arr, outbound->v_dep, step->v_body,
 				flyby_body, minimum_periapsis, &flyby_result) &&
 				isfinite(flyby_result.burn_delta_v)) {
 				has_valid_powered_route = 1;
@@ -774,7 +774,7 @@ static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *sys
 	return itinerary_structure_problem(first) != 0;
 }
 
-static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
+static int check_itinerary_operations_body(struct ItinStep **departures, int num_departures, CelestSystem *system) {
 	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0, sweep_routes = 0;
 #define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
 	int maneuver_budget = 30, plain_budget = 30;
@@ -907,6 +907,13 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 	if(problems == 0) printf("Itinerary operations check passed: %d routes (%d with maneuvers) survive structure, text, dv-sum, recompute, removal and date-change checks\n", routes, maneuver_routes);
 	else fprintf(stderr, "Itinerary operations check failed: %d problems on %d routes\n", problems, routes);
 	return problems == 0 && routes > 0;
+}
+
+static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
+	set_itin_robust_flybys(1);
+	int result = check_itinerary_operations_body(departures, num_departures, system);
+	set_itin_robust_flybys(0);
+	return result;
 }
 
 static int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body,
@@ -1098,8 +1105,30 @@ static int check_dsm_model(CelestSystem *system, Body *departure_body, Body *fly
 	return valid;
 }
 
+// Flybys with nearly equal in and out speeds must stay feasible whichever speed is larger.
+static int check_near_equal_speed_flybys(Body *body) {
+	static const double speed_offsets[] = {-0.9, -0.5, 0.5, 0.9};
+	int valid = 1;
+	set_itin_robust_flybys(1);
+	double minimum_radius = body->radius + body->atmo_alt + 1e4;
+	Vector3 incoming = vec3(6000, 0, 0);
+	for(int i = 0; i < 4; i++) {
+		double speed = 6000 + speed_offsets[i];
+		Vector3 outgoing = vec3(speed * cos(M_PI / 3), speed * sin(M_PI / 3), 0);
+		PoweredFlybyResult result;
+		int feasible = calculate_powered_flyby_robust(incoming, outgoing, vec3(0, 0, 0), body, minimum_radius, &result);
+		if(!feasible || !isfinite(result.burn_delta_v) || result.burn_delta_v > 5.0) {
+			fprintf(stderr, "Near-equal-speed flyby with a %+.1f m/s speed difference: feasible %d, burn %.3f m/s\n", speed_offsets[i], feasible, feasible ? result.burn_delta_v : -1.0);
+			valid = 0;
+		}
+	}
+	set_itin_robust_flybys(0);
+	if(valid) printf("Near-equal-speed flyby check passed on %s\n", body->name);
+	return valid;
+}
+
 // A saved route whose flyby iteration used to settle on a mirrored, costlier solution on some departure dates.
-static int check_departure_sweep_fixture(void) {
+static int check_departure_sweep_fixture_body(void) {
 	struct ItinLoadFileResults loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
 	if(loaded.itin == NULL) {
 		fprintf(stderr, "Departure sweep fixture could not be loaded\n");
@@ -1131,6 +1160,24 @@ static int check_departure_sweep_fixture(void) {
 			previous = current;
 		}
 	}
+	// Moving the maneuver node a day at a time in either direction must always re-solve.
+	for(int direction = -1; direction <= 1; direction += 2) {
+		free_itinerary(first);
+		loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
+		first = get_first(loaded.itin);
+		struct ItinStep *maneuver = first->next[0];
+		if(maneuver->body != NULL) { fprintf(stderr, "Departure sweep fixture has no maneuver node\n"); valid = 0; continue; }
+		update_itin_body_osvs(first, loaded.system);
+		for(int click = 1; click <= 20; click++) {
+			set_itinerary_step_date(maneuver, loaded.system, maneuver->date + direction);
+			update_itin_body_osvs(first, loaded.system);
+			if(!resolve_itinerary_with_powered_flybys(loaded.system, first, dep, arr, TF_FLYBY)) {
+				fprintf(stderr, "Departure sweep: the maneuver could not be re-solved after moving it %+d day(s) (click %d)\n", direction, click);
+				valid = 0;
+				break;
+			}
+		}
+	}
 	free_itinerary(first);
 	if(loaded.system != NULL) free_celestial_system(loaded.system);
 	if(resolved < 30) {
@@ -1139,6 +1186,13 @@ static int check_departure_sweep_fixture(void) {
 	}
 	if(valid) printf("Departure sweep fixture passed: %d edits re-solved, largest single-click dv ratio %.2f\n", resolved, worst);
 	return valid;
+}
+
+static int check_departure_sweep_fixture(void) {
+	set_itin_robust_flybys(1);
+	int result = check_departure_sweep_fixture_body();
+	set_itin_robust_flybys(0);
+	return result;
 }
 
 int main(int argc, char **argv) {
@@ -1193,9 +1247,10 @@ int main(int argc, char **argv) {
 	int dsm_valid = run_dsm_comparison(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
 	int sweep_valid = check_departure_sweep_fixture();
+	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid ||
+	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid || !near_equal_valid ||
 		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
 		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
 			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);

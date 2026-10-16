@@ -89,7 +89,7 @@ void draw_itinerary_step_point(Camera *camera, Vector3 r) {
 // Powered flybys change excess speed, so only the periapsis clearance decides viability.
 static int is_flyby_leg_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
 	PoweredFlybyResult result;
-	return calculate_powered_flyby(v_arr, v_dep, v_body, body, body->radius + body->atmo_alt + 1e4, &result);
+	return calculate_powered_flyby_robust(v_arr, v_dep, v_body, body, body->radius + body->atmo_alt + 1e4, &result);
 }
 
 void set_trajectory_color(cairo_t *cr, int trajectory_is_in_the_past, int trajectory_is_viable) {

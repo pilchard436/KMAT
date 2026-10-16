@@ -158,6 +158,13 @@ void remove_step_from_itinerary(struct ItinStep *step);
 // delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
+// calculate_powered_flyby, but with the robust handling below only on threads that enabled it (the GUI thread):
+// a flyby whose speeds differ by under 1 m/s is not rejected when the library's unpowered-periapsis shortcut
+// cannot match the turn; its burn is then accurate to about 2 m/s. The search threads keep the library behaviour.
+void set_itin_robust_flybys(int enabled);
+int calculate_powered_flyby_robust(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
+	double minimum_periapsis_radius, PoweredFlybyResult *result);
+
 // sets a step's date and pushes later steps back if needed; a maneuver node slides along its incoming arc
 void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date);
 
