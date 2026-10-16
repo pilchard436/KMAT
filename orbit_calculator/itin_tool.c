@@ -1266,6 +1266,10 @@ double flyby_periapsis_shortfall(struct ItinStep *step) {
 
 int flyby_hits_surface(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
+	// The burn raises the periapsis, so only a flyby the burn cannot fix is a crash.
+	PoweredFlybyResult flyby;
+	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
+			step->body->radius + step->body->atmo_alt + 1e4, &flyby)) return 0;
 	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
 	return isfinite(unpowered) && unpowered < step->body->radius;
 }
