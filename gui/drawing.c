@@ -106,10 +106,34 @@ void draw_itinerary_spacecraft(Camera *camera, Vector3 r) {
 	cairo_stroke(cr);
 }
 
+// A starburst in the style of a collision/explosion icon.
+static void draw_crash_symbol(cairo_t *cr, Vector2 p) {
+	const int points = 10;
+	for(int i = 0; i < points * 2; i++) {
+		double angle = M_PI * i / points - M_PI / 2;
+		double radius = i % 2 == 0 ? 15 : 7;
+		double x = p.x + radius * cos(angle), y = p.y + radius * sin(angle);
+		if(i == 0) cairo_move_to(cr, x, y);
+		else cairo_line_to(cr, x, y);
+	}
+	cairo_close_path(cr);
+	cairo_set_source_rgb(cr, 1, 0.55, 0.1);
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgb(cr, 0.85, 0.05, 0.05);
+	cairo_set_line_width(cr, 2);
+	cairo_stroke(cr);
+	cairo_arc(cr, p.x, p.y, 3.5, 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 1, 0.95, 0.4);
+	cairo_fill(cr);
+}
+
 // A ring marks a flyby or an endpoint, a diamond a deep-space maneuver.
 static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector2 p = p3d_to_p2d(camera, step->r);
+	int crashes = flyby_periapsis_shortfall(step) > 0;
+	cairo_new_path(cr);
+	if(crashes) draw_crash_symbol(cr, p);
 	cairo_set_source_rgb(cr, 1, 1, 1);
 	cairo_set_line_width(cr, 1.5);
 	if(step->body != NULL) {
@@ -125,8 +149,10 @@ static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 
 	char date_text[20], label[80];
 	date_to_string(convert_JD_date(step->date, get_settings_datetime_type()), date_text, 0);
-	snprintf(label, sizeof(label), "%s  %s", step->body != NULL ? step->body->name : "DSM", date_text);
-	set_label_font(cr, 11, 0);
+	snprintf(label, sizeof(label), "%s  %s%s", step->body != NULL ? step->body->name : "DSM", date_text,
+		crashes ? "  CRASH" : "");
+	set_label_font(cr, 11, crashes);
+	if(crashes) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
 	cairo_move_to(cr, p.x + 11, p.y - 9);
 	cairo_show_text(cr, label);
 	cairo_new_path(cr);

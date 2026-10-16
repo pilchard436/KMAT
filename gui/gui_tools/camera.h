@@ -7,6 +7,7 @@
 
 typedef struct {
 	Vector3 pos, looking, right;
+	Vector3 focus;	// the point the camera orbits, looks at and zooms towards
 	double max_pos_dist, min_pos_dist;
 	gboolean rotation_sensitive;
 	Screen *screen;
@@ -20,6 +21,7 @@ Vector2 p3d_to_p2d(Camera *camera, Vector3 p3d);
 void update_camera_to_celestial_system(Camera *camera, CelestSystem *system, double initial_pos_pitch, double initial_pos_yaw);
 void update_camera_position_from_angles(Camera *camera, double pos_pitch, double pos_yaw, double dist);
 void camera_look_to_center(Camera *camera);
+void camera_set_focus(Camera *camera, Vector3 focus);
 void update_camera_distance_to_center(Camera *camera, double new_distance);
 void update_camera_distance_wrt_width_at_center(Camera *camera, double visible_width);
 void camera_zoom_to_fit_itinerary(Camera *camera, struct ItinStep *itin_step);

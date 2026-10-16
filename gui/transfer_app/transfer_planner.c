@@ -63,6 +63,7 @@ void update_tp_system_view();
 void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
 void on_tp_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_tp_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
+static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
 
 
 void init_transfer_planner(GtkBuilder *builder) {
@@ -96,6 +97,7 @@ void init_transfer_planner(GtkBuilder *builder) {
 	cb_tp_anim_speed = GTK_WIDGET(gtk_builder_get_object(builder, "cb_tp_anim_speed"));
 
 	tp_system_camera = new_camera(GTK_WIDGET(da_tp), &on_tp_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_tp_screen_mouse_move, &on_tp_screen_scroll);
+	g_signal_connect(da_tp, "button-press-event", G_CALLBACK(on_tp_screen_button_press), NULL);
 
 
 	tp_system = NULL;
@@ -121,9 +123,63 @@ void init_transfer_planner(GtkBuilder *builder) {
 
 
 // TRANSFER PLANNER SYSTEM VIEW CALLBACKS -----------------------------------------------
+// The body the view is centered on; NULL is the central body at the origin.
+static Body *tp_focus_body;
+
+static Vector3 tp_body_position(Body *body, double jd) {
+	if(body == NULL || body == tp_system->cb) return vec3(0, 0, 0);
+	OSV osv = tp_system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(body->orbit, jd) :
+		osv_from_ephem(body->ephem, body->num_ephems, jd, tp_system->cb);
+	return osv.r;
+}
+
+// Keeps the view on a moving body as the date changes.
+static void tp_follow_focus_body(void) {
+	if(tp_focus_body == NULL) return;
+	camera_set_focus(tp_system_camera, tp_body_position(tp_focus_body, current_date_tp));
+}
+
+static void tp_focus_on(Body *body) {
+	if(tp_system == NULL) return;
+	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
+	if(body == NULL || body == tp_system->cb) {
+		tp_focus_body = NULL;
+		update_camera_to_celestial_system(tp_system_camera, tp_system, pitch, yaw);
+		return;
+	}
+	tp_focus_body = body;
+	camera_set_focus(tp_system_camera, tp_body_position(body, current_date_tp));
+	// Frame the sphere of influence, and allow zooming in close to the surface.
+	double soi = fabs(body->orbit.a) * pow(body->mu / tp_system->cb->mu, 0.4);
+	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
+	update_camera_distance_wrt_width_at_center(tp_system_camera, soi);
+	tp_system_camera->min_pos_dist = body->radius * 3;
+	camera_look_to_center(tp_system_camera);
+}
+
+static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
+	(void)widget; (void)ptr;
+	if(event->type != GDK_2BUTTON_PRESS || event->button != 1 || tp_system == NULL) return FALSE;
+	const double pick_radius = 12;
+	Body *hit = NULL;
+	for(int i = -1; i < tp_system->num_bodies; i++) {
+		Body *body = i < 0 ? tp_system->cb : tp_system->bodies[i];
+		if(i >= 0 && !body_show_status_tp[i]) continue;
+		Vector2 p = p3d_to_p2d(tp_system_camera, tp_body_position(body, current_date_tp));
+		if(hypot(p.x - event->x, p.y - event->y) > pick_radius) continue;
+		// Overlapping markers resolve to the parent, which is the more massive body.
+		if(hit == NULL || body->mu > hit->mu) hit = body;
+	}
+	tp_focus_on(hit);
+	update_tp_system_view();
+	return FALSE;
+}
+
 void update_tp_system_view() {
 	clear_camera_screen(tp_system_camera);
 	if(tp_system == NULL) return;
+	tp_follow_focus_body();
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
 
@@ -182,7 +238,7 @@ G_MODULE_EXPORT void on_tp_system_change() {
 
 	tp_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system))];
 	update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
@@ -197,7 +253,7 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 	gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 1);
 	tp_system = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
 
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
@@ -769,7 +825,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
 	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
 	update();
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
 	camera_zoom_to_fit_itinerary(tp_system_camera, curr_transfer_tp);
 	update_tp_system_view();
 	char system_name[50];
