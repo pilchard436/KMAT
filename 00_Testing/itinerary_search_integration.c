@@ -37,7 +37,7 @@ static int check_speed_changing_seed_generation(CelestSystem *system, Body *depa
 	int found_diverse_seeds = 0;
 	for(int days = 120; days <= 600 && !found_diverse_seeds; days += 120) {
 		OSV encounter = osv_from_elements(flyby->orbit, departure_jd + days);
-		Lambert3 inbound = calc_lambert3_selected(dep.r, encounter.r, days * 86400.0, system->cb);
+		Lambert3 inbound = calc_lambert3(dep.r, encounter.r, days * 86400.0, system->cb);
 		if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
 			inbound.success == LAMBERT_MAX_ITERATIONS) continue;
 		struct ItinStep step = {.body = flyby, .date = departure_jd + days,
@@ -64,8 +64,7 @@ static int check_speed_changing_seed_generation(CelestSystem *system, Body *depa
 }
 
 static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
-        double min_departure_jd, double max_arrival_jd, enum LambertSolverMethod solver,
-        int *num_nodes, int *num_itins) {
+        double min_departure_jd, double max_arrival_jd, int *num_nodes, int *num_itins) {
 	Body *flyby_bodies[] = {departure_body, arrival_body};
 	Itin_Calc_Data calc_data = {0};
 	calc_data.jd_min_dep = min_departure_jd;
@@ -89,7 +88,6 @@ static int run_bounded_search(CelestSystem *system, Body *departure_body, Body *
 		.num_flyby_bodies = 2
 	};
 
-	set_lambert_solver_method(solver);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	*num_nodes = results.num_nodes;
 	*num_itins = results.num_itins;
@@ -138,9 +136,9 @@ static int score_unpowered_grid_route(CelestSystem *system, Body **bodies,
 		if(!isfinite(states[i].r.x) || !isfinite(states[i].r.y) || !isfinite(states[i].r.z) ||
 			!isfinite(states[i].v.x) || !isfinite(states[i].v.y) || !isfinite(states[i].v.z)) return 0;
 	}
-	Lambert3 inbound = calc_lambert3_selected(states[0].r, states[1].r,
+	Lambert3 inbound = calc_lambert3(states[0].r, states[1].r,
 		(times[1] - times[0]) * 86400, system->cb);
-	Lambert3 outbound = calc_lambert3_selected(states[1].r, states[2].r,
+	Lambert3 outbound = calc_lambert3(states[1].r, states[2].r,
 		(times[2] - times[1]) * 86400, system->cb);
 	if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
 		inbound.success == LAMBERT_MAX_ITERATIONS || outbound.success == LAMBERT_FAIL_NAN ||
@@ -171,7 +169,7 @@ static int outgoing_excess_speed_difference(CelestSystem *system, Body *flyby_bo
 		osv_from_ephem(arrival_body->ephem, arrival_body->num_ephems, arrival_jd, system->cb);
 	if(!isfinite(arrival_state.r.x) || !isfinite(arrival_state.r.y) || !isfinite(arrival_state.r.z) ||
 		!isfinite(arrival_state.v.x) || !isfinite(arrival_state.v.y) || !isfinite(arrival_state.v.z)) return 0;
-	*outbound = calc_lambert3_selected(flyby_state.r, arrival_state.r,
+	*outbound = calc_lambert3(flyby_state.r, arrival_state.r,
 		(arrival_jd - flyby_jd) * 86400, system->cb);
 	if(!is_valid_lambert_solution(*outbound)) return 0;
 	Vector3 outgoing_excess = subtract_vec3(outbound->v0, flyby_state.v);
@@ -216,7 +214,7 @@ static double find_unpowered_grid_baseline(CelestSystem *system, Body *departure
 			osv_from_ephem(flyby_body->ephem, flyby_body->num_ephems, flyby_jd, system->cb);
 		if(!isfinite(flyby_state.r.x) || !isfinite(flyby_state.r.y) || !isfinite(flyby_state.r.z) ||
 			!isfinite(flyby_state.v.x) || !isfinite(flyby_state.v.y) || !isfinite(flyby_state.v.z)) continue;
-		Lambert3 inbound = calc_lambert3_selected(departure_state.r, flyby_state.r,
+		Lambert3 inbound = calc_lambert3(departure_state.r, flyby_state.r,
 			flyby_offset * 86400, system->cb);
 		if(!is_valid_lambert_solution(inbound)) continue;
 		Vector3 incoming_excess = subtract_vec3(inbound.v1, flyby_state.v);
@@ -340,7 +338,6 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 		.flyby_bodies = flyby_bodies,
 		.num_flyby_bodies = 2
 	};
-	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	if(results.num_deps <= 0 || results.num_itins <= 0) goto cleanup;
 	if(results.powered_seed_stats.seeds_added > POWERED_SEEDS_PER_DEPARTURE ||
@@ -531,7 +528,6 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 		.num_flyby_bodies = num_flybys,
 		.allow_resonant = benchmark_resonant
 	};
-	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	printf("\n=== %s saved-settings benchmark ===\n", label);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	printf("%s benchmark result: %d departure roots, %d nodes, %d itineraries\n",
@@ -630,7 +626,6 @@ static int run_full_profile(void) {
 		.flyby_bodies = flyby_bodies,
 		.num_flyby_bodies = (int)(sizeof(candidate_names) / sizeof(candidate_names[0]))
 	};
-	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	int valid = results.num_itins > 0 && results.powered_routes_corrected > 0 &&
 		results.powered_itineraries_pruned * 100 <= results.num_itins &&
@@ -949,7 +944,6 @@ static int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *
 		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body,
 		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 2
 	};
-	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	calc_data.allow_dsm = 0;
 	Itin_Calc_Results without_dsm = search_for_itineraries(calc_data);
 	calc_data.allow_dsm = 1;
@@ -1140,7 +1134,6 @@ static int check_resonant_flybys(CelestSystem *system, Body *departure_body, Bod
 		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body,
 		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 2, .allow_resonant = 1
 	};
-	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	calc_data.allow_dsm = 1;
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 
@@ -1399,12 +1392,10 @@ int main(int argc, char **argv) {
 		mag_vec3(departure_state.r), mag_vec3(arrival_state.r), system->cb).dur / 86400;
 	double min_transfer_duration = 0.4 * hohmann_duration;
 	double max_arrival_jd = departure_jd + min_transfer_duration + 0.25;
-	int legacy_nodes, legacy_itins, izzo_nodes, izzo_itins;
+	int search_nodes, search_itins;
 
-	int legacy_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,
-		max_arrival_jd, LAMBERT_METHOD_LEGACY, &legacy_nodes, &legacy_itins);
-	int izzo_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,
-		max_arrival_jd, LAMBERT_METHOD_IZZO, &izzo_nodes, &izzo_itins);
+	int search_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,
+		max_arrival_jd, &search_nodes, &search_itins);
 	int powered_valid = run_powered_flyby_objective_regression(system, departure_body,
 		flyby_body, arrival_body, departure_jd, hohmann_duration);
 	int seeds_valid = check_speed_changing_seed_generation(system, departure_body,
@@ -1419,13 +1410,12 @@ int main(int argc, char **argv) {
 	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid || !resonant_valid || !near_equal_valid ||
-		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
-		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
-			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);
+	if(!search_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid || !resonant_valid || !near_equal_valid) {
+		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
+			search_nodes, search_itins);
 		return EXIT_FAILURE;
 	}
-	printf("UI-free itinerary integration passed: %d nodes, %d itineraries with both solvers\n",
-		izzo_nodes, izzo_itins);
+	printf("UI-free itinerary integration passed: %d nodes, %d itineraries\n",
+		search_nodes, search_itins);
 	return EXIT_SUCCESS;
 }

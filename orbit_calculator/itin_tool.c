@@ -94,7 +94,7 @@ static int evaluate_powered_flyby_seed(struct ItinStep *tf, CelestSystem *system
 #else
 	(void)right_side;
 #endif
-	seed->transfer = calc_lambert3_selected_cancellable(tf->r, seed->target_state.r,
+	seed->transfer = calc_lambert3_cancellable(tf->r, seed->target_state.r,
 		dt, system->cb, itinerary_search_cancelled, NULL);
 	if(itinerary_search_cancelled(NULL) ||
 		seed->transfer.success == LAMBERT_FAIL_NAN ||
@@ -137,7 +137,7 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 
 Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, int variant,
 		LambertCancelCheck cancel_check, void *cancel_context) {
-	if(variant <= 0) return calc_lambert3_selected_cancellable(r0, r1, dt, cb, cancel_check, cancel_context);
+	if(variant <= 0) return calc_lambert3_cancellable(r0, r1, dt, cb, cancel_check, cancel_context);
 	return calc_lambert3_revs_cancellable(r0, r1, dt, cb, (variant + 1) / 2, (variant - 1) % 2,
 		cancel_check, cancel_context);
 }
@@ -807,7 +807,7 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 		next = step->next[0];
 		// A deep-space maneuver node keeps its stored position, so its two arcs are ordinary Lambert legs.
 		double dt = (next->date - step->date) * 86400;
-		Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
+		Lambert3 transfer = calc_lambert3(step->r, next->r, dt, system->cb);
 		next->v_dep = transfer.v0;
 		next->v_arr = transfer.v1;
 		step = next;
