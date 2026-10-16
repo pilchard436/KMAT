@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <stdint.h>
 #include "tools/thread_pool.h"
+#include "tools/parking_orbit.h"
 
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
@@ -291,13 +292,12 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 	}
 
 	Body *departure_body = candidate->bodies[0];
-	DepartureBurn3D departure_burn;
 	Vector3 departure_vinf = subtract_vec3(legs[0].v0, states[0].v);
-	if(!calculate_free_plane_departure_burn(departure_vinf, departure_body,
-		alt2radius(departure_body, calc_data->dv_filter.dep_periapsis), &departure_burn)) {
+	double departure_dv;
+	if(!parking_orbit_departure_dv(departure_body, departure_vinf,
+		alt2radius(departure_body, calc_data->dv_filter.dep_periapsis), &departure_dv)) {
 		goto cleanup;
 	}
-	double departure_dv = departure_burn.burn_magnitude;
 	if(departure_dv > calc_data->dv_filter.max_depdv) {
 		goto cleanup;
 	}

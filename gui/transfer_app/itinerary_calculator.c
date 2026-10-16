@@ -4,6 +4,7 @@
 #include "gui/css_loader.h"
 #include "gui/settings.h"
 #include "gui/info_win_manager.h"
+#include "parking_orbit_editor.h"
 #include "tools/file_io.h"
 #include "tools/itinerary_date_limits.h"
 #include "tools/itinerary_reference_defaults.h"
@@ -664,6 +665,7 @@ void save_itineraries_ic(struct ItinStep **departures, int num_deps, int num_nod
 
 static gboolean end_ic_calc_thread(gpointer user_data) {
 	(void)user_data;
+	parking_orbit_editor_finish_search();
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 1);
 
@@ -743,8 +745,19 @@ static gpointer ic_calc_thread(gpointer user_data) {
 	return NULL;
 }
 
+Body *ic_get_departure_body(void) {
+	if(ic_system == NULL) return NULL;
+	int index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	return index >= 0 && index < ic_system->num_bodies ? ic_system->bodies[index] : NULL;
+}
+
 G_MODULE_EXPORT void on_calc_ic() {
 	if(ic_system == NULL) return;
+	char parking_error[256];
+	if(!parking_orbit_editor_prepare_search(ic_get_departure_body(), parking_error, sizeof(parking_error))) {
+		show_msg_window(parking_error);
+		return;
+	}
 	prepare_ic_calc_data_from_widgets();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 0);
 	prepare_thread_pool_counters();

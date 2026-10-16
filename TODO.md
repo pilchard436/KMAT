@@ -35,9 +35,9 @@
 
 ## Parking Orbit
 
-- [ ] Add all six classical elements: semi-major axis, eccentricity, inclination, RAAN, argument of periapsis, and true anomaly.
-- [ ] Add a separate parking-orbit editor accessible from the main page.
-- [ ] Add a figure that updates as the elements change.
+- [x] Add all six classical elements: semi-major axis, eccentricity, inclination, RAAN, argument of periapsis, and true anomaly.
+- [x] Add a separate parking-orbit editor accessible from the main page.
+- [x] Add a figure that updates as the elements change.
 
 ## Remaining Powered-Flyby Search Coverage
 

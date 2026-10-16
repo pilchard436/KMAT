@@ -2,6 +2,7 @@
 #include "double_swing_by.h"
 #include "powered_seed_selection.h"
 #include "tools/thread_pool.h"
+#include "tools/parking_orbit.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -527,11 +528,8 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 
 	pp.dep_date = itin->prev->date;
 	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
-	DepartureBurn3D departure_burn;
-	if(calculate_free_plane_departure_burn(departure_vinf, itin->prev->body,
-		alt2radius(itin->prev->body, dep_periapsis), &departure_burn))
-		pp.dv_dep = departure_burn.burn_magnitude;
-	else
+	if(!parking_orbit_departure_dv(itin->prev->body, departure_vinf,
+		alt2radius(itin->prev->body, dep_periapsis), &pp.dv_dep))
 		pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis),
 			mag_vec3(departure_vinf));
 	return pp;

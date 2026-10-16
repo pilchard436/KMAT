@@ -35,6 +35,8 @@ add_executable(KMAT
     tools/itinerary_date_limits.c
     tools/itinerary_reference_defaults.c
     tools/itinerary_reference_defaults.h
+    tools/parking_orbit.c
+    tools/parking_orbit.h
     tools/file_io.h
     launch_calculator/launch_calculator.c
     launch_calculator/launch_calculator.h
@@ -104,6 +106,8 @@ add_executable(KMAT
     orbit_calculator/itin_dsb_tool.h
     gui/transfer_app/itinerary_calculator.c
     gui/transfer_app/itinerary_calculator.h
+    gui/transfer_app/parking_orbit_editor.c
+    gui/transfer_app/parking_orbit_editor.h
     gui/gui_manager.c
     gui/gui_manager.h
     gui/info_win_manager.c
@@ -128,6 +132,7 @@ add_executable(KMATUnitTests
     tools/file_io_format.c
     tools/itinerary_date_limits.c
     tools/itinerary_reference_defaults.c
+    tools/parking_orbit.c
     gui/transfer_app/porkchop_analyzer_model.c
     tools/tool_funcs.c
 )
@@ -150,6 +155,7 @@ add_executable(KMATSearchIntegration
     orbit_calculator/transfer_calc.c
     orbit_calculator/powered_flyby_optimizer.c
     orbit_calculator/itin_tool.c
+    tools/parking_orbit.c
     tools/thread_pool.c
     tools/tool_funcs.c
 )
