@@ -158,9 +158,6 @@ void remove_step_from_itinerary(struct ItinStep *step);
 // delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
-// unlinks and frees one step of a single itinerary; returns the step to show next (NULL if none is left)
-struct ItinStep *unlink_itinerary_step(struct ItinStep *step);
-
 // sets a step's date and pushes later steps back if needed; a maneuver node slides along its incoming arc
 void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date);
 

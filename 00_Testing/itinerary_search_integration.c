@@ -842,19 +842,6 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 			}
 
 			for(int k = 0; k < nodes; k++) {
-				// Removing any step, including the first, last and maneuver nodes.
-				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
-				struct ItinStep *victim = copy;
-				for(int n = 0; n < k; n++) victim = victim->next[0];
-				struct ItinStep *shown = unlink_itinerary_step(victim);
-				if(shown == NULL) { continue; }
-				struct ItinStep *first = get_first(shown);
-				if(first->body != NULL && get_last(first)->body != NULL) {
-					itinerary_recompute_problem(first, system);
-					if(itinerary_text_problem(first, 50e3, 50e3)) OPERATION_PROBLEM("route %d.%d: text overflow after removing step %d\n", d, j, k);
-				}
-				free_itinerary(first);
-
 				// Moving the step's date.
 				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
 				struct ItinStep *moved = copy;

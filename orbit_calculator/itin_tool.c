@@ -1193,23 +1193,6 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 	return HUGE_VAL;
 }
 
-struct ItinStep *unlink_itinerary_step(struct ItinStep *step) {
-	struct ItinStep *remaining = step->prev != NULL ? step->prev : (step->next != NULL ? step->next[0] : NULL);
-	if(step->next != NULL) step->next[0]->prev = step->prev;
-	if(step->prev != NULL) {
-		if(step->next != NULL) {
-			step->prev->next[0] = step->next[0];
-		} else {
-			free(step->prev->next);
-			step->prev->next = NULL;
-			step->prev->num_next_nodes = 0;
-		}
-	}
-	free(step->next);
-	free(step);
-	return remaining;
-}
-
 void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date) {
 	if(step->body == NULL && step->prev != NULL)
 		step->r = propagate_osv_time((OSV){step->prev->r, step->v_dep}, system->cb, (date - step->prev->date) * 86400).r;

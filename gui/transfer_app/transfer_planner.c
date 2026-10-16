@@ -516,67 +516,9 @@ G_MODULE_EXPORT void on_goto_transfer_date(GtkWidget* widget, gpointer data) {
 	update_itinerary();
 }
 
-G_MODULE_EXPORT void on_add_transfer(GtkWidget* widget, gpointer data) {
-	if(tp_system == NULL) return;
-	struct ItinStep *new_transfer = (struct ItinStep *) malloc(sizeof(struct ItinStep));
-	new_transfer->body = tp_system->home_body ? : tp_system->bodies[0];
-	new_transfer->prev = NULL;
-	new_transfer->next = NULL;
-	new_transfer->num_next_nodes = 0;
-
-	struct ItinStep *next = (curr_transfer_tp != NULL && curr_transfer_tp->next != NULL) ? curr_transfer_tp->next[0] : NULL;
-
-	// date
-	new_transfer->date = current_date_tp;
-	if(curr_transfer_tp != NULL) {
-		if(current_date_tp <= curr_transfer_tp->date) new_transfer->date = curr_transfer_tp->date + 1;
-		if(next != NULL) {
-			if(next->date - curr_transfer_tp->date < 2) {
-				free(new_transfer);
-				return;    // no space between this and next transfer...
-			}
-			if(new_transfer->date >= next->date) new_transfer->date = next->date - 1;
-		}
-	}
-
-	// next and prev pointers
-	if(curr_transfer_tp != NULL) {
-		if(next != NULL) {
-			next->prev = new_transfer;
-			new_transfer->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-			new_transfer->next[0] = next;
-			new_transfer->num_next_nodes = 1;
-		} else {
-			curr_transfer_tp->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-			curr_transfer_tp->num_next_nodes = 1;
-		}
-		new_transfer->prev = curr_transfer_tp;
-		curr_transfer_tp->next[0] = new_transfer;
-	}
-
-	// Location and Velocity vectors
-	update_itinerary();
-
-	curr_transfer_tp = new_transfer;
-	current_date_tp = curr_transfer_tp->date;
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
-	update_itinerary();
-}
-
-G_MODULE_EXPORT void on_remove_transfer(GtkWidget* widget, gpointer data) {
-	if(tp_system == NULL) return;
-	if(curr_transfer_tp == NULL) return;
-	struct ItinStep *rem_transfer = curr_transfer_tp;
-	curr_transfer_tp = unlink_itinerary_step(rem_transfer);
-	if(curr_transfer_tp != NULL) current_date_tp = curr_transfer_tp->date;
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
-	// Neighbouring arcs changed, so velocities must be re-solved.
-	if(curr_transfer_tp != NULL) update_itinerary();
-	else update();
-}
-
 int find_closest_transfer(struct ItinStep *step) {
-	if(step == NULL || step->prev == NULL || step->prev->prev == NULL) return 0;
+	// A maneuver node has no body to search for, and a maneuver predecessor has no state to search from.
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->prev->prev == NULL || step->prev->body == NULL) return 0;
 	struct ItinStep *prev = step->prev;
 	struct ItinStep *temp = (struct ItinStep*) malloc(sizeof(struct ItinStep));
 	copy_step_body_vectors_and_date(prev, temp);
