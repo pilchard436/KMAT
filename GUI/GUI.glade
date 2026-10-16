@@ -2400,6 +2400,42 @@
                             <property name="top-attach">1</property>
                           </packing>
                         </child>
+                        <child>
+                          <object class="GtkToggleButton" id="tb_tp_animate">
+                            <property name="label" translatable="yes">Animate</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">True</property>
+                            <signal name="toggled" handler="on_tp_animate_toggled" swapped="no"/>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">2</property>
+                            <property name="width">2</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="cb_tp_anim_speed">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="active">3</property>
+                            <items>
+                              <item translatable="yes">1 hour / s</item>
+                              <item translatable="yes">6 hours / s</item>
+                              <item translatable="yes">1 day / s</item>
+                              <item translatable="yes">5 days / s</item>
+                              <item translatable="yes">10 days / s</item>
+                              <item translatable="yes">30 days / s</item>
+                              <item translatable="yes">100 days / s</item>
+                              <item translatable="yes">1 year / s</item>
+                            </items>
+                          </object>
+                          <packing>
+                            <property name="left-attach">2</property>
+                            <property name="top-attach">2</property>
+                            <property name="width">3</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>

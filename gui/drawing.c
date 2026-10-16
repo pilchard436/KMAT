@@ -4,6 +4,8 @@
 #include "settings.h"
 #include "math.h"
 
+static double stroke_width = 1;
+
 
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	set_cairo_body_color(get_camera_screen_cairo(camera), body);
@@ -68,38 +70,99 @@ void draw_trajectory(Camera *camera, struct OSV osv0, double dt, struct Body *at
 	}
 }
 
-void draw_itinerary_spacecraft(Camera *camera, Vector3 r) {
-	cairo_set_source_rgb(get_camera_screen_cairo(camera), 1, 0.4, 0.1);
-	Vector2 p2d = p3d_to_p2d(camera, r);
-	cairo_arc(get_camera_screen_cairo(camera), p2d.x, p2d.y, 3, 0, 2 * M_PI);
-	cairo_fill(get_camera_screen_cairo(camera));
+static const double leg_palette[][3] = {
+	{0.25, 0.75, 1.00}, {1.00, 0.65, 0.15}, {0.55, 0.90, 0.35}, {0.90, 0.45, 0.90},
+	{1.00, 0.90, 0.25}, {0.30, 1.00, 0.80}, {0.60, 0.60, 1.00}, {1.00, 0.55, 0.55}
+};
+#define LEG_PALETTE_SIZE ((int)(sizeof(leg_palette) / sizeof(leg_palette[0])))
+
+// Unflyable legs stay red; a leg already flown is dimmed.
+static void set_leg_color(cairo_t *cr, int leg, int trajectory_is_in_the_past, int trajectory_is_viable) {
+	const double *color = leg_palette[leg % LEG_PALETTE_SIZE];
+	double alpha = trajectory_is_in_the_past ? 0.45 : 1.0;
+	if(trajectory_is_viable) cairo_set_source_rgba(cr, color[0], color[1], color[2], alpha);
+	else cairo_set_source_rgba(cr, 1, 0.2, 0.2, alpha);
 }
 
-void draw_itinerary_step_point(Camera *camera, Vector3 r) {
-	int cross_length = 4;
-	cairo_set_source_rgb(get_camera_screen_cairo(camera), 1, 0, 0);
+static void set_label_font(cairo_t *cr, double size, int bold) {
+	cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, bold ? CAIRO_FONT_WEIGHT_BOLD : CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_set_font_size(cr, size);
+}
+
+static void draw_trajectory_arc(Camera *camera, OSV osv0, double dt, Body *attractor) {
+	stroke_width = 2;
+	draw_trajectory(camera, osv0, dt, attractor);
+	stroke_width = 1;
+}
+
+void draw_itinerary_spacecraft(Camera *camera, Vector3 r) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector2 p2d = p3d_to_p2d(camera, r);
-	for(int i = -1; i<=1; i+=2) {
-		Vector2 p1 = {p2d.x - cross_length, p2d.y + cross_length*i};
-		Vector2 p2 = {p2d.x + cross_length, p2d.y - cross_length*i};
-		draw_stroke(get_camera_screen_cairo(camera), p1, p2);
+	cairo_arc(cr, p2d.x, p2d.y, 4.5, 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 1, 0.4, 0.1);
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1.2);
+	cairo_stroke(cr);
+}
+
+// A starburst in the style of a collision/explosion icon.
+static void draw_crash_symbol(cairo_t *cr, Vector2 p) {
+	const int points = 10;
+	for(int i = 0; i < points * 2; i++) {
+		double angle = M_PI * i / points - M_PI / 2;
+		double radius = i % 2 == 0 ? 15 : 7;
+		double x = p.x + radius * cos(angle), y = p.y + radius * sin(angle);
+		if(i == 0) cairo_move_to(cr, x, y);
+		else cairo_line_to(cr, x, y);
 	}
+	cairo_close_path(cr);
+	cairo_set_source_rgb(cr, 1, 0.55, 0.1);
+	cairo_fill_preserve(cr);
+	cairo_set_source_rgb(cr, 0.85, 0.05, 0.05);
+	cairo_set_line_width(cr, 2);
+	cairo_stroke(cr);
+	cairo_arc(cr, p.x, p.y, 3.5, 0, 2 * M_PI);
+	cairo_set_source_rgb(cr, 1, 0.95, 0.4);
+	cairo_fill(cr);
+}
+
+// A ring marks a flyby or an endpoint, a diamond a deep-space maneuver.
+static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector2 p = p3d_to_p2d(camera, step->r);
+	int crashes = flyby_periapsis_shortfall(step) > 0;
+	cairo_new_path(cr);
+	if(crashes) draw_crash_symbol(cr, p);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1.5);
+	if(step->body != NULL) {
+		cairo_arc(cr, p.x, p.y, 8, 0, 2 * M_PI);
+	} else {
+		cairo_move_to(cr, p.x, p.y - 7);
+		cairo_line_to(cr, p.x + 7, p.y);
+		cairo_line_to(cr, p.x, p.y + 7);
+		cairo_line_to(cr, p.x - 7, p.y);
+		cairo_close_path(cr);
+	}
+	cairo_stroke(cr);
+
+	char date_text[20], label[80];
+	date_to_string(convert_JD_date(step->date, get_settings_datetime_type()), date_text, 0);
+	snprintf(label, sizeof(label), "%s  %s%s", step->body != NULL ? step->body->name : "DSM", date_text,
+		crashes ? "  CRASH" : "");
+	set_label_font(cr, 11, crashes);
+	if(crashes) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
+	cairo_move_to(cr, p.x + 11, p.y - 9);
+	cairo_show_text(cr, label);
+	cairo_new_path(cr);
+	cairo_set_line_width(cr, 1);
 }
 
 // Powered flybys change excess speed, so only the periapsis clearance decides viability.
 static int is_flyby_leg_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
 	PoweredFlybyResult result;
 	return calculate_powered_flyby(v_arr, v_dep, v_body, body, body->radius + body->atmo_alt + 1e4, &result);
-}
-
-void set_trajectory_color(cairo_t *cr, int trajectory_is_in_the_past, int trajectory_is_viable) {
-	if(trajectory_is_in_the_past) {
-		if(trajectory_is_viable) cairo_set_source_rgb(cr, 0, 0.6, 0.4);
-		else cairo_set_source_rgb(cr, 0.6, 0, 0.2);
-	} else {
-		if(trajectory_is_viable) cairo_set_source_rgb(cr, 0, 1, 0);
-		else cairo_set_source_rgb(cr, 1, 0, 0);
-	}
 }
 
 // Stored leg velocities start at the SOI boundary, so propagating them from the node would miss the next node.
@@ -115,9 +178,11 @@ static Vector3 leg_drawing_velocity(CelestSystem *system, struct ItinStep *tf) {
 
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time) {
 	if(tf == NULL) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
 
 	// draw trajectories
 	tf = get_first(tf);
+	int leg = 0;
 	while(tf->next != NULL) {
 		OSV tf_osv0 = {tf->r, leg_drawing_velocity(system, tf)};
 		int trajectory_is_viable = 1;
@@ -128,22 +193,23 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 		}
 
 		if(current_time >= tf->date && current_time < tf->next[0]->date) {
-			set_trajectory_color(get_camera_screen_cairo(camera), 1, trajectory_is_viable);
+			set_leg_color(cr, leg, 1, trajectory_is_viable);
 			dt = current_time - tf->date;
-			draw_trajectory(camera, tf_osv0, dt, system->cb);
+			draw_trajectory_arc(camera, tf_osv0, dt, system->cb);
 
 			OSV current_osv = dt != 0 ? propagate_osv_time(tf_osv0, system->cb, dt*86400) : tf_osv0;
 
-			set_trajectory_color(get_camera_screen_cairo(camera), 0, trajectory_is_viable);
+			set_leg_color(cr, leg, 0, trajectory_is_viable);
 			dt = tf->next[0]->date - current_time;
-			draw_trajectory(camera, current_osv, dt, system->cb);
+			draw_trajectory_arc(camera, current_osv, dt, system->cb);
 
 			draw_itinerary_spacecraft(camera, current_osv.r);
 		} else {
-			set_trajectory_color(get_camera_screen_cairo(camera), current_time > tf->date, trajectory_is_viable);
-			draw_trajectory(camera, tf_osv0, dt, system->cb);
+			set_leg_color(cr, leg, current_time > tf->date, trajectory_is_viable);
+			draw_trajectory_arc(camera, tf_osv0, dt, system->cb);
 		}
 		tf = tf->next[0];
+		leg++;
 	}
 
 	if(current_time <= get_first(tf)->date && get_first(tf)->body != NULL) {
@@ -158,11 +224,77 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 		draw_itinerary_spacecraft(camera, osv_body.r);
 	}
 
-	// draw itin step points
+	// draw itin step markers
 	while(tf != NULL) {
-		draw_itinerary_step_point(camera, tf->r);
+		draw_itinerary_step_marker(camera, tf);
 		tf = tf->prev;
 	}
+}
+
+void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	OSV osv_body = {.r = vec3(0,0,0)};
+	if(body != system->cb) osv_body = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(body->orbit, jd_date) :
+		osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb);
+	Vector2 p = p3d_to_p2d(camera, osv_body.r);
+	set_cairo_body_color(cr, body);
+	set_label_font(cr, 10, 0);
+	cairo_move_to(cr, p.x + 8, p.y + 14);
+	cairo_show_text(cr, body->name);
+	cairo_new_path(cr);
+}
+
+// The legs with their colors, the leg under way highlighted, and the progress through it.
+void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time) {
+	if(tf == NULL) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	tf = get_first(tf);
+	double width = camera->screen->width;
+	int active_leg = -1, leg = 0;
+	for(struct ItinStep *step = tf; step->next != NULL; step = step->next[0], leg++)
+		if(current_time >= step->date && current_time < step->next[0]->date) active_leg = leg;
+
+	set_label_font(cr, 11, 0);
+	double y = 18;
+	leg = 0;
+	for(struct ItinStep *step = tf; step->next != NULL; step = step->next[0], leg++) {
+		struct ItinStep *next = step->next[0];
+		char text[96];
+		snprintf(text, sizeof(text), "%s -> %s  (%.0f d)", step->body != NULL ? step->body->name : "DSM",
+			next->body != NULL ? next->body->name : "DSM", next->date - step->date);
+		cairo_text_extents_t extents;
+		cairo_text_extents(cr, text, &extents);
+		double x = width - 12 - extents.width;
+		set_label_font(cr, 11, leg == active_leg);
+		set_leg_color(cr, leg, 0, 1);
+		cairo_set_line_width(cr, 3);
+		cairo_move_to(cr, x - 26, y - 4);
+		cairo_line_to(cr, x - 8, y - 4);
+		cairo_stroke(cr);
+		cairo_set_line_width(cr, 1);
+		cairo_set_source_rgb(cr, leg == active_leg ? 1 : 0.7, leg == active_leg ? 1 : 0.7, leg == active_leg ? 1 : 0.7);
+		cairo_move_to(cr, x, y);
+		cairo_show_text(cr, text);
+		cairo_new_path(cr);
+		y += 17;
+	}
+
+	struct ItinStep *last = get_last(tf);
+	char status[96];
+	if(current_time < tf->date) snprintf(status, sizeof(status), "Departs in %.1f d", tf->date - current_time);
+	else if(current_time >= last->date) snprintf(status, sizeof(status), "Arrived");
+	else if(active_leg >= 0) {
+		struct ItinStep *step = tf;
+		for(int i = 0; i < active_leg; i++) step = step->next[0];
+		snprintf(status, sizeof(status), "Leg %d of %d, day %.1f of %.1f", active_leg + 1, leg,
+			current_time - step->date, step->next[0]->date - step->date);
+	} else status[0] = '\0';
+	set_label_font(cr, 12, 1);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_move_to(cr, 12, 20);
+	cairo_show_text(cr, status);
+	cairo_new_path(cr);
 }
 
 void draw_orbit_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r, Vector3 v, struct Body *attractor) {
@@ -246,7 +378,7 @@ void draw_trajectory_2d(cairo_t *cr, Vector2 center, double scale, struct ItinSt
 
 
 void draw_stroke(cairo_t *cr, Vector2 p1, Vector2 p2) {
-	cairo_set_line_width(cr, 1);
+	cairo_set_line_width(cr, stroke_width);
 	cairo_move_to(cr, p1.x, p1.y);
 	cairo_line_to(cr, p2.x, p2.y);
 	cairo_stroke(cr);
