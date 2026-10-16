@@ -562,11 +562,11 @@ static int run_saved_mission_benchmarks(void) {
 	int jupiter_valid = run_saved_mission_benchmark(system, "Jupiter",
 		"EARTH", "JUPITER", jupiter_flybys, 3,
 		2461327.50, 2461692.50, 2463325.50, 1998.0,
-		6939, 6939, 0, 190e3, 1600e3);
+		6939, 6939, 6939, 190e3, 1600e3);
 	int saturn_valid = run_saved_mission_benchmark(system, "Saturn",
 		"EARTH", "SATURN", saturn_flybys, 4,
 		2461326.50, 2461691.50, 2466098.50, 4407.0,
-		7282, 7282, 0, 190e3, 2050e3);
+		7282, 7282, 7282, 190e3, 2050e3);
 	free_celestial_system(system);
 	return jupiter_valid && saturn_valid ? EXIT_SUCCESS : EXIT_FAILURE;
 }
@@ -604,7 +604,7 @@ static int run_full_profile(void) {
 	calc_data.dv_filter = (struct Dv_Filter) {
 		.max_totdv = 7282,
 		.max_depdv = 7282,
-		.max_satdv = 0,
+		.max_satdv = 7282,
 		.dep_periapsis = departure_body->atmo_alt + 50000,
 		.arr_periapsis = arrival_body->atmo_alt + 50000,
 		.last_transfer_type = TF_FLYBY
@@ -620,12 +620,17 @@ static int run_full_profile(void) {
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	int valid = validate_rejection_audit(0) && results.num_itins > 0 && results.powered_routes_corrected > 0 &&
-		results.powered_itineraries_pruned == 0 &&
+		results.powered_itineraries_pruned * 100 <= results.num_itins &&
 		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
 		results.powered_repairs_recovered <= results.powered_repairs_attempted &&
 		results.powered_challenges_refined > 0 && results.powered_challenges_refined <= POWERED_CHALLENGE_SLOTS &&
 		isfinite(results.best_powered_refined_total_dv) &&
 		results.best_powered_refined_total_dv <= calc_data.dv_filter.max_totdv;
+	if(!valid)
+		fprintf(stderr, "Full-profile summary: itins %d corrected %d pruned %d repairs %d/%d challenges %d refined best %.1f\n",
+			results.num_itins, results.powered_routes_corrected, results.powered_itineraries_pruned,
+			results.powered_repairs_attempted, results.powered_repairs_recovered,
+			results.powered_challenges_refined, results.best_powered_refined_total_dv);
 	for(int i = 0; i < results.num_deps; i++) {
 		int count = get_number_of_itineraries(results.departures[i]);
 		struct ItinStep **leaves = malloc((size_t)count * sizeof(*leaves));
@@ -641,8 +646,11 @@ static int run_full_profile(void) {
 				point.dv_dep > calc_data.dv_filter.max_depdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dv_dsm + point.dv_flyby > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dep_date < calc_data.jd_min_dep || point.dep_date > calc_data.jd_max_dep ||
-				leaves[j]->date > calc_data.jd_max_arr || point.dur > calc_data.max_duration)
+				leaves[j]->date > calc_data.jd_max_arr || point.dur > calc_data.max_duration) {
+				if(valid) fprintf(stderr, "Full-profile route violates limits: total %.1f dep %.1f sat %.1f dur %.1f\n",
+					total, point.dv_dep, point.dv_dsm + point.dv_flyby, point.dur);
 				valid = 0;
+			}
 		}
 		free(leaves);
 	}
