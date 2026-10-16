@@ -147,14 +147,16 @@ static int is_valid_lambert(Lambert3 leg) {
  * followed by a second Lambert arc. A zero delta_v reproduces the plain arc with zero burn. */
 static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, CelestSystem *system,
 		Vector3 departure_position, Vector3 arrival_position, double departure_epoch,
-		double duration_days, Lambert3 *leg, PoweredDsmResult *dsm) {
-	Lambert3 plain = calc_lambert3_selected_cancellable(departure_position, arrival_position,
-		duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+		double duration_days, int variant, Lambert3 *leg, PoweredDsmResult *dsm) {
+	Lambert3 plain = calc_leg_variant_lambert(system->cb, departure_position, arrival_position,
+		duration_days * 86400, variant, itinerary_search_cancelled, NULL);
 	if(itinerary_search_cancelled(NULL) || !is_valid_lambert(plain)) return 0;
 	*leg = plain;
 	if(dsm != NULL) dsm->used = 0;
 	const PoweredLegDsm *spec = candidate->dsms != NULL ? &candidate->dsms[index] : NULL;
 	if(spec == NULL || !spec->enabled) return 1;
+	// A maneuver inside a revolution-spanning leg is not modelled.
+	if(variant != 0) return 0;
 	if(spec->use_position) {
 		// The leg's epochs are SOI-adjusted, so the maneuver is given by absolute date.
 		double eta = (spec->date - departure_epoch) / duration_days;
@@ -199,8 +201,8 @@ static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, Celes
 	return 1;
 }
 
-static double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
-		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out) {
+static double evaluate_route_variants_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
+		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out, const int *variants) {
 	if(itinerary_search_cancelled(NULL)) return DBL_MAX;
 	if(objective_budget == 0) return DBL_MAX;
 	if(objective_budget > 0) objective_budget--;
@@ -219,7 +221,7 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 		double duration_days = times[i + 1] - times[i];
 		if(duration_days < POWERED_MIN_LEG_DAYS) return DBL_MAX;
 		if(!solve_leg(candidate, i, system, states[i].r, states[i + 1].r, times[i],
-			duration_days, &legs[i], NULL)) return DBL_MAX;
+			duration_days, variants != NULL ? variants[i] : 0, &legs[i], NULL)) return DBL_MAX;
 	}
 
 	PoweredFlybyResult *flybys = calloc(candidate->num_steps, sizeof(*flybys));
@@ -279,7 +281,7 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 				break;
 			}
 			if(!solve_leg(candidate, i, system, departure_position, arrival_position,
-				departure_epoch, duration_days, &legs[i], &dsm_local[i])) {
+				departure_epoch, duration_days, variants != NULL ? variants[i] : 0, &legs[i], &dsm_local[i])) {
 				valid_route = 0;
 				break;
 			}
@@ -406,6 +408,57 @@ cleanup:
 	free(outgoing_excess);
 	free(dsm_local);
 	return total_dv;
+}
+
+static double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
+		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out) {
+	size_t resonant[2];
+	int num_resonant = 0;
+	for(size_t i = 0; i + 1 < candidate->num_steps; i++) {
+		if(candidate->bodies[i] != candidate->bodies[i + 1]) continue;
+		if(num_resonant == 2) return DBL_MAX;
+		resonant[num_resonant++] = i;
+	}
+	if(num_resonant == 0)
+		return evaluate_route_variants_core(candidate, calc_data, times, states, legs, dsm_out, NULL);
+
+	// Legs between two visits of the same body can span revolutions, so keep the best leg variant.
+	size_t num_legs = candidate->num_steps - 1;
+	int *variants = calloc(num_legs, sizeof(*variants));
+	OSV *trial_states = calloc(candidate->num_steps, sizeof(*trial_states));
+	Lambert3 *trial_legs = calloc(num_legs, sizeof(*trial_legs));
+	PoweredDsmResult *trial_dsm = calloc(num_legs, sizeof(*trial_dsm));
+	double best = DBL_MAX;
+	int best_converged = 0;
+	int combinations = num_resonant == 1 ? LEG_VARIANT_COUNT : LEG_VARIANT_COUNT * LEG_VARIANT_COUNT;
+	for(int combination = 0; combination < combinations && variants != NULL && trial_states != NULL &&
+		trial_legs != NULL && trial_dsm != NULL && !itinerary_search_cancelled(NULL); combination++) {
+		int remainder = combination;
+		for(int r = 0; r < num_resonant; r++) {
+			variants[resonant[r]] = remainder % LEG_VARIANT_COUNT;
+			remainder /= LEG_VARIANT_COUNT;
+		}
+		PoweredRouteCandidate trial_candidate = *candidate;
+		int trial_converged = 0;
+		trial_candidate.converged_out = &trial_converged;
+		double dv = evaluate_route_variants_core(&trial_candidate, calc_data, times, trial_states,
+			trial_legs, trial_dsm, variants);
+		if(!(dv < DBL_MAX)) continue;
+		int better = best >= DBL_MAX || (trial_converged && !best_converged) ||
+			(trial_converged == best_converged && dv < best);
+		if(!better) continue;
+		best = dv;
+		best_converged = trial_converged;
+		memcpy(states, trial_states, candidate->num_steps * sizeof(*states));
+		memcpy(legs, trial_legs, num_legs * sizeof(*legs));
+		if(dsm_out != NULL) memcpy(dsm_out, trial_dsm, num_legs * sizeof(*dsm_out));
+	}
+	if(candidate->converged_out != NULL) *candidate->converged_out = best_converged;
+	free(variants);
+	free(trial_states);
+	free(trial_legs);
+	free(trial_dsm);
+	return best;
 }
 
 static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,

@@ -586,7 +586,10 @@ int find_closest_transfer(struct ItinStep *step) {
 	find_viable_flybys(temp, tp_system, step->body, 86400, 86400*365.25*50);
 
 	if(temp->next != NULL) {
+		// Resonant returns come grouped by leg variant, so take the one closest to the current date.
 		struct ItinStep *new_step = temp->next[0];
+		for(int i = 1; i < temp->num_next_nodes && step->body == prev->body; i++)
+			if(fabs(temp->next[i]->date - step->date) < fabs(new_step->date - step->date)) new_step = temp->next[i];
 		copy_step_body_vectors_and_date(new_step, step);
 		for(int i = 0; i < temp->num_next_nodes; i++) free(temp->next[i]);
 		free(temp->next);

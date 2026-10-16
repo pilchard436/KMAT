@@ -25,6 +25,7 @@ static GObject *rb_ic_maxarrdate;
 static GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
 static GtkWidget *cb_ic_allow_dsm;
+static GtkWidget *cb_ic_allow_resonant;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
 GObject *vp_ic_fbbodies;
@@ -424,6 +425,9 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
 	if(cb_ic_allow_dsm != NULL)
 		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
+	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
+	if(cb_ic_allow_resonant != NULL)
+		set_stable_tooltip(cb_ic_allow_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search several times slower.");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
@@ -732,6 +736,8 @@ static void prepare_ic_calc_data_from_widgets() {
 			.dep_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))],
 			.arr_body = arr_body,
 			.num_flyby_bodies = get_num_selected_bodies_from_grid(grid_ic_fbbodies),
+			.allow_resonant = cb_ic_allow_resonant != NULL &&
+				gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_resonant)),
 	};
 	seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
 	ic_calc_data.seq_info.to_target = seq_info;

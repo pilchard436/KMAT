@@ -106,8 +106,14 @@ void set_trajectory_color(cairo_t *cr, int trajectory_is_in_the_past, int trajec
 static Vector3 leg_drawing_velocity(CelestSystem *system, struct ItinStep *tf) {
 	double dt = (tf->next[0]->date - tf->date) * 86400;
 	if(dt > 0) {
-		Lambert3 leg = calc_lambert3_selected(tf->r, tf->next[0]->r, dt, system->cb);
-		if(isfinite(leg.v0.x + leg.v0.y + leg.v0.z)) return leg.v0;
+		Lambert3 leg;
+		// A return to the same body spans revolutions, so pick the arc matching the stored velocity.
+		if(tf->body != NULL && tf->body == tf->next[0]->body) {
+			if(nearest_leg_variant_lambert(system->cb, tf->r, tf->next[0]->r, dt, tf->next[0]->v_dep, &leg)) return leg.v0;
+		} else {
+			leg = calc_lambert3_selected(tf->r, tf->next[0]->r, dt, system->cb);
+			if(isfinite(leg.v0.x + leg.v0.y + leg.v0.z)) return leg.v0;
+		}
 	}
 	return tf->next[0]->v_dep;
 }

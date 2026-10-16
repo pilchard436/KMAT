@@ -15,6 +15,8 @@
 #define POWERED_TEST_GRID_RELATIVE_TOLERANCE 0.10
 
 static int audit_requested;
+static int benchmark_resonant;
+static double stored_total_dv(struct ItinStep *leaf, const Itin_Calc_Data *calc_data, double *dsm_dv);
 
 static int validate_rejection_audit(int require_recovery) {
 	if(!audit_requested) return 1;
@@ -537,13 +539,37 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 		.dep_body = departure_body,
 		.arr_body = arrival_body,
 		.flyby_bodies = flyby_bodies,
-		.num_flyby_bodies = num_flybys
+		.num_flyby_bodies = num_flybys,
+		.allow_resonant = benchmark_resonant
 	};
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	printf("\n=== %s saved-settings benchmark ===\n", label);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	printf("%s benchmark result: %d departure roots, %d nodes, %d itineraries\n",
 		label, results.num_deps, results.num_nodes, results.num_itins);
+	if(benchmark_resonant) {
+		int resonant_routes = 0;
+		double best_resonant = DBL_MAX, best_overall = DBL_MAX;
+		for(int i = 0; i < results.num_deps; i++) {
+			int count = get_number_of_itineraries(results.departures[i]);
+			struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+			if(leaves == NULL) continue;
+			int stored = 0;
+			store_itineraries_in_array(results.departures[i], leaves, &stored);
+			for(int j = 0; j < stored; j++) {
+				double total = stored_total_dv(leaves[j], &calc_data, NULL);
+				int resonant = 0;
+				for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
+					resonant |= step->body != NULL && step->prev != NULL && step->prev->body == step->body;
+				if(!isfinite(total)) continue;
+				if(total < best_overall) best_overall = total;
+				if(resonant) { resonant_routes++; if(total < best_resonant) best_resonant = total; }
+			}
+			free(leaves);
+		}
+		printf("%s resonant routes: %d, best resonant %.3f m/s, best overall %.3f m/s\n",
+			label, resonant_routes, best_resonant, best_overall);
+	}
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	free(flyby_bodies);
@@ -1108,6 +1134,91 @@ static int check_dsm_model(CelestSystem *system, Body *departure_body, Body *fly
 }
 
 // Flybys with nearly equal in and out speeds must stay feasible whichever speed is larger.
+// Routes that return to the same body after revolutions must be stored consistently and re-solve to the stored delta-v.
+static int check_resonant_flybys(CelestSystem *system, Body *departure_body, Body *flyby_body,
+		Body *arrival_body, double departure_jd, double hohmann_duration) {
+	Body *flyby_bodies[] = {departure_body, arrival_body};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd;
+	calc_data.jd_max_arr = departure_jd + 1.5 * hohmann_duration;
+	calc_data.max_duration = calc_data.jd_max_arr - departure_jd;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9, .max_depdv = 1e9, .max_satdv = 1e9,
+		.dep_periapsis = departure_body->atmo_alt + 50000,
+		.arr_periapsis = arrival_body->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body,
+		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 2, .allow_resonant = 1
+	};
+	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	Itin_Calc_Results results = search_for_itineraries(calc_data);
+
+	int resonant_routes = 0, bad_routes = 0, resolve_failures = 0, reported = 0, scored_routes = 0, unscorable_routes = 0;
+	double best = DBL_MAX, worst_recompute = 0, worst_resolve = 0;
+	// Only the cheapest routes are corrected by the optimizer, so the second pass checks those.
+	for(int pass = 0; pass < 2; pass++)
+	for(int i = 0; i < results.num_deps; i++) {
+		int count = get_number_of_itineraries(results.departures[i]);
+		struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+		if(leaves == NULL) { bad_routes++; continue; }
+		int stored = 0;
+		store_itineraries_in_array(results.departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			int resonant = 0;
+			for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
+				resonant |= step->body != NULL && step->prev != NULL && step->prev->body == step->body;
+			if(!resonant) continue;
+			double total = stored_total_dv(leaves[j], &calc_data, NULL);
+			if(pass == 0) {
+				resonant_routes++;
+				if(isfinite(total) && total < best) best = total;
+				continue;
+			}
+			if(!isfinite(total)) { bad_routes++; continue; }
+			if(total > best * 1.1 + 100) continue;
+			double recomputed = plain_cost_without_maneuvers(leaves[j], &calc_data);
+			// Routes the optimizer could not correct stay as raw search nodes and cannot be scored from dates.
+			if(!(recomputed < DBL_MAX)) { unscorable_routes++; continue; }
+			scored_routes++;
+			double recompute_gap = fabs(recomputed - total);
+			worst_recompute = fmax(worst_recompute, recompute_gap);
+			if(recompute_gap > POWERED_TEST_DV_TOLERANCE) {
+				bad_routes++;
+				if(reported++ < 5) fprintf(stderr, "Resonant route stored %.3f but recomputes to %.3f m/s\n", total, recomputed);
+			}
+			// The planner re-solves from dates alone, so an unchanged route must reproduce its stored cost.
+			struct ItinStep *copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+			double dep = copy->body->atmo_alt + 50e3, arr = get_last(copy)->body->atmo_alt + 50e3;
+			update_itin_body_osvs(copy, system);
+			int converged = 0;
+			int resolved = resolve_itinerary_with_powered_flybys_approximate(system, copy, dep, arr, TF_FLYBY, &converged);
+			double after = 0;
+			for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+			double resolve_gap = resolved && converged ? fabs(after - total) : DBL_MAX;
+			if(resolve_gap < DBL_MAX) worst_resolve = fmax(worst_resolve, resolve_gap);
+			if(!(after <= total + 0.5 + 1e-4 * total) || !resolved || !converged) {
+				resolve_failures++;
+				if(reported++ < 5) fprintf(stderr, "Resonant route stored %.3f re-solves to %.3f m/s (resolved %d, converged %d)\n", total, after, resolved, converged);
+			}
+			free_itinerary(copy);
+		}
+		free(leaves);
+	}
+	int valid = scored_routes > 0 && bad_routes == 0 && resolve_failures == 0;
+	if(valid)
+		printf("Resonant flyby check passed: %d resonant routes (%d scored, %d unscorable), best %.3f m/s, worst recompute gap %.4f, worst re-solve gap %.4f m/s\n",
+			resonant_routes, scored_routes, unscorable_routes, best, worst_recompute, worst_resolve);
+	else
+		fprintf(stderr, "Resonant flyby check failed: %d resonant routes, %d scored, %d inconsistent, %d did not re-solve\n",
+			resonant_routes, scored_routes, bad_routes, resolve_failures);
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	return valid;
+}
+
 static int check_near_equal_speed_flybys(Body *body) {
 	static const double speed_offsets[] = {-0.9, -0.5, 0.5, 0.9};
 	int valid = 1;
@@ -1248,6 +1359,10 @@ int main(int argc, char **argv) {
 		set_powered_rejection_audit_enabled(1);
 		argc--;
 	}
+	if(argc > 1 && strcmp(argv[argc - 1], "--resonant") == 0) {
+		benchmark_resonant = 1;
+		argc--;
+	}
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
 		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
@@ -1294,10 +1409,12 @@ int main(int argc, char **argv) {
 	int dsm_valid = run_dsm_comparison(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
 	int sweep_valid = check_departure_sweep_fixture();
+	int resonant_valid = check_resonant_flybys(system, departure_body, flyby_body, arrival_body,
+		departure_jd, hohmann_duration);
 	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid || !near_equal_valid ||
+	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid || !resonant_valid || !near_equal_valid ||
 		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
 		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
 			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);

@@ -90,7 +90,7 @@ static int cancel_requested(void *context) {
 int main(void) {
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
-    const int total_checks = 94;
+    const int total_checks = 98;
     int failures = check_seed_fallback();
 
     failures += expect_int("Izzo is the default Lambert solver", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
@@ -188,6 +188,38 @@ int main(void) {
     }
     failures += expect_int("Izzo solver reaches endpoints across representative inclined corpus",
                            izzo_corpus_closes, 1);
+
+    int revolution_solutions = 0, revolution_misses = 0, branches_differ = 0;
+    for(int sample_index = 0; sample_index < 120; sample_index++) {
+        int revolutions = 1 + sample_index % 3;
+        double sample_start_radius = 1.5e11 * (1 + (sample_index % 7) * 0.08);
+        double sample_end_radius = sample_start_radius * (0.9 + (sample_index % 5) * 0.1);
+        double transfer_angle = 0.3 + (sample_index % 11) * 0.55;
+        double circular_period = 2 * pi * sqrt(pow(sample_start_radius, 3) / solar_central_body.mu);
+        double sample_duration = circular_period * (revolutions + 0.2 + (sample_index % 9) * 0.12);
+        Vector3 sample_r0 = vec3(sample_start_radius, 0, 0);
+        Vector3 sample_r1 = vec3(sample_end_radius * cos(transfer_angle),
+                     sample_end_radius * sin(transfer_angle), 0);
+        Lambert3 branch_solutions[2];
+        for(int branch = 0; branch < 2; branch++) {
+            branch_solutions[branch] = calc_lambert3_revs(sample_r0, sample_r1, sample_duration,
+                &solar_central_body, revolutions, branch);
+            if(branch_solutions[branch].success != LAMBERT_SUCCESS) continue;
+            revolution_solutions++;
+            OSV arrival = propagate_osv_time((OSV){sample_r0, branch_solutions[branch].v0},
+                &solar_central_body, sample_duration);
+            if(!(mag_vec3(subtract_vec3(arrival.r, sample_r1)) / sample_end_radius < 1e-4)) revolution_misses++;
+        }
+        if(branch_solutions[0].success == LAMBERT_SUCCESS && branch_solutions[1].success == LAMBERT_SUCCESS &&
+            mag_vec3(subtract_vec3(branch_solutions[0].v0, branch_solutions[1].v0)) > 1) branches_differ++;
+    }
+    failures += expect_int("multi-revolution Lambert finds solutions", revolution_solutions > 40, 1);
+    failures += expect_int("multi-revolution Lambert solutions reach the endpoint", revolution_misses, 0);
+    failures += expect_int("multi-revolution Lambert left and right branches differ", branches_differ > 10, 1);
+    Lambert3 too_fast = calc_lambert3_revs(vec3(1.5e11, 0, 0), vec3(0, 1.5e11, 0), 1e6,
+        &solar_central_body, 2, 0);
+    failures += expect_int("multi-revolution Lambert rejects a time below the minimum",
+                           too_fast.success != LAMBERT_SUCCESS, 1);
 
     Body powered_flyby_body = {
         .mu = 3.9860043543609598e14,

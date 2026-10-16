@@ -2,6 +2,7 @@
 #define KSP_ITIN_TOOL_H
 
 #include "tools/celestial_systems.h"
+#include "orbitlib_transfer.h"
 #include <stdio.h>
 
 struct ItinStep {
@@ -22,6 +23,7 @@ typedef union ItinSequenceInfo {
 		CelestSystem *system;
 		Body *dep_body, *arr_body, **flyby_bodies;
 		int num_flyby_bodies;
+		int allow_resonant;	// also search flybys that return to the same body after revolutions
 	} to_target;
 
 	struct ItinSequenceInfoSpecItin {
@@ -67,8 +69,19 @@ void begin_powered_seed_search(PoweredSeedSearchStats *stats);
 
 enum LastTransferType {TF_FLYBY, TF_CAPTURE, TF_CIRC};
 
-// find viable flybys to next body with a given arrival trajectory
+// find viable flybys to next body with a given arrival trajectory; the same body gives resonant (multi-revolution) returns
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);
+
+// A leg is solved as variant 0 (no revolutions) or as 1..LEG_VARIANT_COUNT-1: revolutions (v+1)/2, branch (v-1)%2.
+#define LEG_VARIANT_MAX_REVS 4
+#define LEG_VARIANT_COUNT (1 + 2 * LEG_VARIANT_MAX_REVS)
+Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, int variant,
+		LambertCancelCheck cancel_check, void *cancel_context);
+// Picks the variant whose departure velocity is closest to v_ref; returns 0 if none exists.
+int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg);
+// Samples of (duration, variant) for a first leg that returns to the departure body, around 1 and 2 of its periods.
+int resonant_departure_sample_count(void);
+void resonant_departure_sample(int index, double period_days, double *duration_days, int *variant);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 void set_itin_search_lambert_counter(unsigned long long *counter);
 void set_itin_search_flyby_profile(Body **bodies, int num_bodies, ItinFlybyProfileStats *stats);

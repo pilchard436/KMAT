@@ -184,7 +184,7 @@ void *calc_itins_from_departure(void *args) {
 		for(int i = 0; i < num_next_bodies && !itinerary_search_cancelled(NULL); i++) {
 			if(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
 				next_step_body = fly_by_bodies[i];
-				if(next_step_body == dep_body) continue;
+				if(next_step_body == dep_body && !calc_data->seq_info.to_target.allow_resonant) continue;
 			} else {
 				next_step_body = fly_by_bodies[1];
 			}
@@ -201,10 +201,25 @@ void *calc_itins_from_departure(void *args) {
 			double max_duration = (4*(r_ratio-0.85)*(r_ratio-0.85)+1.5) * hohmann_dur; if(max_duration/hohmann_dur > 3) max_duration = hohmann_dur*3;
 			double max_min_duration_diff = max_duration - min_duration;
 
-			for(int j = 0; j < NUM_INITIAL_TRANSFERS_PER_BODY && !itinerary_search_cancelled(NULL); j++) {
-				double jd_arr = jd_dep + min_duration + max_min_duration_diff * j/(NUM_INITIAL_TRANSFERS_PER_BODY - 1);
+			// A return to the departure body only works with the revolution variants.
+			int resonant_leg = next_step_body == dep_body;
+			double departure_period_days = resonant_leg ?
+				calc_orbital_period(constr_orbit_from_osv(osv_body0.r, osv_body0.v, system->cb)) / 86400 : 0;
+			if(resonant_leg && !(departure_period_days > 0)) continue;
+			int num_samples = resonant_leg ? resonant_departure_sample_count() : NUM_INITIAL_TRANSFERS_PER_BODY;
 
-				if(jd_arr > jd_max_arr) break;
+			for(int j = 0; j < num_samples && !itinerary_search_cancelled(NULL); j++) {
+				int leg_variant = 0;
+				double jd_arr;
+				if(resonant_leg) {
+					double duration_days;
+					resonant_departure_sample(j, departure_period_days, &duration_days, &leg_variant);
+					jd_arr = jd_dep + duration_days;
+					if(jd_arr > jd_max_arr) continue;
+				} else {
+					jd_arr = jd_dep + min_duration + max_min_duration_diff * j/(NUM_INITIAL_TRANSFERS_PER_BODY - 1);
+					if(jd_arr > jd_max_arr) break;
+				}
 
 				osv_body1 = system->prop_method == ORB_ELEMENTS ?
 							osv_from_elements(next_step_body->orbit, jd_arr) :
@@ -213,13 +228,15 @@ void *calc_itins_from_departure(void *args) {
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 				profile->initial_lambert_calls++;
 #endif
-				Lambert3 tf = calc_lambert3_selected_cancellable(osv_body0.r, osv_body1.r,
-					(jd_arr - jd_dep) * 86400, system->cb, itinerary_search_cancelled, NULL);
+				Lambert3 tf = calc_leg_variant_lambert(system->cb, osv_body0.r, osv_body1.r,
+					(jd_arr - jd_dep) * 86400, leg_variant, itinerary_search_cancelled, NULL);
 				if(++pending_progress_samples >= 10) {
 					incr_thread_counter_by_amount(INITIAL_SAMPLE_PROGRESS_COUNTER, pending_progress_samples);
 					pending_progress_samples = 0;
 				}
 				if(itinerary_search_cancelled(NULL)) break;
+				if(resonant_leg && (tf.success == LAMBERT_FAIL_NAN || tf.success == LAMBERT_FAIL_ECC ||
+					tf.success == LAMBERT_MAX_ITERATIONS)) continue;
 				
 				
 				double dv_dep, dv_arr;
@@ -365,16 +382,20 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 #endif
 
 	int initial_body_count = 1;
+	int resonant_samples = 0;
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 		initial_body_count = 0;
-		for(int i = 0; i < calc_data.seq_info.to_target.num_flyby_bodies; i++)
+		for(int i = 0; i < calc_data.seq_info.to_target.num_flyby_bodies; i++) {
 			if(calc_data.seq_info.to_target.flyby_bodies[i] != calc_data.seq_info.to_target.dep_body)
 				initial_body_count++;
+			else if(calc_data.seq_info.to_target.allow_resonant)
+				resonant_samples = resonant_departure_sample_count();
+		}
 	}
 	thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
 		.jd_min_dep = calc_data.jd_min_dep,
 		.jd_max_dep = calc_data.jd_max_dep,
-		.total_initial_samples = num_deps * initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY,
+		.total_initial_samples = num_deps * (initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY + resonant_samples),
 		.has_post_processing = calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET,
 		.search_start_time = progress_clock()
 	};
