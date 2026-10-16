@@ -106,25 +106,22 @@ void draw_itinerary_spacecraft(Camera *camera, Vector3 r) {
 	cairo_stroke(cr);
 }
 
-// A starburst in the style of a collision/explosion icon.
+// A thin outlined starburst, kept light so it does not hide the trajectory.
 static void draw_crash_symbol(cairo_t *cr, Vector2 p) {
-	const int points = 10;
+	const int points = 8;
 	for(int i = 0; i < points * 2; i++) {
 		double angle = M_PI * i / points - M_PI / 2;
-		double radius = i % 2 == 0 ? 15 : 7;
+		double radius = i % 2 == 0 ? 11 : 5;
 		double x = p.x + radius * cos(angle), y = p.y + radius * sin(angle);
 		if(i == 0) cairo_move_to(cr, x, y);
 		else cairo_line_to(cr, x, y);
 	}
 	cairo_close_path(cr);
-	cairo_set_source_rgb(cr, 1, 0.55, 0.1);
+	cairo_set_source_rgba(cr, 1, 0.45, 0.2, 0.35);
 	cairo_fill_preserve(cr);
-	cairo_set_source_rgb(cr, 0.85, 0.05, 0.05);
-	cairo_set_line_width(cr, 2);
+	cairo_set_source_rgb(cr, 1, 0.35, 0.25);
+	cairo_set_line_width(cr, 1);
 	cairo_stroke(cr);
-	cairo_arc(cr, p.x, p.y, 3.5, 0, 2 * M_PI);
-	cairo_set_source_rgb(cr, 1, 0.95, 0.4);
-	cairo_fill(cr);
 }
 
 // A ring marks a flyby or an endpoint, a diamond a deep-space maneuver.

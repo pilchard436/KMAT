@@ -16,7 +16,7 @@ typedef struct {
 typedef struct CelestSystem CelestSystem;
 struct ItinStep;
 
-Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), void (*button_press_func)(), void (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)());
+Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), gboolean (*button_press_func)(), gboolean (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)());
 Vector2 p3d_to_p2d(Camera *camera, Vector3 p3d);
 void update_camera_to_celestial_system(Camera *camera, CelestSystem *system, double initial_pos_pitch, double initial_pos_yaw);
 void update_camera_position_from_angles(Camera *camera, double pos_pitch, double pos_yaw, double dist);
@@ -37,8 +37,8 @@ void clear_camera_screen(Camera *camera);
 void resize_camera_screen(Camera *camera);
 
 void on_camera_zoom(GtkWidget *widget, GdkEventScroll *event, Camera *camera);
-void on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera);
-void on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera);
+gboolean on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera);
+gboolean on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera);
 void on_camera_rotate(Camera *camera, GdkEventButton *event);
 
 #endif //KSP_CAMERA_H

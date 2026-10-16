@@ -5,7 +5,7 @@
 #include "orbit_calculator/itin_tool.h"
 
 
-Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), void (*button_press_func)(), void (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)()) {
+Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), gboolean (*button_press_func)(), gboolean (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)()) {
 	Camera *new_camera = malloc(sizeof(Camera));
 	new_camera->pos = vec3(1, 0, 0);
 	new_camera->focus = vec3(0, 0, 0);
@@ -167,13 +167,16 @@ void on_camera_zoom(GtkWidget *widget, GdkEventScroll *event, Camera *camera) {
 	update_camera_distance_to_center(camera, distance);
 }
 
-void on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
+// Returns FALSE so later press handlers (e.g. double-click focus) still run.
+gboolean on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
 	camera->rotation_sensitive = TRUE;
 	camera->screen->last_mouse_pos = (Vector2) {event->x, event->y};
+	return FALSE;
 }
 
-void on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
+gboolean on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
 	camera->rotation_sensitive = FALSE;
+	return FALSE;
 }
 
 void on_camera_rotate(Camera *camera, GdkEventButton *event) {
