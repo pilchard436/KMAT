@@ -143,6 +143,10 @@ static void tp_follow_focus_body(void) {
 static void tp_focus_on(Body *body) {
 	if(tp_system == NULL) return;
 	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
+	// A straight-down view loses its direction to rounding once the focus is far from the origin.
+	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
+	if(pitch < -1.5) pitch = -1.5;
+	if(!isfinite(yaw)) yaw = 0;
 	if(body == NULL || body == tp_system->cb) {
 		tp_focus_body = NULL;
 		update_camera_to_celestial_system(tp_system_camera, tp_system, pitch, yaw);
@@ -153,7 +157,7 @@ static void tp_focus_on(Body *body) {
 	// Frame the sphere of influence, and allow zooming in close to the surface.
 	double soi = fabs(body->orbit.a) * pow(body->mu / tp_system->cb->mu, 0.4);
 	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
-	update_camera_distance_wrt_width_at_center(tp_system_camera, soi);
+	update_camera_position_from_angles(tp_system_camera, pitch, yaw, soi * 7);
 	tp_system_camera->min_pos_dist = body->radius * 3;
 	camera_look_to_center(tp_system_camera);
 }
