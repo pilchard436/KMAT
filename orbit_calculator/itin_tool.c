@@ -164,9 +164,9 @@ int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vec
 	return best_distance < HUGE_VAL;
 }
 
-#define RESONANT_MAX_ROOTS 24
+#define RESONANT_MAX_ROOTS 12
 #define RESONANT_MAX_BODY_REVS 2
-#define RESONANT_SAMPLE_SECONDS (4 * 86400.0)
+#define RESONANT_SAMPLE_SECONDS (6 * 86400.0)
 #define RESONANT_DEPARTURE_STEPS 16
 
 int resonant_departure_sample_count(void) {
@@ -747,8 +747,9 @@ int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenc
 	for(int i = 0; i < seq_info->num_flyby_bodies && !itinerary_search_cancelled(NULL); i++) {
 		if(get_thread_counter(3) > 0) break;
 		if(seq_info->flyby_bodies[i] == curr_step->body) {
-			// Only one resonant return per visit; a third consecutive visit is not searched.
-			if(!seq_info->allow_resonant || curr_step->prev == NULL || curr_step->prev->body == curr_step->body) continue;
+			// Only one resonant return per visit, and none once the route has reached its target.
+			if(!seq_info->allow_resonant || curr_step->prev == NULL || curr_step->prev->body == curr_step->body ||
+				curr_step->body == seq_info->arr_body) continue;
 		}
 		double jd_max;
 		if(get_first(curr_step)->date + max_total_duration < jd_max_arr)

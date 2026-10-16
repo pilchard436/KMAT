@@ -18,6 +18,9 @@
 #define POWERED_OBJECTIVES_PER_ROUTE 96
 #define POWERED_REPAIR_OBJECTIVES_PER_ROUTE 144
 #define POWERED_REPAIR_DATE_BINS 64
+/* Residual is in units of the convergence tolerance. */
+#define POWERED_STALL_CHECK_ITERATION 25
+#define POWERED_STALL_RESIDUAL 30.0
 #define AUDIT_SAMPLE_SIZE POWERED_AUDIT_SAMPLE_SIZE
 #define AUDIT_OBJECTIVES_PER_ROUTE POWERED_AUDIT_OBJECTIVES_PER_ROUTE
 
@@ -277,6 +280,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	if(itinerary_search_cancelled(NULL)) valid_route = 0;
 
 	int converged = 0;
+	double best_residual = DBL_MAX;
 	for(int iteration = 0; valid_route && !itinerary_search_cancelled(NULL) && iteration < 60; iteration++) {
 		for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 			double departure_epoch = times[i];
@@ -381,6 +385,10 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 			converged = 1;
 			break;
 		}
+		// Oscillating routes never get near the tolerance, so they are not worth the full iteration budget.
+		best_residual = fmin(best_residual, fmax(fmax(maximum_time_change / 1e-3, maximum_velocity_change / 1e-3),
+			maximum_boundary_position_change / 2e-3));
+		if(iteration >= POWERED_STALL_CHECK_ITERATION && best_residual > POWERED_STALL_RESIDUAL) break;
 	}
 	if(candidate->converged_out != NULL) *candidate->converged_out = converged;
 	if(!valid_route || (!converged && !candidate->accept_unconverged) || itinerary_search_cancelled(NULL)) {
