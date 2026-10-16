@@ -746,6 +746,7 @@ static int itinerary_text_problem(struct ItinStep *first, double dep_periapsis, 
 		if(detailed) itinerary_detailed_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
 		else itinerary_short_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
 		if(guard_broken(overview, 10000) || strstr(overview, "nan") != NULL) return 2 + detailed;
+		if(first->next != NULL && strstr(overview, "Total dv") == NULL) return 6;
 		if(strstr(overview, "Deep-Space Maneuver") != NULL && (strstr(overview, "tangential") == NULL || strstr(overview, "normal") == NULL)) return 5;
 	}
 	return 0;

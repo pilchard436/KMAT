@@ -884,7 +884,11 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
-	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
+	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
 	
 	step = get_first(step);
 	int step_id = 0;
@@ -966,7 +970,11 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n", string, pp.dv_arr_circ);
-	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
+	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
 	
 	step = get_first(step);
 	int step_id = 0;
