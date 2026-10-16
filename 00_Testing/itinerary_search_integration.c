@@ -818,7 +818,9 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 				}
 				else {
 					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
-					if(fabs(after - before) > 50.0) OPERATION_PROBLEM("route %d.%d: re-solve changed total dv from %.1f to %.1f m/s\n", d, j, before, after);
+					// A maneuver node is pinned by its stored position and date, which amplifies the solver's convergence noise.
+					double tolerance = has_maneuver ? 0.05 * before : 50.0;
+					if(fabs(after - before) > tolerance) OPERATION_PROBLEM("route %d.%d: re-solve changed total dv from %.1f to %.1f m/s\n", d, j, before, after);
 				}
 			}
 			free_itinerary(copy);
