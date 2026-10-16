@@ -775,7 +775,7 @@ static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *sys
 }
 
 static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
-	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0;
+	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0, sweep_routes = 0;
 #define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
 	int maneuver_budget = 30, plain_budget = 30;
 	for(int d = 0; d < num_departures; d++) {
@@ -837,6 +837,27 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
 					if(after > before * 1.05 + 50.0) OPERATION_PROBLEM("route %d.%d: maneuver optimization raised dv from %.1f to %.1f m/s\n", d, j, before, after);
 					if(itinerary_text_problem(copy, dep, arr)) OPERATION_PROBLEM("route %d.%d: text problem after optimizing maneuvers\n", d, j);
+				}
+				free_itinerary(copy);
+			}
+
+			// Moving the departure a day at a time must change delta-v smoothly, never jump to a mirrored flyby solution.
+			if(encounters >= 3 && sweep_routes < 24) {
+				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+				update_itin_body_osvs(copy, system);
+				if(resolve_itinerary_with_powered_flybys(system, copy, dep, arr, TF_FLYBY)) {
+					sweep_routes++;
+					double previous = 0;
+					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) previous += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+					for(int click = 1; click <= 20; click++) {
+						set_itinerary_step_date(copy, system, copy->date + (sweep_routes % 2 ? 1 : -1));
+						update_itin_body_osvs(copy, system);
+						if(!resolve_itinerary_with_powered_flybys(system, copy, dep, arr, TF_FLYBY)) break;
+						double current = 0;
+						for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) current += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+						if(current > previous * 1.4 + 200.0) OPERATION_PROBLEM("route %d.%d: moving the departure one day raised dv from %.0f to %.0f m/s (click %d)\n", d, j, previous, current, click);
+						previous = current;
+					}
 				}
 				free_itinerary(copy);
 			}
@@ -1077,6 +1098,49 @@ static int check_dsm_model(CelestSystem *system, Body *departure_body, Body *fly
 	return valid;
 }
 
+// A saved route whose flyby iteration used to settle on a mirrored, costlier solution on some departure dates.
+static int check_departure_sweep_fixture(void) {
+	struct ItinLoadFileResults loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
+	if(loaded.itin == NULL) {
+		fprintf(stderr, "Departure sweep fixture could not be loaded\n");
+		return 0;
+	}
+	struct ItinStep *first = get_first(loaded.itin);
+	double dep = first->body->atmo_alt + 50e3, arr = get_last(first)->body->atmo_alt + 50e3;
+	int valid = 1, resolved = 0;
+	double previous = 0, worst = 0;
+	for(int direction = -1; direction <= 1; direction += 2) {
+		free_itinerary(first);
+		loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
+		first = get_first(loaded.itin);
+		update_itin_body_osvs(first, loaded.system);
+		previous = 0;
+		for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL) previous += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+		for(int click = 1; click <= 20; click++) {
+			set_itinerary_step_date(first, loaded.system, first->date + direction);
+			update_itin_body_osvs(first, loaded.system);
+			if(!resolve_itinerary_with_powered_flybys(loaded.system, first, dep, arr, TF_FLYBY)) continue;
+			resolved++;
+			double current = 0;
+			for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL) current += itinerary_step_dv(s, dep, arr, TF_FLYBY);
+			worst = fmax(worst, current / previous);
+			if(current > previous * 1.4 + 200.0) {
+				fprintf(stderr, "Departure sweep: moving the departure %+d day raised dv from %.0f to %.0f m/s (click %d)\n", direction, previous, current, click);
+				valid = 0;
+			}
+			previous = current;
+		}
+	}
+	free_itinerary(first);
+	if(loaded.system != NULL) free_celestial_system(loaded.system);
+	if(resolved < 30) {
+		fprintf(stderr, "Departure sweep: only %d of 40 edits could be re-solved\n", resolved);
+		valid = 0;
+	}
+	if(valid) printf("Departure sweep fixture passed: %d edits re-solved, largest single-click dv ratio %.2f\n", resolved, worst);
+	return valid;
+}
+
 int main(int argc, char **argv) {
 	if(argc > 1 && strcmp(argv[argc - 1], "--audit-rejections") == 0) {
 		audit_requested = 1;
@@ -1128,9 +1192,10 @@ int main(int argc, char **argv) {
 		arrival_body, departure_jd, hohmann_duration);
 	int dsm_valid = run_dsm_comparison(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
+	int sweep_valid = check_departure_sweep_fixture();
 
 	free_celestial_system(system);
-	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid ||
+	if(!legacy_valid || !izzo_valid || !powered_valid || !seeds_valid || !dsm_model_valid || !dsm_valid || !sweep_valid ||
 		legacy_nodes != izzo_nodes || legacy_itins != izzo_itins) {
 		fprintf(stderr, "Search mismatch: legacy %d nodes/%d itineraries, Izzo %d nodes/%d itineraries\n",
 			legacy_nodes, legacy_itins, izzo_nodes, izzo_itins);

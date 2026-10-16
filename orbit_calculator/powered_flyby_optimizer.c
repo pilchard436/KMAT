@@ -501,15 +501,27 @@ int resolve_itinerary_with_powered_flybys(CelestSystem *system, struct ItinStep 
 		}
 		seed_index++;
 	}
+	// The flyby iteration can settle on a mirrored, costlier flyby orientation, so try both starting points and keep the cheaper.
+	OSV *trial_states = calloc(num_steps, sizeof(*trial_states));
+	Lambert3 *trial_legs = calloc(num_steps - 1, sizeof(*trial_legs));
+	PoweredDsmResult *trial_dsm = calloc(num_steps - 1, sizeof(*trial_dsm));
 	double resolved_dv = DBL_MAX;
-	if(seeded) {
-		candidate.seed_incoming = seed_incoming;
-		candidate.seed_outgoing = seed_outgoing;
-		resolved_dv = evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results);
-		candidate.seed_incoming = candidate.seed_outgoing = NULL;
+	for(int attempt = 0; attempt < 2 && trial_states != NULL && trial_legs != NULL && trial_dsm != NULL; attempt++) {
+		if(attempt == 0 && !seeded) continue;
+		candidate.seed_incoming = attempt == 0 ? seed_incoming : NULL;
+		candidate.seed_outgoing = attempt == 0 ? seed_outgoing : NULL;
+		double trial_dv = evaluate_route_core(&candidate, &calc_data, times, trial_states, trial_legs, trial_dsm);
+		if(trial_dv < resolved_dv) {
+			resolved_dv = trial_dv;
+			memcpy(states, trial_states, num_steps * sizeof(*states));
+			memcpy(legs, trial_legs, (num_steps - 1) * sizeof(*legs));
+			memcpy(dsm_results, trial_dsm, (num_steps - 1) * sizeof(*dsm_results));
+		}
 	}
-	if(resolved_dv >= DBL_MAX)
-		resolved_dv = evaluate_route_core(&candidate, &calc_data, times, states, legs, dsm_results);
+	candidate.seed_incoming = candidate.seed_outgoing = NULL;
+	free(trial_states);
+	free(trial_legs);
+	free(trial_dsm);
 	free(seed_incoming);
 	free(seed_outgoing);
 	if(resolved_dv >= DBL_MAX) goto cleanup;
