@@ -21,6 +21,7 @@
 
 /* Opt-in deep-space maneuvers run only on this many of the best-ranked routes. */
 #define POWERED_DSM_ROUTE_LIMIT 50
+#define POWERED_DSM_RESONANT_ROUTE_LIMIT 30
 #define POWERED_DSM_OBJECTIVES_PER_ROUTE 900
 
 /* One impulsive maneuver on a leg: the leg's departure velocity changes by delta_v, the coast

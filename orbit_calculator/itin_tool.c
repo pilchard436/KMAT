@@ -149,15 +149,16 @@ static int is_usable_lambert(Lambert3 leg) {
 		isfinite(leg.v1.x + leg.v1.y + leg.v1.z);
 }
 
-int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg) {
+int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg, int *variant) {
 	double best_distance = HUGE_VAL;
-	for(int variant = 0; variant < LEG_VARIANT_COUNT; variant++) {
-		Lambert3 candidate = calc_leg_variant_lambert(cb, r0, r1, dt, variant, NULL, NULL);
+	for(int candidate_variant = 0; candidate_variant < LEG_VARIANT_COUNT; candidate_variant++) {
+		Lambert3 candidate = calc_leg_variant_lambert(cb, r0, r1, dt, candidate_variant, NULL, NULL);
 		if(!is_usable_lambert(candidate)) continue;
 		double distance = mag_vec3(subtract_vec3(candidate.v0, v_ref));
 		if(distance < best_distance) {
 			best_distance = distance;
 			*leg = candidate;
+			if(variant != NULL) *variant = candidate_variant;
 		}
 	}
 	return best_distance < HUGE_VAL;

@@ -78,7 +78,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, int variant,
 		LambertCancelCheck cancel_check, void *cancel_context);
 // Picks the variant whose departure velocity is closest to v_ref; returns 0 if none exists.
-int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg);
+int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg, int *variant);
 // Samples of (duration, variant) for a first leg that returns to the departure body, around 1 and 2 of its periods.
 int resonant_departure_sample_count(void);
 void resonant_departure_sample(int index, double period_days, double *duration_days, int *variant);

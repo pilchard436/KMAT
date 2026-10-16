@@ -18,6 +18,17 @@ static int audit_requested;
 static int benchmark_resonant;
 static double stored_total_dv(struct ItinStep *leaf, const Itin_Calc_Data *calc_data, double *dsm_dv);
 
+// The same body twice in a row, ignoring maneuver nodes between the visits.
+static int route_is_resonant(struct ItinStep *leaf) {
+	Body *later = NULL;
+	for(struct ItinStep *step = leaf; step != NULL; step = step->prev) {
+		if(step->body == NULL) continue;
+		if(later == step->body) return 1;
+		later = step->body;
+	}
+	return 0;
+}
+
 static int validate_rejection_audit(int require_recovery) {
 	if(!audit_requested) return 1;
 	PoweredRejectionAudit audit = get_powered_rejection_audit();
@@ -558,9 +569,7 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 			store_itineraries_in_array(results.departures[i], leaves, &stored);
 			for(int j = 0; j < stored; j++) {
 				double total = stored_total_dv(leaves[j], &calc_data, NULL);
-				int resonant = 0;
-				for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
-					resonant |= step->body != NULL && step->prev != NULL && step->prev->body == step->body;
+				int resonant = route_is_resonant(leaves[j]);
 				if(!isfinite(total)) continue;
 				if(total < best_overall) best_overall = total;
 				if(resonant) { resonant_routes++; if(total < best_resonant) best_resonant = total; }
@@ -1154,10 +1163,12 @@ static int check_resonant_flybys(CelestSystem *system, Body *departure_body, Bod
 		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 2, .allow_resonant = 1
 	};
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
+	calc_data.allow_dsm = 1;
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 
-	int resonant_routes = 0, bad_routes = 0, resolve_failures = 0, reported = 0, scored_routes = 0, unscorable_routes = 0;
+	int resonant_routes = 0, bad_routes = 0, resolve_failures = 0, reported = 0, scored_routes = 0, unscorable_routes = 0, maneuver_routes = 0;
 	double best = DBL_MAX, worst_recompute = 0, worst_resolve = 0;
+	struct ItinStep *best_leaf = NULL;
 	// Only the cheapest routes are corrected by the optimizer, so the second pass checks those.
 	for(int pass = 0; pass < 2; pass++)
 	for(int i = 0; i < results.num_deps; i++) {
@@ -1167,23 +1178,24 @@ static int check_resonant_flybys(CelestSystem *system, Body *departure_body, Bod
 		int stored = 0;
 		store_itineraries_in_array(results.departures[i], leaves, &stored);
 		for(int j = 0; j < stored; j++) {
-			int resonant = 0;
-			for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
-				resonant |= step->body != NULL && step->prev != NULL && step->prev->body == step->body;
+			int resonant = route_is_resonant(leaves[j]);
 			if(!resonant) continue;
 			double total = stored_total_dv(leaves[j], &calc_data, NULL);
 			if(pass == 0) {
 				resonant_routes++;
-				if(isfinite(total) && total < best) best = total;
+				if(isfinite(total) && total < best) { best = total; best_leaf = leaves[j]; }
 				continue;
 			}
 			if(!isfinite(total)) { bad_routes++; continue; }
 			if(total > best * 1.1 + 100) continue;
 			double recomputed = plain_cost_without_maneuvers(leaves[j], &calc_data);
+			int has_maneuver = 0;
+			for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev) has_maneuver |= step->body == NULL;
+			maneuver_routes += has_maneuver;
 			// Routes the optimizer could not correct stay as raw search nodes and cannot be scored from dates.
 			if(!(recomputed < DBL_MAX)) { unscorable_routes++; continue; }
 			scored_routes++;
-			double recompute_gap = fabs(recomputed - total);
+			double recompute_gap = has_maneuver ? 0 : fabs(recomputed - total);
 			worst_recompute = fmax(worst_recompute, recompute_gap);
 			if(recompute_gap > POWERED_TEST_DV_TOLERANCE) {
 				bad_routes++;
@@ -1207,10 +1219,30 @@ static int check_resonant_flybys(CelestSystem *system, Body *departure_body, Bod
 		}
 		free(leaves);
 	}
-	int valid = scored_routes > 0 && bad_routes == 0 && resolve_failures == 0;
+	// A maneuver inside the revolution-spanning leg must be optimizable and never make the route worse.
+	int dsm_probe_valid = 1, probe_maneuvers = 0;
+	double probe_plain = DBL_MAX, probe_best = DBL_MAX;
+	if(best_leaf != NULL) {
+		Body *probe_bodies[16];
+		double probe_times[16];
+		size_t probe_steps = 0;
+		for(struct ItinStep *step = best_leaf; step != NULL && probe_steps < 16; step = step->prev)
+			if(step->body != NULL) { probe_bodies[probe_steps] = step->body; probe_times[probe_steps++] = step->date; }
+		for(size_t a = 0, b = probe_steps - 1; a < b; a++, b--) {
+			Body *tb = probe_bodies[a]; probe_bodies[a] = probe_bodies[b]; probe_bodies[b] = tb;
+			double tt = probe_times[a]; probe_times[a] = probe_times[b]; probe_times[b] = tt;
+		}
+		PoweredLegDsm probe_dsm[16];
+		probe_plain = evaluate_powered_flyby_route_objective(&calc_data, probe_bodies, probe_times, probe_steps);
+		probe_best = optimize_powered_flyby_route_dsm(&calc_data, probe_bodies, probe_times, probe_steps, probe_dsm);
+		for(size_t leg = 0; leg + 1 < probe_steps; leg++) probe_maneuvers += probe_dsm[leg].enabled;
+		dsm_probe_valid = probe_plain < DBL_MAX && probe_best <= probe_plain + POWERED_TEST_DV_TOLERANCE;
+		printf("Resonant DSM probe: %.3f m/s without, %.3f m/s optimized, %d maneuver(s)\n", probe_plain, probe_best, probe_maneuvers);
+	}
+	int valid = dsm_probe_valid && scored_routes > 0 && bad_routes == 0 && resolve_failures == 0;
 	if(valid)
-		printf("Resonant flyby check passed: %d resonant routes (%d scored, %d unscorable), best %.3f m/s, worst recompute gap %.4f, worst re-solve gap %.4f m/s\n",
-			resonant_routes, scored_routes, unscorable_routes, best, worst_recompute, worst_resolve);
+		printf("Resonant flyby check passed: %d resonant routes (%d scored, %d unscorable, %d with a maneuver), best %.3f m/s, worst recompute gap %.4f, worst re-solve gap %.4f m/s\n",
+			resonant_routes, scored_routes, unscorable_routes, maneuver_routes, best, worst_recompute, worst_resolve);
 	else
 		fprintf(stderr, "Resonant flyby check failed: %d resonant routes, %d scored, %d inconsistent, %d did not re-solve\n",
 			resonant_routes, scored_routes, bad_routes, resolve_failures);
