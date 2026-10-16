@@ -1261,7 +1261,7 @@ int flyby_below_min_safe(struct ItinStep *step) {
 	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
 			step->body->radius + step->body->atmo_alt + 1e4, &flyby)) return 0;
 	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
-	return isfinite(unpowered) && unpowered < step->body->radius + step->body->atmo_alt;
+	return isfinite(unpowered) && unpowered < step->body->radius + step->body->atmo_alt + 1e4;
 }
 
 int count_flybys_below_min_safe(struct ItinStep *step_in_route) {
