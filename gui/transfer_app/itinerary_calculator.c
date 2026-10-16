@@ -24,6 +24,7 @@ GObject *tf_ic_maxdur;
 static GObject *rb_ic_maxarrdate;
 static GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
+static GtkWidget *cb_ic_allow_dsm;
 GObject *tf_ic_totdv;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
@@ -423,6 +424,9 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
 	}
 	cb_ic_transfertype = gtk_builder_get_object(builder, "cb_ic_transfertype");
+	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
+	if(cb_ic_allow_dsm != NULL)
+		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
 	tf_ic_totdv = gtk_builder_get_object(builder, "tf_ic_totdv");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
@@ -710,6 +714,8 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.dv_filter.max_satdv = strtod(string, NULL);
 	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
 	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
+	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
+		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
 
 	ic_calc_data.dv_filter.dep_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))]->atmo_alt + ic_dep_periapsis;
 	ic_calc_data.dv_filter.arr_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody))]->atmo_alt + ic_arr_periapsis;

@@ -263,7 +263,7 @@ void pa_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 double calc_step_dv_pa(struct ItinStep *step) {
 	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
 	if(step->body == NULL) {
-		if(step->next == NULL || step->next[0]->next == NULL || step->prev == NULL)
+		if(step->next == NULL || step->num_next_nodes == 0 || step->prev == NULL)
 			return 0;
 		return mag_vec3(subtract_vec3(step->v_arr, step->next[0]->v_dep));
 	} else if(step->prev == NULL) {

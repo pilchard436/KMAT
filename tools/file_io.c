@@ -595,7 +595,8 @@ void convert_bin_ItinStep(union ItinStepBin bin_step, struct ItinStep *step, str
 				step->date = bin_step.t0.date;
 				step->num_next_nodes = bin_step.t0.num_next_nodes;
 				break;
-		case 2:	step->body = system->bodies[bin_step.t2.body_id];
+		case 2:	step->body = bin_step.t2.body_id >= 0 && bin_step.t2.body_id < system->num_bodies ?
+					system->bodies[bin_step.t2.body_id] : NULL;
 				step->r = bin_step.t2.r;
 				step->v_arr = bin_step.t2.v_arr;
 				step->v_body = bin_step.t2.v_body;

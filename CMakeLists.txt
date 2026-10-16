@@ -150,6 +150,8 @@ add_executable(KMATSearchIntegration
     orbit_calculator/transfer_calc.c
     orbit_calculator/powered_flyby_optimizer.c
     orbit_calculator/itin_tool.c
+    tools/file_io.c
+    tools/file_io_format.c
     tools/thread_pool.c
     tools/tool_funcs.c
 )
@@ -218,7 +220,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
     )
 
     target_link_libraries(KMATUnitTests PRIVATE urlmon)
-    target_link_libraries(KMATSearchIntegration PRIVATE urlmon)
+    target_link_libraries(KMATSearchIntegration PRIVATE urlmon glib-2.0 gobject-2.0)
 
     target_include_directories(KMAT PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
@@ -237,6 +239,7 @@ else(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     link_directories(${GTK3_LIBRARY_DIRS})
     add_definitions(${GTK3_CFLAGS_OTHER})
     target_link_libraries(KMAT m ${GTK3_LIBRARIES} sqlite3 orbitlib)
+    target_link_libraries(KMATSearchIntegration PRIVATE ${GTK3_LIBRARIES})
 
     target_link_options(KMAT PRIVATE -rdynamic)
 

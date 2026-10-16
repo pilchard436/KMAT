@@ -467,6 +467,9 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 			results.powered_repairs_recovered = powered_stats.repairs_recovered;
 			results.powered_repairs_competing = powered_stats.repairs_competing;
 			results.powered_challenges_refined = powered_stats.challenges_refined;
+			results.powered_dsm_routes_optimized = powered_stats.dsm_routes_optimized;
+			results.powered_dsm_routes_improved = powered_stats.dsm_routes_improved;
+			results.powered_best_dsm_saving = powered_stats.best_dsm_saving;
 			results.best_unpowered_seed_total_dv = powered_stats.best_unpowered_seed_total_dv;
 			results.best_powered_initial_total_dv = powered_stats.best_initial_total_dv;
 			results.best_powered_refined_total_dv = powered_stats.best_refined_total_dv;
@@ -484,6 +487,10 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 				powered_stats.repairs_recovered, powered_stats.repairs_competing,
 				powered_stats.challenge_population, powered_stats.challenges_refined,
 				powered_stats.challenges_beat_cutoff);
+			if(calc_data.allow_dsm)
+				printf("Deep-space maneuvers: %d routes optimized, %d improved, best saving %.2f m/s\n",
+					powered_stats.dsm_routes_optimized, powered_stats.dsm_routes_improved,
+					powered_stats.best_dsm_saving);
 		}
 		int itineraries_before_prune = 0;
 		for(int i = 0; i < num_deps; i++)

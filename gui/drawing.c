@@ -112,7 +112,7 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 		int trajectory_is_viable = 1;
 		double dt = tf->next[0]->date - tf->date;
 
-		if(tf->prev != NULL) {
+		if(tf->prev != NULL && tf->body != NULL) {
 			trajectory_is_viable = is_flyby_leg_viable(tf->v_arr, tf->next[0]->v_dep, tf->v_body, tf->body);
 		}
 
@@ -209,7 +209,7 @@ void draw_trajectory_2d(cairo_t *cr, Vector2 center, double scale, struct ItinSt
 	if(tf->prev->body == NULL && tf->prev->v_body.x == 0) prev = tf->prev->prev;
 	double dt = (tf->date-prev->date)*24*60*60;
 
-	if(prev->prev != NULL && prev->body != NULL) {
+	if(prev->prev != NULL && prev->body != NULL && tf->prev->body != NULL && tf->body != NULL) {
 		if(!is_flyby_leg_viable(tf->prev->v_arr, tf->v_dep, tf->prev->v_body, tf->body)) cairo_set_source_rgb(cr, 1, 0, 0);
 	}
 

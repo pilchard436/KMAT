@@ -19,7 +19,8 @@
 - [x] Repair a bounded, stratified sample of initially rejected routes and let recovered routes compete for refinement by repaired full-mission cost.
 - [x] Give 32 sampled cutoff-excluded routes extra refinement slots to challenge the 500-route cutoff.
 - [x] Write corrected routes as a full chain with `v_dep` on every node; the old suffix-only write-back left stale velocities and the final filter pruned the routes.
-- [ ] One-DSM-per-leg exploration, starting with a controlled case comparing total mission delta-v against no DSM.
+- [x] One-DSM-per-leg exploration (opt-in "Allow deep-space maneuvers" in the itinerary calculator; `allow_dsm` in the search settings). On the quick Earth-Venus-Jupiter fixture the best flyby route drops from 26570.9 to 26408.5 m/s (162 m/s). See `00_Testing/tests.md`.
+- [ ] DSM follow-ups: widen beyond the best 20 routes, allow a DSM on the arrival leg's approach geometry, export DSM itineraries to GMAT (currently declined with a message), and decide whether DSM delta-v should have its own limit instead of sharing the satellite delta-v limit.
 
 ### Current Search Budgets
 
@@ -30,6 +31,7 @@
 - Up to 200 routes receive three timing starts if their initial objective is within 10% of the best selected initial objective or they introduce a different body sequence. Other routes use one start; all share the same per-route evaluation cap.
 - Up to 64 initially rejected routes (one reservoir slot per departure-date bin and body-sequence hash) get at most 144 timing-repair evaluations each, moving only their own dates. Recovered routes rank with the 500 by repaired cost; user limits are unchanged.
 - 32 routes sampled from those excluded by the cutoff are refined beyond the 500.
+- With deep-space maneuvers allowed, the 20 best-ranked routes get at most 900 extra objective evaluations each, and a leg keeps its DSM only if it saves at least 5 m/s with at least a 1 m/s maneuver.
 - Logs report seed feasibility evaluations, added seeds, extra branches, skipped feasible bucket alternatives, encounters that skip powered sampling after budget exhaustion, objective evaluations, exhausted refinement budgets, and scoring/refinement wall time. Existing optional profiling reports Lambert calls.
 - These budgets bound additional branching and per-route refinement, not total recursive search runtime. Full feasibility scoring still visits all generated complete candidates.
 

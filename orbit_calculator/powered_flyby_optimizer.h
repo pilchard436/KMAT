@@ -19,6 +19,18 @@
 #define POWERED_PROGRESS_REFINE_UNITS (POWERED_REFINE_PROGRESS_WEIGHT * \
 	(POWERED_REPAIR_SLOTS + POWERED_ROUTE_REFINEMENT_LIMIT + POWERED_CHALLENGE_SLOTS))
 
+/* Opt-in deep-space maneuvers run only on this many of the best-ranked routes. */
+#define POWERED_DSM_ROUTE_LIMIT 20
+#define POWERED_DSM_OBJECTIVES_PER_ROUTE 900
+
+/* One impulsive maneuver on a leg: the leg's departure velocity changes by delta_v, the coast
+ * continues for eta of the leg time, and a second Lambert arc reaches the next encounter. */
+typedef struct PoweredLegDsm {
+	int enabled;
+	double eta;
+	Vector3 delta_v;
+} PoweredLegDsm;
+
 typedef struct PoweredRejectionAuditGroup {
 	unsigned long long population;
 	int sampled, feasible, improved, beats_retained_best, beats_retained_worst;
@@ -53,6 +65,8 @@ typedef struct PoweredFlybyOptimizationStats {
 	unsigned long long initial_rejections, challenge_population;
 	int repairs_attempted, repairs_recovered, repairs_competing;
 	int challenges_refined, challenges_beat_cutoff;
+	int dsm_routes_optimized, dsm_routes_improved;
+	double best_dsm_saving;
 } PoweredFlybyOptimizationStats;
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
@@ -60,5 +74,15 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 	Body **bodies, const double *times, size_t num_steps);
+
+/* Same objective with optional per-leg DSMs (num_steps - 1 entries, NULL for none). DSM delta-v
+ * counts toward the satellite delta-v limit, like every other deep-space maneuver. */
+double evaluate_powered_flyby_route_objective_with_dsm(const Itin_Calc_Data *calc_data,
+	Body **bodies, const double *times, size_t num_steps, const PoweredLegDsm *dsms);
+
+/* Local search over one DSM per leg on a fixed-date route. Returns the best objective and fills
+ * dsms (num_steps - 1 entries); a leg is only enabled if it lowers the objective. */
+double optimize_powered_flyby_route_dsm(const Itin_Calc_Data *calc_data, Body **bodies,
+	const double *times, size_t num_steps, PoweredLegDsm *dsms);
 
 #endif

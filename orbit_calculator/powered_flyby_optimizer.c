@@ -10,6 +10,9 @@
 
 #define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
+/* The SOI-converged objective is only repeatable to a few m/s, so smaller DSM gains are noise. */
+#define POWERED_DSM_MIN_SAVING 5.0
+#define POWERED_DSM_MIN_MANEUVER 1.0
 #define POWERED_TIMING_START_COUNT 3
 #define POWERED_MULTI_START_ROUTE_LIMIT 200
 #define POWERED_OBJECTIVES_PER_ROUTE 96
@@ -38,6 +41,12 @@ static int itinerary_search_cancelled(void *context) {
 	return get_thread_counter(3) > 0;
 }
 
+typedef struct PoweredDsmResult {
+	int used;
+	double date, delta_v;
+	Vector3 position, velocity_before, velocity_after;
+} PoweredDsmResult;
+
 typedef struct PoweredRouteCandidate {
 	int departure_index;
 	size_t num_steps;
@@ -52,6 +61,8 @@ typedef struct PoweredRouteCandidate {
 	Lambert3 *best_legs;
 	double original_total_dv;
 	double best_total_dv;
+	PoweredLegDsm *dsms;
+	PoweredDsmResult *dsm_results;
 } PoweredRouteCandidate;
 
 typedef struct AuditReservoir {
@@ -122,8 +133,48 @@ static int hyperbolic_excess_velocity(OSV relative_state, Body *body, int incomi
 	return is_finite_vector(*excess_velocity);
 }
 
-static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
-		const double *times, OSV *states, Lambert3 *legs) {
+static int is_valid_lambert(Lambert3 leg) {
+	return leg.success != LAMBERT_FAIL_NAN && leg.success != LAMBERT_FAIL_ECC &&
+		leg.success != LAMBERT_MAX_ITERATIONS && is_finite_vector(leg.v0) && is_finite_vector(leg.v1);
+}
+
+/* One leg: a Lambert arc, or with a DSM a ballistic coast from the shifted departure velocity
+ * followed by a second Lambert arc. A zero delta_v reproduces the plain arc with zero burn. */
+static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, CelestSystem *system,
+		Vector3 departure_position, Vector3 arrival_position, double departure_epoch,
+		double duration_days, Lambert3 *leg, PoweredDsmResult *dsm) {
+	Lambert3 plain = calc_lambert3_selected_cancellable(departure_position, arrival_position,
+		duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+	if(itinerary_search_cancelled(NULL) || !is_valid_lambert(plain)) return 0;
+	*leg = plain;
+	if(dsm != NULL) dsm->used = 0;
+	const PoweredLegDsm *spec = candidate->dsms != NULL ? &candidate->dsms[index] : NULL;
+	if(spec == NULL || !spec->enabled) return 1;
+	if(!(spec->eta > 0 && spec->eta < 1) || !is_finite_vector(spec->delta_v)) return 0;
+
+	Vector3 departure_velocity = add_vec3(plain.v0, spec->delta_v);
+	OSV at_dsm = propagate_osv_time((OSV){departure_position, departure_velocity}, system->cb,
+		spec->eta * duration_days * 86400);
+	if(!is_finite_vector(at_dsm.r) || !is_finite_vector(at_dsm.v)) return 0;
+	Lambert3 second = calc_lambert3_selected_cancellable(at_dsm.r, arrival_position,
+		(1 - spec->eta) * duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
+	if(itinerary_search_cancelled(NULL) || !is_valid_lambert(second)) return 0;
+
+	leg->v0 = departure_velocity;
+	leg->v1 = second.v1;
+	if(dsm != NULL) {
+		dsm->used = 1;
+		dsm->date = departure_epoch + spec->eta * duration_days;
+		dsm->position = at_dsm.r;
+		dsm->velocity_before = at_dsm.v;
+		dsm->velocity_after = second.v0;
+		dsm->delta_v = mag_vec3(subtract_vec3(second.v0, at_dsm.v));
+	}
+	return 1;
+}
+
+static double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
+		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out) {
 	if(itinerary_search_cancelled(NULL)) return DBL_MAX;
 	if(objective_budget == 0) return DBL_MAX;
 	if(objective_budget > 0) objective_budget--;
@@ -141,21 +192,19 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 	for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		double duration_days = times[i + 1] - times[i];
 		if(duration_days < POWERED_MIN_LEG_DAYS) return DBL_MAX;
-		legs[i] = calc_lambert3_selected_cancellable(states[i].r, states[i + 1].r,
-			duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
-		if(itinerary_search_cancelled(NULL)) return DBL_MAX;
-		if(legs[i].success == LAMBERT_FAIL_NAN || legs[i].success == LAMBERT_FAIL_ECC ||
-			legs[i].success == LAMBERT_MAX_ITERATIONS || !is_finite_vector(legs[i].v0) ||
-			!is_finite_vector(legs[i].v1)) return DBL_MAX;
+		if(!solve_leg(candidate, i, system, states[i].r, states[i + 1].r, times[i],
+			duration_days, &legs[i], NULL)) return DBL_MAX;
 	}
 
 	PoweredFlybyResult *flybys = calloc(candidate->num_steps, sizeof(*flybys));
 	Vector3 *incoming_excess = calloc(candidate->num_steps, sizeof(*incoming_excess));
 	Vector3 *outgoing_excess = calloc(candidate->num_steps, sizeof(*outgoing_excess));
-	if(flybys == NULL || incoming_excess == NULL || outgoing_excess == NULL) {
+	PoweredDsmResult *dsm_local = calloc(candidate->num_steps, sizeof(*dsm_local));
+	if(flybys == NULL || incoming_excess == NULL || outgoing_excess == NULL || dsm_local == NULL) {
 		free(flybys);
 		free(incoming_excess);
 		free(outgoing_excess);
+		free(dsm_local);
 		return DBL_MAX;
 	}
 	double total_dv = DBL_MAX;
@@ -203,15 +252,8 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 				valid_route = 0;
 				break;
 			}
-			legs[i] = calc_lambert3_selected_cancellable(departure_position, arrival_position,
-				duration_days * 86400, system->cb, itinerary_search_cancelled, NULL);
-			if(itinerary_search_cancelled(NULL)) {
-				valid_route = 0;
-				break;
-			}
-			if(legs[i].success == LAMBERT_FAIL_NAN || legs[i].success == LAMBERT_FAIL_ECC ||
-				legs[i].success == LAMBERT_MAX_ITERATIONS || !is_finite_vector(legs[i].v0) ||
-				!is_finite_vector(legs[i].v1)) {
+			if(!solve_leg(candidate, i, system, departure_position, arrival_position,
+				departure_epoch, duration_days, &legs[i], &dsm_local[i])) {
 				valid_route = 0;
 				break;
 			}
@@ -307,15 +349,19 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 		powered_flyby_dv += flybys[i].burn_delta_v;
 	}
 
+	double dsm_total_dv = 0;
+	for(size_t i = 0; i + 1 < candidate->num_steps; i++)
+		if(dsm_local[i].used) dsm_total_dv += dsm_local[i].delta_v;
+
 	size_t last_leg = candidate->num_steps - 2;
 	Body *arrival_body = candidate->bodies[candidate->num_steps - 1];
 	double arrival_dv = arrival_delta_v(&calc_data->dv_filter, arrival_body,
 		legs[last_leg].v1, states[candidate->num_steps - 1].v,
 		calc_data->dv_filter.arr_periapsis);
-	if(arrival_dv > calc_data->dv_filter.max_satdv) {
+	if(arrival_dv + dsm_total_dv > calc_data->dv_filter.max_satdv) {
 		goto cleanup;
 	}
-	total_dv = departure_dv + powered_flyby_dv + arrival_dv;
+	total_dv = departure_dv + powered_flyby_dv + dsm_total_dv + arrival_dv;
 	if(total_dv > calc_data->dv_filter.max_totdv) {
 		total_dv = DBL_MAX;
 		goto cleanup;
@@ -324,16 +370,24 @@ static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_
 		legs[i - 1].v1 = add_vec3(states[i].v, incoming_excess[i]);
 		legs[i].v0 = add_vec3(states[i].v, outgoing_excess[i]);
 	}
+	if(dsm_out != NULL)
+		memcpy(dsm_out, dsm_local, (candidate->num_steps - 1) * sizeof(*dsm_out));
 
 cleanup:
 	free(flybys);
 	free(incoming_excess);
 	free(outgoing_excess);
+	free(dsm_local);
 	return total_dv;
 }
 
-double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
-		Body **bodies, const double *times, size_t num_steps) {
+static double evaluate_route(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
+		const double *times, OSV *states, Lambert3 *legs) {
+	return evaluate_route_core(candidate, calc_data, times, states, legs, NULL);
+}
+
+double evaluate_powered_flyby_route_objective_with_dsm(const Itin_Calc_Data *calc_data,
+		Body **bodies, const double *times, size_t num_steps, const PoweredLegDsm *dsms) {
 	if(calc_data == NULL || bodies == NULL || times == NULL || num_steps < 3) return DBL_MAX;
 	for(size_t i = 0; i < num_steps; i++)
 		if(bodies[i] == NULL || !isfinite(times[i])) return DBL_MAX;
@@ -344,11 +398,151 @@ double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 		free(legs);
 		return DBL_MAX;
 	}
-	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies};
+	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies,
+		.dsms = (PoweredLegDsm *)dsms};
 	double objective = evaluate_route(&candidate, calc_data, times, states, legs);
 	free(states);
 	free(legs);
 	return objective;
+}
+
+double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
+		Body **bodies, const double *times, size_t num_steps) {
+	return evaluate_powered_flyby_route_objective_with_dsm(calc_data, bodies, times, num_steps, NULL);
+}
+
+static int dsm_search_frame(Vector3 position, Vector3 velocity, Vector3 axes[3]) {
+	double speed = mag_vec3(velocity);
+	Vector3 normal = cross_vec3(position, velocity);
+	double normal_magnitude = mag_vec3(normal);
+	if(!(speed > 0) || !(normal_magnitude > 0)) return 0;
+	axes[0] = scale_vec3(velocity, 1 / speed);
+	axes[2] = scale_vec3(normal, 1 / normal_magnitude);
+	axes[1] = cross_vec3(axes[2], axes[0]);
+	return 1;
+}
+
+/* Coordinate search over one DSM per leg on a route whose dates are fixed. Needs best_states,
+ * best_legs and best_total_dv of the plain route; a leg keeps its DSM only if it lowers the cost. */
+static double optimize_candidate_dsm(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data) {
+	static const double delta_steps[] = {300, 100, 30, 10, 3, 1};
+	static const double eta_steps[] = {0.2, 0.1, 0.05, 0.03, 0.02, 0.01};
+	size_t n = candidate->num_steps;
+	OSV *trial_states = calloc(n, sizeof(*trial_states));
+	Lambert3 *trial_legs = calloc(n - 1, sizeof(*trial_legs));
+	PoweredDsmResult *trial_dsm = calloc(n - 1, sizeof(*trial_dsm));
+	PoweredLegDsm *dsms = calloc(n - 1, sizeof(*dsms));
+	PoweredDsmResult *dsm_results = calloc(n - 1, sizeof(*dsm_results));
+	double best = candidate->best_total_dv;
+	if(trial_states == NULL || trial_legs == NULL || trial_dsm == NULL || dsms == NULL || dsm_results == NULL)
+		goto cleanup;
+
+	candidate->dsms = dsms;
+	OSV *leg_states = malloc(n * sizeof(*leg_states));
+	Lambert3 *leg_legs = malloc((n - 1) * sizeof(*leg_legs));
+	PoweredDsmResult *leg_dsm = malloc((n - 1) * sizeof(*leg_dsm));
+	if(leg_states == NULL || leg_legs == NULL || leg_dsm == NULL) {
+		free(leg_states); free(leg_legs); free(leg_dsm);
+		candidate->dsms = NULL;
+		goto cleanup;
+	}
+	for(size_t leg = 0; leg + 1 < n && objective_budget != 0 && !itinerary_search_cancelled(NULL); leg++) {
+		Vector3 axes[3];
+		if(!dsm_search_frame(candidate->best_states[leg].r, candidate->best_legs[leg].v0, axes)) continue;
+		double cost_before_leg = best;
+		memcpy(leg_states, candidate->best_states, n * sizeof(*leg_states));
+		memcpy(leg_legs, candidate->best_legs, (n - 1) * sizeof(*leg_legs));
+		memcpy(leg_dsm, dsm_results, (n - 1) * sizeof(*leg_dsm));
+		dsms[leg] = (PoweredLegDsm){.enabled = 1, .eta = 0.5};
+		for(size_t s = 0; s < sizeof(delta_steps) / sizeof(delta_steps[0]) &&
+			objective_budget != 0 && !itinerary_search_cancelled(NULL); s++) {
+			for(int pass = 0; pass < 4 && objective_budget != 0; pass++) {
+				int improved = 0;
+				for(int move = 0; move < 8 && objective_budget != 0; move++) {
+					PoweredLegDsm saved = dsms[leg];
+					int direction = move % 2 ? 1 : -1;
+					if(move < 6) dsms[leg].delta_v = add_vec3(saved.delta_v,
+						scale_vec3(axes[move / 2], direction * delta_steps[s]));
+					else dsms[leg].eta = saved.eta + direction * eta_steps[s];
+					if(dsms[leg].eta < 0.02 || dsms[leg].eta > 0.98) {
+						dsms[leg] = saved;
+						continue;
+					}
+					double value = evaluate_route_core(candidate, calc_data, candidate->times,
+						trial_states, trial_legs, trial_dsm);
+					if(value + POWERED_IMPROVEMENT_THRESHOLD < best) {
+						best = value;
+						improved = 1;
+						memcpy(candidate->best_states, trial_states, n * sizeof(*trial_states));
+						memcpy(candidate->best_legs, trial_legs, (n - 1) * sizeof(*trial_legs));
+						memcpy(dsm_results, trial_dsm, (n - 1) * sizeof(*trial_dsm));
+					} else {
+						dsms[leg] = saved;
+					}
+				}
+				if(!improved) break;
+			}
+		}
+		int kept = best + POWERED_DSM_MIN_SAVING < cost_before_leg && dsm_results[leg].used &&
+			dsm_results[leg].delta_v >= POWERED_DSM_MIN_MANEUVER;
+		if(!kept) {
+			dsms[leg].enabled = 0;
+			best = cost_before_leg;
+			memcpy(candidate->best_states, leg_states, n * sizeof(*leg_states));
+			memcpy(candidate->best_legs, leg_legs, (n - 1) * sizeof(*leg_legs));
+			memcpy(dsm_results, leg_dsm, (n - 1) * sizeof(*leg_dsm));
+		}
+	}
+	free(leg_states); free(leg_legs); free(leg_dsm);
+
+	if(best + POWERED_IMPROVEMENT_THRESHOLD < candidate->best_total_dv) {
+		candidate->best_total_dv = best;
+		candidate->dsm_results = dsm_results;
+		dsm_results = NULL;
+		dsms = NULL;
+	} else {
+		candidate->dsms = NULL;
+		best = candidate->best_total_dv;
+	}
+
+cleanup:
+	free(trial_states);
+	free(trial_legs);
+	free(trial_dsm);
+	free(dsms);
+	free(dsm_results);
+	return best;
+}
+
+double optimize_powered_flyby_route_dsm(const Itin_Calc_Data *calc_data, Body **bodies,
+		const double *times, size_t num_steps, PoweredLegDsm *dsms) {
+	if(calc_data == NULL || bodies == NULL || times == NULL || dsms == NULL || num_steps < 3) return DBL_MAX;
+	for(size_t i = 0; i < num_steps; i++)
+		if(bodies[i] == NULL || !isfinite(times[i])) return DBL_MAX;
+	memset(dsms, 0, (num_steps - 1) * sizeof(*dsms));
+	PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies};
+	candidate.times = malloc(num_steps * sizeof(*candidate.times));
+	candidate.best_states = calloc(num_steps, sizeof(*candidate.best_states));
+	candidate.best_legs = calloc(num_steps - 1, sizeof(*candidate.best_legs));
+	double result = DBL_MAX;
+	if(candidate.times != NULL && candidate.best_states != NULL && candidate.best_legs != NULL) {
+		memcpy(candidate.times, times, num_steps * sizeof(*times));
+		candidate.best_total_dv = evaluate_route(&candidate, calc_data, candidate.times,
+			candidate.best_states, candidate.best_legs);
+		result = candidate.best_total_dv;
+		if(result < DBL_MAX) {
+			objective_budget = POWERED_DSM_OBJECTIVES_PER_ROUTE;
+			result = optimize_candidate_dsm(&candidate, calc_data);
+			objective_budget = -1;
+			if(candidate.dsms != NULL) memcpy(dsms, candidate.dsms, (num_steps - 1) * sizeof(*dsms));
+		}
+	}
+	free(candidate.times);
+	free(candidate.best_states);
+	free(candidate.best_legs);
+	free(candidate.dsms);
+	free(candidate.dsm_results);
+	return result;
 }
 
 static int initialize_candidate(PoweredRouteCandidate *candidate, struct ItinStep *arrival,
@@ -413,6 +607,8 @@ static void free_candidate(PoweredRouteCandidate *candidate) {
 	free(candidate->times);
 	free(candidate->best_states);
 	free(candidate->best_legs);
+	free(candidate->dsms);
+	free(candidate->dsm_results);
 	memset(candidate, 0, sizeof(*candidate));
 }
 
@@ -450,6 +646,8 @@ static PoweredRouteCandidate *copy_candidate(const PoweredRouteCandidate *source
 	if(copy == NULL) return NULL;
 	size_t n = source->num_steps;
 	*copy = *source;
+	copy->dsms = NULL;
+	copy->dsm_results = NULL;
 	copy->bodies = malloc(n * sizeof(*copy->bodies));
 	copy->signature_dates = malloc(n * sizeof(*copy->signature_dates));
 	copy->signature_positions = malloc(n * sizeof(*copy->signature_positions));
@@ -776,8 +974,15 @@ static struct ItinStep *find_matching_prefix(struct ItinStep *step,
 }
 
 /* Flyby corrections change inbound-leg velocities on every node after the departure. */
+static int leg_has_dsm(const PoweredRouteCandidate *candidate, size_t leg) {
+	return candidate->dsms != NULL && candidate->dsm_results != NULL &&
+		candidate->dsms[leg].enabled && candidate->dsm_results[leg].used;
+}
+
 static struct ItinStep *make_optimized_suffix(const PoweredRouteCandidate *candidate) {
 	size_t suffix_count = candidate->num_steps - 1;
+	for(size_t leg = 0; leg + 1 < candidate->num_steps; leg++)
+		suffix_count += leg_has_dsm(candidate, leg);
 	struct ItinStep **nodes = calloc(suffix_count, sizeof(*nodes));
 	if(nodes == NULL) return NULL;
 	for(size_t i = 0; i < suffix_count; i++) {
@@ -788,28 +993,42 @@ static struct ItinStep *make_optimized_suffix(const PoweredRouteCandidate *candi
 			return NULL;
 		}
 	}
-	for(size_t i = 0; i < suffix_count; i++) {
-		size_t route_index = 1 + i;
-		struct ItinStep *node = nodes[i];
+	size_t k = 0;
+	for(size_t route_index = 1; route_index < candidate->num_steps; route_index++) {
+		size_t leg = route_index - 1;
+		Vector3 arriving_leg_start_velocity = candidate->best_legs[leg].v0;
+		if(leg_has_dsm(candidate, leg)) {
+			const PoweredDsmResult *dsm = &candidate->dsm_results[leg];
+			struct ItinStep *maneuver = nodes[k++];
+			maneuver->body = NULL;
+			maneuver->date = dsm->date;
+			maneuver->r = dsm->position;
+			/* Non-zero v_body marks a real maneuver for the drawing code. */
+			maneuver->v_body = dsm->velocity_before;
+			maneuver->v_arr = dsm->velocity_before;
+			maneuver->v_dep = candidate->best_legs[leg].v0;
+			arriving_leg_start_velocity = dsm->velocity_after;
+		}
+		struct ItinStep *node = nodes[k++];
 		node->body = candidate->bodies[route_index];
 		node->date = candidate->times[route_index];
 		node->r = candidate->best_states[route_index].r;
 		node->v_body = candidate->best_states[route_index].v;
-		node->v_arr = candidate->best_legs[route_index - 1].v1;
-		node->v_dep = candidate->best_legs[route_index - 1].v0;
-		if(route_index + 1 < candidate->num_steps) {
-			node->next = malloc(sizeof(*node->next));
-			if(node->next == NULL) {
-				for(size_t j = 0; j < suffix_count; j++) {
-					free(nodes[j]->next);
-					free(nodes[j]);
-				}
-				free(nodes);
-				return NULL;
+		node->v_arr = candidate->best_legs[leg].v1;
+		node->v_dep = arriving_leg_start_velocity;
+	}
+	for(size_t i = 0; i + 1 < suffix_count; i++) {
+		nodes[i]->next = malloc(sizeof(*nodes[i]->next));
+		if(nodes[i]->next == NULL) {
+			for(size_t j = 0; j < suffix_count; j++) {
+				free(nodes[j]->next);
+				free(nodes[j]);
 			}
-			node->num_next_nodes = 1;
-			node->next[0] = nodes[i + 1];
+			free(nodes);
+			return NULL;
 		}
+		nodes[i]->num_next_nodes = 1;
+		nodes[i]->next[0] = nodes[i + 1];
 	}
 	for(size_t i = 0; i < suffix_count; i++)
 		nodes[i]->prev = i == 0 ? NULL : nodes[i - 1];
@@ -1054,6 +1273,20 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats && objective_budget == 0) stats->refinement_budgets_exhausted++;
 		objective_budget = -1;
+		if(optimized && calc_data->allow_dsm && candidate_index < POWERED_DSM_ROUTE_LIMIT) {
+			double cost_without_dsm = candidate->best_total_dv;
+			objective_budget = POWERED_DSM_OBJECTIVES_PER_ROUTE;
+			optimize_candidate_dsm(candidate, calc_data);
+			objective_budget = -1;
+			if(stats != NULL) {
+				stats->dsm_routes_optimized++;
+				if(candidate->dsms != NULL) {
+					stats->dsm_routes_improved++;
+					stats->best_dsm_saving = fmax(stats->best_dsm_saving,
+						cost_without_dsm - candidate->best_total_dv);
+				}
+			}
+		}
 		if(optimized &&
 			replace_candidate_route(departures, candidate)) {
 			rejection_audit.retained_best = fmin(rejection_audit.retained_best, candidate->best_total_dv);

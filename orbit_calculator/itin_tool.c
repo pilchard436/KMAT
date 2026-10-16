@@ -510,9 +510,10 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	pp.dv_dsm = 0;
 	pp.dv_flyby = 0;
 	while(itin->prev->prev != NULL) {
-		if(itin->body == NULL) {
+		if(itin->body == NULL)
 			pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
-		} else if(itin->prev->body != NULL && itin->prev->prev != NULL) {
+		// A DSM right after a flyby must not hide that flyby's burn.
+		if(itin->prev->body != NULL && itin->prev->prev != NULL) {
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby->body->radius + flyby->body->atmo_alt + 1e4;
@@ -524,6 +525,9 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		}
 		itin = itin->prev;
 	}
+	// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
+	if(itin->body == NULL && itin->next != NULL && itin->num_next_nodes > 0)
+		pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
 
 	pp.dep_date = itin->prev->date;
 	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
@@ -891,7 +895,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
-		sprintf(string, "%s%s", string, step->body->name);
+		sprintf(string, "%s%s", string, step->body != NULL ? step->body->name : "DSM");
 		if(step->next != NULL) step = step->next[0];
 		else break;
 	}
@@ -915,6 +919,12 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	
 	while(step != NULL) {
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
+		if(step->body == NULL) {
+			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
+			sprintf(string, "%sDeep-Space Maneuver: | %s | Burn: %.2f m/s\n", string, date_string, maneuver_dv);
+			step = step->next != NULL ? step->next[0] : NULL;
+			continue;
+		}
 		if(step_id == 0) sprintf(string, "%sDeparture", string);
 		else if(step->next == NULL) sprintf(string, "%sArrival", string);
 		else sprintf(string, "%sFly-By %d", string, step_id);
@@ -950,7 +960,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
-		sprintf(string, "%s%s", string, step->body->name);
+		sprintf(string, "%s%s", string, step->body != NULL ? step->body->name : "DSM");
 		if(step->next != NULL) step = step->next[0];
 		else break;
 	}
@@ -989,6 +999,13 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	
 	while(step != NULL) {
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
+		if(step->body == NULL) {
+			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
+			sprintf(string, "%s\nDeep-Space Maneuver:\nDate: %s  (T+%.2f days)\nBurn: %.2f m/s\n", string,
+				date_string, step->date-get_first(step)->date, maneuver_dv);
+			step = step->next != NULL ? step->next[0] : NULL;
+			continue;
+		}
 		if(step_id == 0) sprintf(string, "%s\nDeparture", string);
 		else if(step->next == NULL) sprintf(string, "%s\nArrival", string);
 		else sprintf(string, "%s\nFly-By %d", string, step_id);
@@ -1025,6 +1042,14 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 
 void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum DateType date_type, double dep_periapsis, double arr_periapsis, struct ItinStep *step) {
 	if(step == NULL) {sprintf(s_labels,""); sprintf(s_values,""); return;}
+	if(step->body == NULL) {
+		double dt_in_days = step->date - get_first(step)->date;
+		if(date_type == DATE_KERBAL) dt_in_days *= 4;
+		double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
+		sprintf(s_labels, "Deep-Space Maneuver\nT+:\nBurn:");
+		sprintf(s_values, "\n%.2f days\n%.2f m/s", dt_in_days, maneuver_dv);
+		return;
+	}
 	HyperbolaParams hyp_params;
 
 	// is departure step
