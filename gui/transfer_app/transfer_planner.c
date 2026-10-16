@@ -404,9 +404,11 @@ G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 			return;
 		}
 		tp_set_current_step_date(current_date_tp);
+		return;
 	}
 
-	update_itinerary();
+	// Only the clock moved, so the route and its delta-v stay as they are.
+	update();
 }
 
 G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
@@ -418,9 +420,10 @@ G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
 			return;
 		}
 		tp_set_current_step_date(current_date_tp);
+		return;
 	}
 	
-	update_itinerary();
+	update();
 }
 
 G_MODULE_EXPORT void on_tp_switch_clocktime_date(GtkWidget* widget, gpointer data) {
@@ -502,18 +505,14 @@ G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer da
 	}
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate)))
 		current_date_tp = curr_transfer_tp->date;
-	// Releasing the lock changes nothing, and re-solving would replace the loaded route's velocities.
-	if(curr_transfer_tp != NULL && !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate))) {
-		update();
-		return;
-	}
-	update_itinerary();
+	// Locking or releasing only changes what the date buttons move; the route stays as it is.
+	update();
 }
 
 G_MODULE_EXPORT void on_goto_transfer_date(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_tp == NULL) return;
 	current_date_tp = curr_transfer_tp->date;
-	update_itinerary();
+	update();
 }
 
 int find_closest_transfer(struct ItinStep *step) {
