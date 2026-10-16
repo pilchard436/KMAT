@@ -1097,6 +1097,12 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 
 			hyp_params = get_hyperbola_params(step->v_arr, step->next[0]->v_dep,
 											  step->v_body, step->body, 0, HYP_FLYBY);
+			// The unpowered periapsis can lie below the surface; the route actually flies the powered one.
+			PoweredFlybyResult powered_flyby;
+			int powered_valid = calculate_powered_flyby(v_arr, v_dep, v_body, step->body,
+				step->body->radius + step->body->atmo_alt + 1e4, &powered_flyby);
+			double periapsis_radius = powered_valid ? powered_flyby.periapsis_radius : hyp_params.rp;
+			double flyby_burn = powered_valid ? powered_flyby.burn_delta_v : 0;
 			double dt_in_days = step->date - get_first(step)->date;
 			if(date_type == DATE_KERBAL) dt_in_days *= 4;
 
@@ -1104,6 +1110,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "T+:\n"
 							  "RadPer:\n"
 							  "AltPer:\n"
+							  "Burn:\n"
 							  "Inclination:\n\n"
 							  "C3Energy:\n"
 							  "RHA (in):\n"
@@ -1116,6 +1123,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 			sprintf(s_values, "\n%.2f days\n"
 							  "%.0f km\n"
 							  "%.0f km\n"
+							  "%.1f m/s\n"
 							  "%.2f°\n\n"
 							  "%.2f km²/s²\n"
 							  "%.2f°\n"
@@ -1124,7 +1132,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "%.2f°\n"
 							  "%.2f°\n"
 							  "%.2f°",
-					dt_in_days, hyp_params.rp / 1000, (hyp_params.rp-step->body->radius) / 1000, rad2deg(incl),
+					dt_in_days, periapsis_radius / 1000, (periapsis_radius-step->body->radius) / 1000, flyby_burn, rad2deg(incl),
 					hyp_params.c3_energy / 1e6,
 					rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl),
 					rad2deg(hyp_params.incoming.bvazi),

@@ -1189,6 +1189,31 @@ static int check_departure_sweep_fixture(void) {
 	}
 	free_itinerary(first);
 	if(loaded.system != NULL) free_celestial_system(loaded.system);
+
+	// The step panel must show the periapsis of the powered flyby that is flown, never the unpowered one below the surface.
+	loaded = load_single_itinerary_from_bfile("../00_Testing/fixtures/departure_sweep.itin");
+	first = get_first(loaded.itin);
+	second_earth = first->next[0]->next[0]->next[0];
+	update_itin_body_osvs(first, loaded.system);
+	set_itinerary_step_date(second_earth, loaded.system, second_earth->date + 35);
+	update_itin_body_osvs(first, loaded.system);
+	if(resolve_itinerary_with_powered_flybys_approximate(loaded.system, first, dep, arr, TF_FLYBY, &approximate_converged)) {
+		char panel_labels[ITIN_STEP_TEXT_SIZE], panel_values[ITIN_STEP_TEXT_SIZE];
+		itinerary_step_parameters_to_string(panel_labels, panel_values, DATE_ISO, dep, arr, second_earth);
+		char *altitude_line = panel_values;
+		for(int line = 0; line < 3 && altitude_line != NULL; line++) {
+			altitude_line = strchr(altitude_line, '\n');
+			if(altitude_line != NULL) altitude_line++;
+		}
+		double minimum_altitude_km = (second_earth->body->atmo_alt + 1e4) / 1e3;
+		if(altitude_line == NULL || atof(altitude_line) < minimum_altitude_km - 0.6) {
+			fprintf(stderr, "Departure sweep: the step panel shows a periapsis altitude of %s km, below the %.0f km minimum\n",
+				altitude_line != NULL ? altitude_line : "?", minimum_altitude_km);
+			valid = 0;
+		}
+	}
+	free_itinerary(first);
+	if(loaded.system != NULL) free_celestial_system(loaded.system);
 	if(resolved < 30) {
 		fprintf(stderr, "Departure sweep: only %d of 40 edits could be re-solved\n", resolved);
 		valid = 0;
