@@ -15,6 +15,8 @@ void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date)
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date);
 void draw_orbit(Camera *camera, Orbit orbit);
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
+void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
+void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date);
 void draw_orbit_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r, Vector3 v, Body *attractor);
 void draw_body_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r);
 double calc_scale(int area_width, int area_height, Body *farthest_body);

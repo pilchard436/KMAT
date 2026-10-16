@@ -42,6 +42,12 @@ GObject *lb_tp_param_values;
 GObject *vp_tp_bodies;
 GtkWidget *grid_tp_bodies;
 
+// Simulated days per real second for each entry of the speed dropdown.
+static const double tp_animation_speeds[] = {1.0 / 24, 0.25, 1, 5, 10, 30, 100, 365.25};
+static GtkWidget *tb_tp_animate, *cb_tp_anim_speed;
+static guint tp_animation_source;
+static gint64 tp_animation_last_time;
+
 gboolean *body_show_status_tp, fix_tfbody;
 double current_date_tp;
 
@@ -86,6 +92,8 @@ void init_transfer_planner(GtkBuilder *builder) {
 	lb_tp_date = gtk_builder_get_object(builder, "lb_tp_date");
 	da_tp = gtk_builder_get_object(builder, "da_tp");
 	vp_tp_bodies = gtk_builder_get_object(builder, "vp_tp_bodies");
+	tb_tp_animate = GTK_WIDGET(gtk_builder_get_object(builder, "tb_tp_animate"));
+	cb_tp_anim_speed = GTK_WIDGET(gtk_builder_get_object(builder, "cb_tp_anim_speed"));
 
 	tp_system_camera = new_camera(GTK_WIDGET(da_tp), &on_tp_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_tp_screen_mouse_move, &on_tp_screen_scroll);
 
@@ -122,15 +130,20 @@ void update_tp_system_view() {
 	for(int i = 0; i < tp_system->num_bodies; i++) {
 		if(!body_show_status_tp[i]) continue;
 		draw_body(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
+		draw_body_label(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
 		struct Orbit orbit = tp_system->bodies[i]->orbit;
 		if(tp_system->prop_method == EPHEMS) {
 			struct OSV body_osv = osv_from_ephem(tp_system->bodies[i]->ephem, tp_system->bodies[i]->num_ephems, current_date_tp, tp_system->cb);
 			orbit = constr_orbit_from_osv(body_osv.r, body_osv.v, tp_system->cb);
 		}
+		// Body orbits are kept faint so the trajectory stands out.
+		cairo_set_source_rgba(get_camera_screen_cairo(tp_system_camera), tp_system->bodies[i]->color[0],
+			tp_system->bodies[i]->color[1], tp_system->bodies[i]->color[2], 0.4);
 		draw_orbit(tp_system_camera, orbit);
 	}
 
 	draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
+	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
 	draw_camera_image(tp_system_camera);
 }
@@ -470,6 +483,62 @@ G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 	update();
 }
 
+static void tp_stop_animation(void) {
+	if(tp_animation_source != 0) {
+		g_source_remove(tp_animation_source);
+		tp_animation_source = 0;
+	}
+	if(tb_tp_animate != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_animate)))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_animate), FALSE);
+}
+
+static gboolean tp_animation_tick(gpointer data) {
+	(void)data;
+	gint64 now = g_get_monotonic_time();
+	double elapsed = (now - tp_animation_last_time) / 1e6;
+	tp_animation_last_time = now;
+	int speed_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_anim_speed));
+	if(speed_index < 0 || speed_index >= (int)G_N_ELEMENTS(tp_animation_speeds)) speed_index = 0;
+	current_date_tp += elapsed * tp_animation_speeds[speed_index];
+
+	// An itinerary is played once and stops where it ends.
+	if(curr_transfer_tp != NULL && current_date_tp >= get_last(curr_transfer_tp)->date) {
+		current_date_tp = get_last(curr_transfer_tp)->date;
+		tp_animation_source = 0;
+		update_date_label();
+		update_tp_system_view();
+		tp_stop_animation();
+		return G_SOURCE_REMOVE;
+	}
+	update_date_label();
+	update_tp_system_view();
+	return G_SOURCE_CONTINUE;
+}
+
+G_MODULE_EXPORT void on_tp_animate_toggled(GtkToggleButton *button, gpointer data) {
+	(void)data;
+	if(!gtk_toggle_button_get_active(button)) {
+		if(tp_animation_source != 0) {
+			g_source_remove(tp_animation_source);
+			tp_animation_source = 0;
+		}
+		gtk_button_set_label(GTK_BUTTON(button), "Animate");
+		return;
+	}
+	if(tp_system == NULL) {
+		gtk_toggle_button_set_active(button, FALSE);
+		return;
+	}
+	// Start from the departure when the clock is outside the itinerary.
+	if(curr_transfer_tp != NULL) {
+		struct ItinStep *first = get_first(curr_transfer_tp), *last = get_last(curr_transfer_tp);
+		if(current_date_tp < first->date || current_date_tp >= last->date) current_date_tp = first->date;
+	}
+	gtk_button_set_label(GTK_BUTTON(button), "Stop");
+	tp_animation_last_time = g_get_monotonic_time();
+	if(tp_animation_source == 0) tp_animation_source = g_timeout_add(33, tp_animation_tick, NULL);
+}
+
 G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
 	Datetime datetime = convert_JD_date(current_date_tp, get_settings_datetime_type());
 	current_date_tp = convert_date_JD((Datetime){datetime.y, datetime.m, datetime.d});
@@ -800,6 +869,7 @@ G_MODULE_EXPORT void on_create_gmat_script() {
 }
 
 void end_transfer_planner() {
+	tp_stop_animation();
 	remove_all_transfers();
 	if(body_show_status_tp != NULL) free(body_show_status_tp);
 	destroy_camera(tp_system_camera);
