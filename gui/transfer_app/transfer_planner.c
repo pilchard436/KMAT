@@ -181,8 +181,9 @@ static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *eve
 }
 
 void update_tp_system_view() {
+	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	clear_camera_screen(tp_system_camera);
-	if(tp_system == NULL) return;
+	if(tp_system == NULL) { set_flyby_unrestricted_periapsis(previous_restriction); return; }
 	tp_follow_focus_body();
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
@@ -206,6 +207,7 @@ void update_tp_system_view() {
 	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
 	draw_camera_image(tp_system_camera);
+	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr) {
@@ -269,7 +271,10 @@ static int tp_route_unconverged;
 static char tp_details_owner;
 
 double calc_step_dv(struct ItinStep *step) {
-	return itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
+	int previous = set_flyby_unrestricted_periapsis(1);
+	double dv = itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
+	set_flyby_unrestricted_periapsis(previous);
+	return dv;
 }
 
 double calc_total_dv() {
@@ -292,7 +297,7 @@ double calc_periapsis_height_tp() {
 
 // Direct routes have no flyby, so plain Lambert arcs are exact; routes with flybys keep their stored velocities
 // if even the approximate powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
-static int tp_resolve_route(void) {
+static int tp_resolve_route_unrestricted(void) {
 	struct ItinStep *first = get_first(curr_transfer_tp);
 	update_itin_body_osvs(first, tp_system);
 	int encounters = 0;
@@ -305,6 +310,14 @@ static int tp_resolve_route(void) {
 	int converged = 1;
 	int resolved = resolve_itinerary_with_powered_flybys_approximate(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type, &converged);
 	if(resolved) tp_route_unconverged = !converged;
+	return resolved;
+}
+
+// The planner lets a flyby dip below the safe periapsis (even into the planet) and warns instead of refusing.
+static int tp_resolve_route(void) {
+	int previous = set_flyby_unrestricted_periapsis(1);
+	int resolved = tp_resolve_route_unrestricted();
+	set_flyby_unrestricted_periapsis(previous);
 	return resolved;
 }
 
@@ -339,7 +352,9 @@ void update() {
 	// Keep an open itinerary details window in step with the route.
 	if(curr_transfer_tp != NULL && msg_window_shows_owner(&tp_details_owner)) {
 		char text[10000];
+		int previous = set_flyby_unrestricted_periapsis(1);
 		itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
+		set_flyby_unrestricted_periapsis(previous);
 		update_msg_window_if_owned(text, &tp_details_owner);
 	}
 }
@@ -355,6 +370,7 @@ void update_date_label() {
 }
 
 void update_transfer_panel() {
+	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	if(curr_transfer_tp == NULL) {
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), get_settings_datetime_type() == DATE_ISO ? "0000-00-00" : "0000-000");
 		update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), NULL);
@@ -394,7 +410,7 @@ void update_transfer_panel() {
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_values), "");
 		}
 	}
-
+	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void tp_update_show_body_list() {
@@ -754,7 +770,9 @@ G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data) 
 G_MODULE_EXPORT void on_show_itin_overview() {
 	if(curr_transfer_tp == NULL) return;
 	char text[10000];
+	int previous = set_flyby_unrestricted_periapsis(1);
 	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
+	set_flyby_unrestricted_periapsis(previous);
 	show_msg_window_owned(text, &tp_details_owner);
 }
 

@@ -159,7 +159,7 @@ static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 // Powered flybys change excess speed, so only the periapsis clearance decides viability.
 static int is_flyby_leg_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
 	PoweredFlybyResult result;
-	return calculate_powered_flyby(v_arr, v_dep, v_body, body, body->radius + body->atmo_alt + 1e4, &result);
+	return calculate_powered_flyby(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), &result);
 }
 
 // Stored leg velocities start at the SOI boundary, so propagating them from the node would miss the next node.

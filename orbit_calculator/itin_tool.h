@@ -170,6 +170,10 @@ void remove_step_from_itinerary(struct ItinStep *step);
 // delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
+// Smallest periapsis radius a powered flyby may use: surface, atmosphere and 10 km, or 10% of the body radius
+// (inside the body) while unrestricted. Unrestricted mode is per thread; it returns the previous setting.
+double flyby_minimum_periapsis(Body *body);
+int set_flyby_unrestricted_periapsis(int enable);
 // Metres by which the unpowered periapsis of a flyby step lies below the minimum safe radius (surface, atmosphere
 // and 10 km); 0 if it can be flown as a gravity assist or the step is not a flyby. A positive value means the
 // unpowered trajectory would enter the planet or its atmosphere and the route only works with the flyby burn.

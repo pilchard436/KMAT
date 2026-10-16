@@ -5,6 +5,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+// Per thread, so the planner can relax the limit without touching search workers.
+static _Thread_local int unrestricted_flyby_periapsis;
+
+int set_flyby_unrestricted_periapsis(int enable) {
+	int previous = unrestricted_flyby_periapsis;
+	unrestricted_flyby_periapsis = enable;
+	return previous;
+}
+
+double flyby_minimum_periapsis(Body *body) {
+	return unrestricted_flyby_periapsis ? body->radius * 0.1 : body->radius + body->atmo_alt + 1e4;
+}
+
 #define POWERED_FLYBY_SEED_SUBDIVISIONS 2
 
 static _Thread_local int extra_seed_budget;
@@ -109,7 +122,7 @@ static int evaluate_powered_flyby_seed(struct ItinStep *tf, CelestSystem *system
 	double incoming_speed = mag_vec3(incoming);
 	double outgoing_speed = mag_vec3(outgoing);
 	seed->diff_vinf = outgoing_speed - incoming_speed;
-	double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+	double minimum_periapsis = flyby_minimum_periapsis(tf->body);
 	if(!(incoming_speed > 0) || !(outgoing_speed > 0) || !isfinite(seed->diff_vinf) ||
 		!(tf->body->mu > 0) ||
 		!(minimum_periapsis > 0)) return 0;
@@ -131,7 +144,7 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 	if(itinerary_search_cancelled(NULL)) return HUGE_VAL;
 	PoweredFlybyResult flyby;
 	if(!calculate_powered_flyby(tf->v_arr, seed->transfer.v0, tf->v_body,
-		tf->body, tf->body->radius + tf->body->atmo_alt + 1e4, &flyby)) return HUGE_VAL;
+		tf->body, flyby_minimum_periapsis(tf->body), &flyby)) return HUGE_VAL;
 	return flyby.burn_delta_v;
 }
 
@@ -199,7 +212,7 @@ static void find_resonant_flybys(struct ItinStep *tf, CelestSystem *system, doub
 	double incoming_speed = mag_vec3(subtract_vec3(tf->v_arr, tf->v_body));
 	double period = calc_orbital_period(constr_orbit_from_osv(tf->r, tf->v_body, system->cb));
 	if(!(incoming_speed > 0) || !(period > 0) || !isfinite(period)) return;
-	double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+	double minimum_periapsis = flyby_minimum_periapsis(tf->body);
 	struct ItinStep *new_steps[RESONANT_MAX_ROOTS];
 	int counter = 0;
 	for(int body_revs = 1; body_revs <= RESONANT_MAX_BODY_REVS && counter < RESONANT_MAX_ROOTS; body_revs++) {
@@ -370,7 +383,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 
 			if(fabs(diff_vinf) < 1) {
 				PoweredFlybyResult flyby_result;
-				double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+				double minimum_periapsis = flyby_minimum_periapsis(tf->body);
 				if(calculate_powered_flyby(tf->v_arr, new_transfer.v0, tf->v_body,
 					tf->body, minimum_periapsis, &flyby_result)) {
 					new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
@@ -581,7 +594,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		if(itin->prev->body != NULL && itin->prev->prev != NULL) {
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
-			double minimum_periapsis = flyby->body->radius + flyby->body->atmo_alt + 1e4;
+			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
 			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
 				flyby->body, minimum_periapsis, &flyby_result))
 				pp.dv_flyby += flyby_result.burn_delta_v;
@@ -986,7 +999,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 			Vector3 v_dep = step->next[0]->v_dep;
 			Vector3 v_body = step->v_body;
 			PoweredFlybyResult flyby;
-			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			double min_periapsis = flyby_minimum_periapsis(step->body);
 			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
@@ -1072,7 +1085,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			Vector3 v_body = step->v_body;
 			double incl = get_flyby_inclination(v_arr, v_dep, v_body, get_body_equatorial_plane(step->body));
 			PoweredFlybyResult flyby;
-			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			double min_periapsis = flyby_minimum_periapsis(step->body);
 			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
@@ -1169,7 +1182,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 			// The unpowered periapsis can lie below the surface; the route actually flies the powered one.
 			PoweredFlybyResult powered_flyby;
 			int powered_valid = calculate_powered_flyby(v_arr, v_dep, v_body, step->body,
-				step->body->radius + step->body->atmo_alt + 1e4, &powered_flyby);
+				flyby_minimum_periapsis(step->body), &powered_flyby);
 			double periapsis_radius = powered_valid ? powered_flyby.periapsis_radius : hyp_params.rp;
 			double flyby_burn = powered_valid ? powered_flyby.burn_delta_v : 0;
 			double dt_in_days = step->date - get_first(step)->date;
@@ -1256,12 +1269,12 @@ double flyby_periapsis_shortfall(struct ItinStep *step) {
 
 int flyby_below_min_safe(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
-	// A burn can raise the periapsis, so the flown periapsis is below safe only when the burn cannot fix it.
+	double safe_radius = step->body->radius + step->body->atmo_alt + 1e4;
 	PoweredFlybyResult flyby;
-	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
-			step->body->radius + step->body->atmo_alt + 1e4, &flyby)) return 0;
-	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
-	return isfinite(unpowered) && unpowered < step->body->radius + step->body->atmo_alt + 1e4;
+	double flown = calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
+			flyby_minimum_periapsis(step->body), &flyby) ?
+		flyby.periapsis_radius : get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	return isfinite(flown) && flown < safe_radius - 1;
 }
 
 int count_flybys_below_min_safe(struct ItinStep *step_in_route) {
@@ -1305,7 +1318,7 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 		return 0;
 	}
 	PoweredFlybyResult flyby;
-	double minimum_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+	double minimum_periapsis = flyby_minimum_periapsis(step->body);
 	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
 		return flyby.burn_delta_v;
 	return HUGE_VAL;

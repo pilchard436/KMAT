@@ -260,7 +260,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	int valid_route = 1;
 	for(size_t i = 1; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		Body *body = candidate->bodies[i];
-		double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
+		double minimum_periapsis = flyby_minimum_periapsis(body);
 		incoming_excess[i] = candidate->seed_incoming != NULL ? candidate->seed_incoming[i] : subtract_vec3(legs[i - 1].v1, states[i].v);
 		outgoing_excess[i] = candidate->seed_outgoing != NULL ? candidate->seed_outgoing[i] : subtract_vec3(legs[i].v0, states[i].v);
 		if(!calculate_powered_flyby(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0),
@@ -340,7 +340,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 			new_incoming_excess = scale_vec3(add_vec3(incoming_excess[i], new_incoming_excess), 0.5);
 			new_outgoing_excess = scale_vec3(add_vec3(outgoing_excess[i], new_outgoing_excess), 0.5);
 			PoweredFlybyResult updated_flyby;
-			double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
+			double minimum_periapsis = flyby_minimum_periapsis(body);
 			if(!calculate_powered_flyby(new_incoming_excess, new_outgoing_excess,
 				vec3(0, 0, 0), body, minimum_periapsis, &updated_flyby)) {
 				valid_route = 0;
