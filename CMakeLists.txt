@@ -57,11 +57,8 @@ add_executable(KMAT
     gui/drawing.c
     gui/drawing.h
     tools/thread_pool.h
-    orbit_calculator/double_swing_by.c
-    orbit_calculator/double_swing_by.h
     database/database.c
     database/database.h
-    orbit_calculator/double_swing_by.h
     orbit_calculator/itin_tool.c
     orbit_calculator/itin_tool.h
     gui/transfer_app/transfer_planner.c
@@ -100,8 +97,6 @@ add_executable(KMAT
     gui/database_app/database_app_tools/mission_manager_tools.h
     tools/gmat_interface.c
     tools/gmat_interface.h
-    orbit_calculator/itin_dsb_tool.c
-    orbit_calculator/itin_dsb_tool.h
     gui/transfer_app/itinerary_calculator.c
     gui/transfer_app/itinerary_calculator.h
     gui/gui_manager.c

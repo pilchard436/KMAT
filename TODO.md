@@ -8,6 +8,7 @@
 
 ## Speed-Changing Powered-Flyby Branch
 
+- [ ] Refactor the resonant (double swing-by) search into one module (`resonant_flybys.c/.h`): `find_resonant_flybys`, the resonant departure samples and the leg-variant helpers currently sit in `itin_tool.c`. The optimizer, GUI and test hooks stay where they are.
 - [x] Generate powered candidates independently of the near-equal excess-speed root search.
 - [x] Retain three distinct estimated candidates per date bucket, falling back when cheaper candidates fail feasibility.
 - [x] Rank feasible bucket winners by calculated periapsis burn, retaining distinct dates with a bounded expansion budget.

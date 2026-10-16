@@ -75,7 +75,6 @@ void set_itin_search_flyby_profile(Body **bodies, int num_bodies, ItinFlybyProfi
 #endif
 
 // find viable flybys to next body with a given arrival trajectory
-void find_viable_dsb_flybys(struct ItinStep *tf, Ephem **ephems, Body *next_body, double min_dt0, double max_dt0, double min_dt1, double max_dt1);
 
 // return departure step
 struct ItinStep * get_first(struct ItinStep *tf);
