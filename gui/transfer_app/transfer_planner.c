@@ -210,14 +210,26 @@ double calc_periapsis_height_tp() {
 	return (rp-curr_transfer_tp->body->radius)*1e-3;
 }
 
+// Direct routes have no flyby, so plain Lambert arcs are exact; routes with flybys keep their stored velocities
+// if the powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
+static int tp_resolve_route(void) {
+	struct ItinStep *first = get_first(curr_transfer_tp);
+	update_itin_body_osvs(first, tp_system);
+	int encounters = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) encounters += node->body != NULL;
+	if(encounters < 3) {
+		calc_itin_v_vectors_from_dates_and_r(first, tp_system);
+		return 1;
+	}
+	return resolve_itinerary_with_powered_flybys(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
+}
+
 void update_itinerary() {
 	if(curr_transfer_tp != NULL) {
 		tp_dep_periapsis = get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
 		tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
+		tp_resolve_route();
 	}
-	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
-	if(!resolve_itinerary_with_powered_flybys(tp_system, get_first(curr_transfer_tp), tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type))
-		calc_itin_v_vectors_from_dates_and_r(get_first(curr_transfer_tp), tp_system);
 	update();
 }
 
@@ -371,8 +383,31 @@ void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 
 // A maneuver node slides along its incoming arc when its date changes.
 static void tp_set_current_step_date(double date) {
+	struct ItinStep *first = get_first(curr_transfer_tp);
+	int count = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) count++;
+	double *dates = malloc(count * sizeof(*dates));
+	Vector3 *positions = malloc(count * sizeof(*positions));
+	if(dates == NULL || positions == NULL) { free(dates); free(positions); return; }
+	int index = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
+		dates[index] = node->date;
+		positions[index] = node->r;
+	}
+
 	set_itinerary_step_date(curr_transfer_tp, tp_system, date);
-	update_itinerary();
+	if(!tp_resolve_route()) {
+		index = 0;
+		for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
+			node->date = dates[index];
+			node->r = positions[index];
+		}
+		update_itin_body_osvs(first, tp_system);
+		show_msg_window("This route cannot be re-solved at that date, so the edit was ignored.");
+	}
+	free(dates);
+	free(positions);
+	update();
 }
 
 G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
