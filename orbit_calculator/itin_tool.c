@@ -849,6 +849,16 @@ void store_itineraries_in_file(struct ItinStep **departures, int num_nodes, int 
 	fclose(file);
 }
 
+// Heliocentric radial (outward), tangential (prograde) and normal components of a maneuver node's burn.
+static Vector3 dsm_burn_rtn(const struct ItinStep *step) {
+	if(step->next == NULL || step->prev == NULL) return vec3(0, 0, 0);
+	Vector3 burn = subtract_vec3(step->next[0]->v_dep, step->v_arr);
+	Vector3 radial = norm_vec3(step->r);
+	Vector3 normal = norm_vec3(cross_vec3(step->r, step->v_arr));
+	Vector3 tangential = cross_vec3(normal, radial);
+	return vec3(dot_vec3(burn, radial), dot_vec3(burn, tangential), dot_vec3(burn, normal));
+}
+
 void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string) {
 	sprintf(string, "");
 	if(step == NULL) return;
@@ -882,7 +892,8 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
 		if(step->body == NULL) {
 			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
-			sprintf(string, "%sDeep-Space Maneuver: | %s | Burn: %.2f m/s\n", string, date_string, maneuver_dv);
+			Vector3 rtn = dsm_burn_rtn(step);
+			sprintf(string, "%sDeep-Space Maneuver: | %s | Burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n", string, date_string, maneuver_dv, rtn.x, rtn.y, rtn.z);
 			step = step->next != NULL ? step->next[0] : NULL;
 			continue;
 		}
@@ -962,8 +973,9 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
 		if(step->body == NULL) {
 			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
-			sprintf(string, "%s\nDeep-Space Maneuver:\nDate: %s  (T+%.2f days)\nBurn: %.2f m/s\n", string,
-				date_string, step->date-get_first(step)->date, maneuver_dv);
+			Vector3 rtn = dsm_burn_rtn(step);
+			sprintf(string, "%s\nDeep-Space Maneuver:\nDate: %s  (T+%.2f days)\nBurn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n", string,
+				date_string, step->date-get_first(step)->date, maneuver_dv, rtn.x, rtn.y, rtn.z);
 			step = step->next != NULL ? step->next[0] : NULL;
 			continue;
 		}
