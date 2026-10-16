@@ -15,6 +15,7 @@ void reset_ic();
 
 G_MODULE_EXPORT void on_calc_ic();
 G_MODULE_EXPORT void on_ic_system_change();
+G_MODULE_EXPORT void on_ic_infinite_satdv_toggled(GtkToggleButton *button, gpointer data);
 G_MODULE_EXPORT void on_ic_central_body_change();
 G_MODULE_EXPORT void on_get_ic_ref_values();
 G_MODULE_EXPORT void on_ic_date_icon_release(GtkEntry *entry, GtkEntryIconPosition icon_pos, gpointer data);

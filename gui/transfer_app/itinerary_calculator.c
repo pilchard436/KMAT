@@ -25,9 +25,9 @@ static GObject *rb_ic_maxarrdate;
 static GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
 static GtkWidget *cb_ic_allow_dsm;
-GObject *tf_ic_totdv;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
+static GtkWidget *cb_ic_infinite_satdv;
 GObject *vp_ic_fbbodies;
 GtkWidget *grid_ic_fbbodies;
 static GtkWidget *ic_latest_dep_minus_month_button;
@@ -41,6 +41,7 @@ CelestSystem *ic_system;
 
 double ic_dep_periapsis = 50e3;
 double ic_arr_periapsis = 50e3;
+#define INFINITE_DV_LIMIT 1e9
 
 GtkWidget * ic_update_seq_body_grid(GObject *viewport, GtkWidget *grid);
 
@@ -340,7 +341,7 @@ static void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data
 
 static gboolean update_ic_reference_defaults(void) {
 	if(ic_system == NULL || tf_ic_mindepdate == NULL || tf_ic_maxarrdate == NULL ||
-		tf_ic_maxdur == NULL || tf_ic_totdv == NULL || tf_ic_depdv == NULL || tf_ic_satdv == NULL) return FALSE;
+		tf_ic_maxdur == NULL || tf_ic_depdv == NULL || tf_ic_satdv == NULL) return FALSE;
 	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
 	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
 	if(departure_index < 0 || departure_index >= ic_system->num_bodies ||
@@ -375,8 +376,6 @@ static gboolean update_ic_reference_defaults(void) {
 	gtk_entry_set_text(GTK_ENTRY(tf_ic_depdv), value_text);
 	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_satellite_dv);
 	gtk_entry_set_text(GTK_ENTRY(tf_ic_satdv), value_text);
-	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_total_dv);
-	gtk_entry_set_text(GTK_ENTRY(tf_ic_totdv), value_text);
 	return TRUE;
 }
 
@@ -427,9 +426,9 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
 	if(cb_ic_allow_dsm != NULL)
 		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
-	tf_ic_totdv = gtk_builder_get_object(builder, "tf_ic_totdv");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
+	cb_ic_infinite_satdv = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_infinite_satdv"));
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
 
 	ic_system = NULL;
@@ -706,12 +705,12 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.jd_max_arr = time_limits.max_arrival_jd;
 	ic_calc_data.max_duration = time_limits.max_duration_days;
 
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_totdv));
-	ic_calc_data.dv_filter.max_totdv = strtod(string, NULL);
+	ic_calc_data.dv_filter.max_totdv = INFINITE_DV_LIMIT;
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_depdv));
 	ic_calc_data.dv_filter.max_depdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_satdv));
-	ic_calc_data.dv_filter.max_satdv = strtod(string, NULL);
+	ic_calc_data.dv_filter.max_satdv = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_infinite_satdv)) ?
+		INFINITE_DV_LIMIT : strtod(string, NULL);
 	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
 	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
 	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
@@ -757,6 +756,11 @@ G_MODULE_EXPORT void on_calc_ic() {
 	init_sc_ic_progress_window();
 	GThread *calc_thread = g_thread_new("calc_thread", (GThreadFunc) ic_calc_thread, NULL);
 	if(calc_thread != NULL) g_thread_unref(calc_thread);
+}
+
+G_MODULE_EXPORT void on_ic_infinite_satdv_toggled(GtkToggleButton *button, gpointer data) {
+	(void)data;
+	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_satdv), !gtk_toggle_button_get_active(button));
 }
 
 G_MODULE_EXPORT void on_ic_system_change() {
