@@ -919,7 +919,8 @@ struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
 	for(int i = 0; i < num_nodes; i++) {
 		itin = (struct ItinStep*) malloc(sizeof(struct ItinStep));
 		fread(&bin_step.t0, sizeof(struct ItinStepBinT0), 1, file);
-		convert_bin_ItinStep(bin_step, itin, system->bodies[bodies_id[i]], system, bin_types.itin_step_type);
+		Body *step_body = bodies_id[i] >= 0 && bodies_id[i] < system->num_bodies ? system->bodies[bodies_id[i]] : NULL;
+		convert_bin_ItinStep(bin_step, itin, step_body, system, bin_types.itin_step_type);
 		itin->prev = last_step;
 		itin->next = NULL;
 		if(last_step != NULL) {

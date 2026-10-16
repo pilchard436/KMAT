@@ -726,7 +726,7 @@ void update_itin_body_osvs(struct ItinStep *step, CelestSystem *system) {
 					osv_from_ephem(step->body->ephem, step->body->num_ephems, step->date, system->cb);
 			step->r = body_osv.r;
 			step->v_body = body_osv.v;
-		} else step->v_body = vec3(0, 0, 0);	// don't draw the trajectory (except changed in later calc)
+		} else step->v_body = vec3(1, 0, 0);	// non-zero marks a valid maneuver node so its trajectory is drawn
 		step = step->next != NULL ? step->next[0] : NULL;
 	}
 }
@@ -736,50 +736,11 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 	struct ItinStep *next;
 	while(step->next != NULL) {
 		next = step->next[0];
-
-		if(next->body == NULL) {
-			if(next->next == NULL) {
-				step = next;
-				continue;
-			} else if(next->next[0]->next == NULL) {
-				next = next->next[0];
-				double dt = (next->date - step->date) * 86400;
-				Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
-				next->v_dep = transfer.v0;
-				next->v_arr = transfer.v1;
-			} else {
-				struct ItinStep *sb2 = next->next[0];
-				struct ItinStep *arr = next->next[0]->next[0];
-				OSV osv_sb2 = {next->next[0]->r, next->next[0]->v_body};
-				OSV osv_arr = {next->next[0]->next[0]->r, next->next[0]->next[0]->v_body};
-				Lambert3 transfer_after_dsb = calc_lambert3_selected(osv_sb2.r, osv_arr.r, (arr->date - sb2->date) * 86400, system->cb);
-
-				OSV s0 = {step->r, step->v_arr};
-				OSV p0 = {step->r, step->v_body};
-				OSV s1 = {transfer_after_dsb.r0, transfer_after_dsb.v0};
-
-				double dt = sb2->date - step->date;
-				struct DSB dsb = calc_double_swing_by(s0, p0, s1, osv_sb2, dt, sb2->body);
-				if(dsb.dv < 10000) {
-					next->r = dsb.osv[1].r;
-					next->v_dep = dsb.osv[0].v;
-					next->v_arr = dsb.osv[1].v;
-					next->date = step->date + dsb.man_time / 86400;
-					next->v_body = vec3(1, 0, 0);    // draw the trajectory
-				} else {
-					next = next->next[0];
-					dt = (next->date - step->date) * 86400;
-					Lambert3 transfer= calc_lambert3_selected(step->r, next->r, dt, system->cb);
-					next->v_dep = transfer.v0;
-					next->v_arr = transfer.v1;
-				}
-			}
-		} else {
-			double dt = (next->date - step->date) * 86400;
-			Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
-			next->v_dep = transfer.v0;
-			next->v_arr = transfer.v1;
-		}
+		// A deep-space maneuver node keeps its stored position, so its two arcs are ordinary Lambert legs.
+		double dt = (next->date - step->date) * 86400;
+		Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
+		next->v_dep = transfer.v0;
+		next->v_arr = transfer.v1;
 		step = next;
 	}
 }

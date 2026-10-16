@@ -354,7 +354,8 @@ static gboolean build_group_overview_batch(gpointer user_data) {
 				g_string_append_printf(route_label, "%d", get_body_system_id(step->body, pa_system) + 1);
 				g_string_append(route_tooltip, step->body->name);
 			} else {
-				g_string_append(route_label, "DSB");
+				g_string_append(route_label, "DSM");
+				g_string_append(route_tooltip, "DSM");
 			}
 		}
 

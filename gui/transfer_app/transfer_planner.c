@@ -689,6 +689,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system)) == get_num_available_systems()) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
 
 	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
+	if(load_results.itin == NULL) return;
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
 	current_date_tp = curr_transfer_tp->date;

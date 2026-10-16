@@ -795,6 +795,31 @@ static int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *
 				loaded_routes, saved_routes, loaded_maneuvers, saved_maneuvers, loaded_best, saved_best);
 			valid = 0;
 		} else {
+			// The transfer planner recomputes loaded routes from dates and positions; maneuver nodes must survive that.
+			int recomputed = 0, non_finite = 0;
+			for(int i = 0; i < loaded.header.num_deps; i++) {
+				int count = get_number_of_itineraries(loaded.departures[i]);
+				struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+				if(leaves == NULL) continue;
+				int stored = 0;
+				store_itineraries_in_array(loaded.departures[i], leaves, &stored);
+				for(int j = 0; j < stored && recomputed < 20; j++) {
+					int has_maneuver = 0;
+					for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev) has_maneuver |= step->body == NULL;
+					if(!has_maneuver) continue;
+					struct ItinStep *first = get_first(leaves[j]);
+					update_itin_body_osvs(first, loaded.header.system);
+					calc_itin_v_vectors_from_dates_and_r(first, loaded.header.system);
+					for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
+						non_finite += !isfinite(step->v_dep.x + step->v_dep.y + step->v_dep.z + step->v_arr.x + step->v_arr.y + step->v_arr.z);
+					recomputed++;
+				}
+				free(leaves);
+			}
+			if(recomputed == 0 || non_finite > 0) {
+				fprintf(stderr, "DSM planner recompute failed: %d routes recomputed, %d non-finite nodes\n", recomputed, non_finite);
+				valid = 0;
+			}
 			printf("DSM file round trip passed: %d routes, %d maneuver nodes, best %.3f m/s\n",
 				loaded_routes, loaded_maneuvers, loaded_best);
 		}
