@@ -190,6 +190,8 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 
 // Set when the flyby iteration did not settle and the shown delta-v is only the last iterate.
 static int tp_route_unconverged;
+// Whether the user has already been warned about flybys that hit the planet on this route.
+static int tp_flyby_warned;
 // Identifies the itinerary details text in the shared message window.
 static char tp_details_owner;
 
@@ -297,10 +299,11 @@ void update_transfer_panel() {
 		int body_id = curr_transfer_tp->body != NULL ? get_body_system_id(curr_transfer_tp->body, tp_system) : tp_system->num_bodies;
 		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), body_id);
 		fix_tfbody = FALSE;
-		char s_dv[40];
+		char s_dv[64];
 		sprintf(s_dv, "%6.0f m/s", calc_step_dv(curr_transfer_tp));
 		gtk_label_set_label(GTK_LABEL(lb_tp_transfer_dv), s_dv);
-		sprintf(s_dv, tp_route_unconverged ? "%6.0f m/s (approx.)" : "%6.0f m/s", calc_total_dv());
+		sprintf(s_dv, "%6.0f m/s%s%s", calc_total_dv(), tp_route_unconverged ? " (approx.)" : "",
+			count_flybys_needing_burn(curr_transfer_tp, NULL) > 0 ? " (flyby hits planet)" : "");
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
 			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
@@ -423,6 +426,11 @@ static void tp_set_current_step_date(double date) {
 	free(dates);
 	free(positions);
 	update();
+	// Warn once when an edit makes a flyby impossible to fly as a gravity assist.
+	int unflyable = count_flybys_needing_burn(first, NULL);
+	if(unflyable > 0 && !tp_flyby_warned)
+		show_msg_window("Warning: at this date a flyby cannot be flown as a gravity assist. Its unpowered trajectory would pass inside the planet or below the minimum safe altitude, so the route only works with a large burn at periapsis. Open Itinerary Details for the flyby and burn.");
+	tp_flyby_warned = unflyable > 0;
 }
 
 G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
@@ -683,6 +691,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
 	tp_route_unconverged = 0;
+	tp_flyby_warned = count_flybys_needing_burn(curr_transfer_tp, NULL) > 0;
 	current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	tp_update_bodies();

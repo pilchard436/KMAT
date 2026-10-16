@@ -158,6 +158,13 @@ void remove_step_from_itinerary(struct ItinStep *step);
 // delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
 
+// Metres by which the unpowered periapsis of a flyby step lies below the minimum safe radius (surface, atmosphere
+// and 10 km); 0 if it can be flown as a gravity assist or the step is not a flyby. A positive value means the
+// unpowered trajectory would enter the planet or its atmosphere and the route only works with the flyby burn.
+double flyby_periapsis_shortfall(struct ItinStep *step);
+// Number of flybys in the route with a shortfall, and the largest shortfall in metres (largest may be NULL).
+int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall);
+
 // sets a step's date and pushes later steps back if needed; a maneuver node slides along its incoming arc
 void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date);
 

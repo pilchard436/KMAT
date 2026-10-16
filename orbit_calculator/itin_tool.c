@@ -952,6 +952,9 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	
 	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
 	
+	int unflyable_flybys = count_flybys_needing_burn(step, NULL);
+	if(unflyable_flybys > 0)
+		sprintf(string, "%s\nWARNING: %d flyby(s) cannot be flown as a gravity assist. Without a burn their trajectory would pass inside the planet or below the minimum safe altitude, so the route only works with the burns listed below.\n", string, unflyable_flybys);
 	sprintf(string, "%s\nDeparture dv: %.2f m/s\n", string, pp.dv_dep);
 	struct ItinStep *departure = get_first(step);
 	DepartureBurn3D departure_burn;
@@ -1016,6 +1019,13 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 				"Powered burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n",
 				string, (periapsis-step->body->radius)/1e3, rad2deg(incl), burn,
 				burn_radial, burn_tangential, burn_normal_component);
+			double shortfall = flyby_periapsis_shortfall(step);
+			if(shortfall > 0) {
+				double unpowered_altitude = (get_flyby_periapsis(v_arr, v_dep, v_body, step->body) - step->body->radius) / 1e3;
+				sprintf(string, "%sWARNING: the unpowered periapsis altitude is %.0f km%s (minimum safe %.0f km); this flyby only works with the burn above.\n",
+					string, unpowered_altitude, unpowered_altitude < 0 ? ", inside the planet" : "",
+					(step->body->atmo_alt) / 1e3);
+			}
 		}
 		if(step->next != NULL) step = step->next[0];
 		else step = NULL;
@@ -1111,6 +1121,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "RadPer:\n"
 							  "AltPer:\n"
 							  "Burn:\n"
+							  "Unpowered AltPer:\n"
 							  "Inclination:\n\n"
 							  "C3Energy:\n"
 							  "RHA (in):\n"
@@ -1124,6 +1135,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "%.0f km\n"
 							  "%.0f km\n"
 							  "%.1f m/s\n"
+							  "%.0f km%s\n"
 							  "%.2f°\n\n"
 							  "%.2f km²/s²\n"
 							  "%.2f°\n"
@@ -1132,7 +1144,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "%.2f°\n"
 							  "%.2f°\n"
 							  "%.2f°",
-					dt_in_days, periapsis_radius / 1000, (periapsis_radius-step->body->radius) / 1000, flyby_burn, rad2deg(incl),
+					dt_in_days, periapsis_radius / 1000, (periapsis_radius-step->body->radius) / 1000, flyby_burn, (hyp_params.rp - step->body->radius) / 1000, flyby_periapsis_shortfall(step) > 0 ? " (!)" : "", rad2deg(incl),
 					hyp_params.c3_energy / 1e6,
 					rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl),
 					rad2deg(hyp_params.incoming.bvazi),
@@ -1174,6 +1186,28 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 	}
 }
 
+
+double flyby_periapsis_shortfall(struct ItinStep *step) {
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
+	double minimum_radius = step->body->radius + step->body->atmo_alt;
+	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	if(!isfinite(unpowered)) return 0;
+	return unpowered < minimum_radius ? minimum_radius - unpowered : 0;
+}
+
+int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall) {
+	int count = 0;
+	double largest = 0;
+	for(struct ItinStep *step = get_first(step_in_route); step != NULL; step = step->next != NULL ? step->next[0] : NULL) {
+		double shortfall = flyby_periapsis_shortfall(step);
+		if(shortfall > 0) {
+			count++;
+			largest = fmax(largest, shortfall);
+		}
+	}
+	if(largest_shortfall != NULL) *largest_shortfall = largest;
+	return count;
+}
 
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
 	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;

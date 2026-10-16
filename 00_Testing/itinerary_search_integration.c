@@ -775,7 +775,7 @@ static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *sys
 }
 
 static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
-	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0, sweep_routes = 0;
+	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0, resolve_attempts = 0, resolve_fallbacks = 0, maneuver_optimizations = 0, sweep_routes = 0, flagged_routes = 0;
 #define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
 	int maneuver_budget = 30, plain_budget = 30;
 	for(int d = 0; d < num_departures; d++) {
@@ -790,6 +790,7 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 			if(has_maneuver ? maneuver_budget <= 0 : (plain_budget <= 0 || j % 7 != 0)) continue;
 			if(has_maneuver) maneuver_budget--; else plain_budget--;
 			routes++; maneuver_routes += has_maneuver;
+			flagged_routes += count_flybys_needing_burn(leaves[j], NULL) > 0;
 
 			struct ItinStep *copy = get_first(create_itin_copy_from_arrival(leaves[j]));
 			double dep = copy->body->atmo_alt + 50e3, arr = get_last(copy)->body->atmo_alt + 50e3;
@@ -904,7 +905,7 @@ static int check_itinerary_operations(struct ItinStep **departures, int num_depa
 	// A route that does not converge falls back to the plain recompute, which is fine for a few routes.
 	if(resolve_fallbacks * 100 > resolve_attempts * 30) { problems++; fprintf(stderr, "re-solve fell back on %d of %d routes\n", resolve_fallbacks, resolve_attempts); }
 	else printf("Planner re-solve: %d of %d stored routes re-solved to the stored delta-v (the rest fall back)\n", resolve_attempts - resolve_fallbacks, resolve_attempts);
-	if(problems == 0) printf("Itinerary operations check passed: %d routes (%d with maneuvers) survive structure, text, dv-sum, recompute, removal and date-change checks\n", routes, maneuver_routes);
+	if(problems == 0) printf("Itinerary operations check passed: %d routes (%d with maneuvers, %d flagged as having a flyby that hits a planet) survive structure, text, dv-sum, recompute, removal and date-change checks\n", routes, maneuver_routes, flagged_routes);
 	else fprintf(stderr, "Itinerary operations check failed: %d problems on %d routes\n", problems, routes);
 	return problems == 0 && routes > 0;
 }
@@ -1128,6 +1129,10 @@ static int check_departure_sweep_fixture(void) {
 	struct ItinStep *first = get_first(loaded.itin);
 	double dep = first->body->atmo_alt + 50e3, arr = get_last(first)->body->atmo_alt + 50e3;
 	int valid = 1, resolved = 0;
+	if(count_flybys_needing_burn(first, NULL) != 0) {
+		fprintf(stderr, "Departure sweep: the stored route is wrongly flagged as having a flyby that hits a planet\n");
+		valid = 0;
+	}
 	double previous = 0, worst = 0;
 	for(int direction = -1; direction <= 1; direction += 2) {
 		free_itinerary(first);
@@ -1209,6 +1214,13 @@ static int check_departure_sweep_fixture(void) {
 		if(altitude_line == NULL || atof(altitude_line) < minimum_altitude_km - 0.6) {
 			fprintf(stderr, "Departure sweep: the step panel shows a periapsis altitude of %s km, below the %.0f km minimum\n",
 				altitude_line != NULL ? altitude_line : "?", minimum_altitude_km);
+			valid = 0;
+		}
+		// The unpowered trajectory is inside Earth here, so the user must be warned.
+		static char overview[10000];
+		itinerary_detailed_overview_to_string(first, DATE_ISO, dep, arr, overview);
+		if(count_flybys_needing_burn(first, NULL) < 1 || strstr(overview, "WARNING") == NULL || strstr(overview, "inside the planet") == NULL) {
+			fprintf(stderr, "Departure sweep: no warning for a flyby whose unpowered trajectory is inside the planet\n");
 			valid = 0;
 		}
 	}
