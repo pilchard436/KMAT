@@ -102,13 +102,23 @@ void set_trajectory_color(cairo_t *cr, int trajectory_is_in_the_past, int trajec
 	}
 }
 
+// Stored leg velocities start at the SOI boundary, so propagating them from the node would miss the next node.
+static Vector3 leg_drawing_velocity(CelestSystem *system, struct ItinStep *tf) {
+	double dt = (tf->next[0]->date - tf->date) * 86400;
+	if(dt > 0) {
+		Lambert3 leg = calc_lambert3_selected(tf->r, tf->next[0]->r, dt, system->cb);
+		if(isfinite(leg.v0.x + leg.v0.y + leg.v0.z)) return leg.v0;
+	}
+	return tf->next[0]->v_dep;
+}
+
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time) {
 	if(tf == NULL) return;
 
 	// draw trajectories
 	tf = get_first(tf);
 	while(tf->next != NULL) {
-		OSV tf_osv0 = {tf->r, tf->next[0]->v_dep};
+		OSV tf_osv0 = {tf->r, leg_drawing_velocity(system, tf)};
 		int trajectory_is_viable = 1;
 		double dt = tf->next[0]->date - tf->date;
 
