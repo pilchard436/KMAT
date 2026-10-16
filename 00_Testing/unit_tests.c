@@ -211,6 +211,18 @@ int main(void) {
         flyby_minimum_radius, &powered_flyby_result);
     failures += expect_int("sub-1 m/s speed difference retains a powered burn",
         near_equal_speed_flyby_valid && powered_flyby_result.burn_delta_v > 1e-3, 1);
+    // Near-equal speeds in either direction must stay feasible with a small burn, not a one-periapsis overestimate.
+    for(int near_equal_case = 0; near_equal_case < 4; near_equal_case++) {
+        static const double speed_offsets[] = {-0.9, -0.5, 0.5, 0.9};
+        double near_speed = 6000 + speed_offsets[near_equal_case];
+        Vector3 near_outgoing = vec3(near_speed * cos(flyby_turn_angle), near_speed * sin(flyby_turn_angle), 0);
+        PoweredFlybyResult near_result;
+        int near_valid = calculate_powered_flyby(incoming_vinf, near_outgoing, vec3(0, 0, 0),
+            &powered_flyby_body, flyby_minimum_radius, &near_result);
+        failures += expect_int("near-equal-speed flyby is feasible in either direction", near_valid, 1);
+        failures += expect_int("near-equal-speed flyby burn stays small",
+            near_valid && near_result.burn_delta_v < 5.0, 1);
+    }
     double flyby_inclination = deg2rad(20);
     Vector3 unequal_speed_outgoing_vinf = vec3(6500 * cos(flyby_turn_angle),
         6500 * sin(flyby_turn_angle) * cos(flyby_inclination),

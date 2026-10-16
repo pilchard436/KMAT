@@ -59,8 +59,6 @@ void on_tp_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer 
 
 
 void init_transfer_planner(GtkBuilder *builder) {
-	// Robust flyby handling is for what the GUI thread shows and edits; the search threads keep the library behaviour.
-	set_itin_robust_flybys(1);
 	struct Datetime date = {1950, 1, 1, 0, 0, 0};
 	current_date_tp = convert_date_JD(date);
 

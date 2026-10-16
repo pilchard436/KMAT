@@ -131,7 +131,7 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 	struct ItinStep *tf = context;
 	if(itinerary_search_cancelled(NULL)) return HUGE_VAL;
 	PoweredFlybyResult flyby;
-	if(!calculate_powered_flyby_robust(tf->v_arr, seed->transfer.v0, tf->v_body,
+	if(!calculate_powered_flyby(tf->v_arr, seed->transfer.v0, tf->v_body,
 		tf->body, tf->body->radius + tf->body->atmo_alt + 1e4, &flyby)) return HUGE_VAL;
 	return flyby.burn_delta_v;
 }
@@ -227,7 +227,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 			if(fabs(diff_vinf) < 1) {
 				PoweredFlybyResult flyby_result;
 				double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
-				if(calculate_powered_flyby_robust(tf->v_arr, new_transfer.v0, tf->v_body,
+				if(calculate_powered_flyby(tf->v_arr, new_transfer.v0, tf->v_body,
 					tf->body, minimum_periapsis, &flyby_result)) {
 					new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
 					new_steps[counter]->body = next_body;
@@ -517,7 +517,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby->body->radius + flyby->body->atmo_alt + 1e4;
-			if(calculate_powered_flyby_robust(flyby->v_arr, itin->v_dep, flyby->v_body,
+			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
 				flyby->body, minimum_periapsis, &flyby_result))
 				pp.dv_flyby += flyby_result.burn_delta_v;
 			else
@@ -918,7 +918,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 			Vector3 v_body = step->v_body;
 			PoweredFlybyResult flyby;
 			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
-			int valid_flyby = calculate_powered_flyby_robust(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
 			sprintf(string, "%s | Periapsis: %.2fkm | Burn: %.2f m/s\n", string,
@@ -1004,7 +1004,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			double incl = get_flyby_inclination(v_arr, v_dep, v_body, get_body_equatorial_plane(step->body));
 			PoweredFlybyResult flyby;
 			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
-			int valid_flyby = calculate_powered_flyby_robust(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
 			Vector3 burn_normal = valid_flyby ?
@@ -1167,31 +1167,6 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 }
 
 
-static _Thread_local int itin_robust_flybys_enabled;
-
-void set_itin_robust_flybys(int enabled) { itin_robust_flybys_enabled = enabled != 0; }
-
-int calculate_powered_flyby_robust(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
-		double minimum_periapsis_radius, PoweredFlybyResult *result) {
-	int valid = calculate_powered_flyby(v_arr, v_dep, v_body, body, minimum_periapsis_radius, result);
-	if(!itin_robust_flybys_enabled) return valid;
-	Vector3 outgoing = subtract_vec3(v_dep, v_body);
-	double incoming_speed = mag_vec3(subtract_vec3(v_arr, v_body)), outgoing_speed = mag_vec3(outgoing);
-	if(!(incoming_speed > 0) || !(outgoing_speed > 0) || fabs(incoming_speed - outgoing_speed) >= 1) return valid;
-	// Under 1 m/s the library tries a single periapsis, which can fail or overstate the burn; nudging the
-	// outgoing speed past 1 m/s makes it search all periapsis radii, so keep the cheaper of the results.
-	for(int sign = 1; sign >= -1; sign -= 2) {
-		Vector3 nudged = scale_vec3(outgoing, (incoming_speed + sign * 1.001) / outgoing_speed);
-		PoweredFlybyResult alternative;
-		if(calculate_powered_flyby(v_arr, add_vec3(v_body, nudged), v_body, body, minimum_periapsis_radius, &alternative) &&
-			(!valid || alternative.burn_delta_v < result->burn_delta_v)) {
-			*result = alternative;
-			valid = 1;
-		}
-	}
-	return valid;
-}
-
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
 	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
 	if(step->body == NULL) {
@@ -1213,7 +1188,7 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 	}
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
-	if(calculate_powered_flyby_robust(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
+	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
 		return flyby.burn_delta_v;
 	return HUGE_VAL;
 }

@@ -237,7 +237,7 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 		double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
 		incoming_excess[i] = candidate->seed_incoming != NULL ? candidate->seed_incoming[i] : subtract_vec3(legs[i - 1].v1, states[i].v);
 		outgoing_excess[i] = candidate->seed_outgoing != NULL ? candidate->seed_outgoing[i] : subtract_vec3(legs[i].v0, states[i].v);
-		if(!calculate_powered_flyby_robust(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0),
+		if(!calculate_powered_flyby(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0),
 			body, minimum_periapsis, &flybys[i])) {
 			valid_route = 0;
 			break;
@@ -314,7 +314,7 @@ static double evaluate_route_core(const PoweredRouteCandidate *candidate, const 
 			new_outgoing_excess = scale_vec3(add_vec3(outgoing_excess[i], new_outgoing_excess), 0.5);
 			PoweredFlybyResult updated_flyby;
 			double minimum_periapsis = body->radius + body->atmo_alt + 1e4;
-			if(!calculate_powered_flyby_robust(new_incoming_excess, new_outgoing_excess,
+			if(!calculate_powered_flyby(new_incoming_excess, new_outgoing_excess,
 				vec3(0, 0, 0), body, minimum_periapsis, &updated_flyby)) {
 				valid_route = 0;
 				break;
