@@ -129,6 +129,7 @@ static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 	set_label_font(cr, 11, 0);
 	cairo_move_to(cr, p.x + 11, p.y - 9);
 	cairo_show_text(cr, label);
+	cairo_new_path(cr);
 	cairo_set_line_width(cr, 1);
 }
 
@@ -214,6 +215,7 @@ void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd
 	set_label_font(cr, 10, 0);
 	cairo_move_to(cr, p.x + 8, p.y + 14);
 	cairo_show_text(cr, body->name);
+	cairo_new_path(cr);
 }
 
 // The legs with their colors, the leg under way highlighted, and the progress through it.
@@ -247,6 +249,7 @@ void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep
 		cairo_set_source_rgb(cr, leg == active_leg ? 1 : 0.7, leg == active_leg ? 1 : 0.7, leg == active_leg ? 1 : 0.7);
 		cairo_move_to(cr, x, y);
 		cairo_show_text(cr, text);
+		cairo_new_path(cr);
 		y += 17;
 	}
 
@@ -264,6 +267,7 @@ void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep
 	cairo_set_source_rgb(cr, 1, 1, 1);
 	cairo_move_to(cr, 12, 20);
 	cairo_show_text(cr, status);
+	cairo_new_path(cr);
 }
 
 void draw_orbit_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r, Vector3 v, struct Body *attractor) {
