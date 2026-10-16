@@ -36,6 +36,7 @@ GObject *bt_tp_1d1minp;
 GObject *bt_tp_1d1minm;
 GObject *lb_tp_transfer_dv;
 GObject *lb_tp_total_dv;
+GObject *lb_tp_dv_warning;
 GObject *lb_tp_param_labels;
 GObject *lb_tp_param_values;
 GObject *vp_tp_bodies;
@@ -79,6 +80,7 @@ void init_transfer_planner(GtkBuilder *builder) {
 	bt_tp_1d1minm = gtk_builder_get_object(builder, "bt_tp_1d1minm");
 	lb_tp_transfer_dv = gtk_builder_get_object(builder, "lb_tp_transfer_dv");
 	lb_tp_total_dv = gtk_builder_get_object(builder, "lb_tp_total_dv");
+	lb_tp_dv_warning = gtk_builder_get_object(builder, "lb_tp_dv_warning");
 	lb_tp_param_labels = gtk_builder_get_object(builder, "lb_tp_param_labels");
 	lb_tp_param_values = gtk_builder_get_object(builder, "lb_tp_param_values");
 	lb_tp_date = gtk_builder_get_object(builder, "lb_tp_date");
@@ -286,6 +288,7 @@ void update_transfer_panel() {
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), get_settings_datetime_type() == DATE_ISO ? "0000-00-00" : "0000-000");
 		update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), NULL);
 		fix_tfbody = TRUE;
+		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), "");
 	} else {
 		struct Datetime date = convert_JD_date(curr_transfer_tp->date, get_settings_datetime_type());
 		char date_string[10];
@@ -302,9 +305,14 @@ void update_transfer_panel() {
 		char s_dv[64];
 		sprintf(s_dv, "%6.0f m/s", calc_step_dv(curr_transfer_tp));
 		gtk_label_set_label(GTK_LABEL(lb_tp_transfer_dv), s_dv);
-		sprintf(s_dv, "%6.0f m/s%s%s", calc_total_dv(), tp_route_unconverged ? " (approx.)" : "",
-			count_flybys_needing_burn(curr_transfer_tp, NULL) > 0 ? " (flyby hits planet)" : "");
+		sprintf(s_dv, "%6.0f m/s", calc_total_dv());
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
+		// Route warnings go on their own red, bold lines under the total.
+		char s_warning[96];
+		g_snprintf(s_warning, sizeof(s_warning), "%s%s%s", tp_route_unconverged ? "Approximate: the flyby solution did not settle" : "",
+			tp_route_unconverged && count_flybys_needing_burn(curr_transfer_tp, NULL) > 0 ? "\n" : "",
+			count_flybys_needing_burn(curr_transfer_tp, NULL) > 0 ? "Flyby hits planet: not flyable without a burn" : "");
+		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), s_warning);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
 			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
 			itinerary_step_parameters_to_string(s_tfprop_labels, s_tfprop_values, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, curr_transfer_tp);

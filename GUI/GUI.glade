@@ -2556,6 +2556,24 @@
                           </packing>
                         </child>
                         <child>
+                          <object class="GtkLabel" id="lb_tp_dv_warning">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="halign">center</property>
+                            <property name="justify">center</property>
+                            <property name="wrap">True</property>
+                            <attributes>
+                              <attribute name="weight" value="bold"/>
+                              <attribute name="foreground" value="#ff3333"/>
+                            </attributes>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">7</property>
+                            <property name="width">4</property>
+                          </packing>
+                        </child>
+                        <child>
                           <object class="GtkScrolledWindow">
                             <property name="visible">True</property>
                             <property name="can-focus">True</property>
@@ -2605,7 +2623,7 @@
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
-                            <property name="top-attach">7</property>
+                            <property name="top-attach">8</property>
                             <property name="width">4</property>
                           </packing>
                         </child>
