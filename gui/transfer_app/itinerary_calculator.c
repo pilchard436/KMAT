@@ -705,12 +705,13 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.jd_max_arr = time_limits.max_arrival_jd;
 	ic_calc_data.max_duration = time_limits.max_duration_days;
 
-	ic_calc_data.dv_filter.max_totdv = INFINITE_DV_LIMIT;
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_depdv));
 	ic_calc_data.dv_filter.max_depdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_satdv));
 	ic_calc_data.dv_filter.max_satdv = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_infinite_satdv)) ?
 		INFINITE_DV_LIMIT : strtod(string, NULL);
+	// Departure burn is capped by its own limit and every later burn by the satellite limit.
+	ic_calc_data.dv_filter.max_totdv = ic_calc_data.dv_filter.max_depdv + ic_calc_data.dv_filter.max_satdv;
 	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
 	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
 	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
