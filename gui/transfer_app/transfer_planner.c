@@ -188,29 +188,7 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 }
 
 double calc_step_dv(struct ItinStep *step) {
-	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
-	// Same burns as the itinerary details: free-plane departure, powered flybys, DSMs, arrival insertion.
-	if(step->body == NULL) {
-		if(step->next == NULL || step->prev == NULL) return 0;
-		return mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
-	} else if(step->prev == NULL) {
-		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
-		DepartureBurn3D burn;
-		if(calculate_free_plane_departure_burn(vinf, step->body, alt2radius(step->body, tp_dep_periapsis), &burn))
-			return burn.burn_magnitude;
-		return dv_circ(step->body, alt2radius(step->body, tp_dep_periapsis), mag_vec3(vinf));
-	} else if(step->next == NULL) {
-		if(tp_last_transfer_type == TF_FLYBY) return 0;
-		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
-		if(tp_last_transfer_type == TF_CAPTURE) return dv_capture(step->body, alt2radius(step->body, tp_arr_periapsis), vinf);
-		else if(tp_last_transfer_type == TF_CIRC) return dv_circ(step->body, alt2radius(step->body, tp_arr_periapsis), vinf);
-		return 0;
-	}
-	PoweredFlybyResult flyby;
-	double minimum_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
-	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
-		return flyby.burn_delta_v;
-	return 0;
+	return itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
 }
 
 double calc_total_dv() {
@@ -296,7 +274,7 @@ void update_transfer_panel() {
 		sprintf(s_dv, "%6.0f m/s", calc_total_dv());
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
-			char s_tfprop_labels[200], s_tfprop_values[100];
+			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
 			itinerary_step_parameters_to_string(s_tfprop_labels, s_tfprop_values, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, curr_transfer_tp);
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_labels), s_tfprop_labels);
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_values), s_tfprop_values);
@@ -391,11 +369,8 @@ void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 
 // A maneuver node slides along its incoming arc when its date changes.
 static void tp_set_current_step_date(double date) {
-	struct ItinStep *step = curr_transfer_tp;
-	if(step->body == NULL && step->prev != NULL)
-		step->r = propagate_osv_time((OSV){step->prev->r, step->v_dep}, tp_system->cb, (date - step->prev->date) * 86400).r;
-	step->date = date;
-	sort_transfer_dates(get_first(step));
+	set_itinerary_step_date(curr_transfer_tp, tp_system, date);
+	update_itinerary();
 }
 
 G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
@@ -590,23 +565,7 @@ G_MODULE_EXPORT void on_remove_transfer(GtkWidget* widget, gpointer data) {
 	if(tp_system == NULL) return;
 	if(curr_transfer_tp == NULL) return;
 	struct ItinStep *rem_transfer = curr_transfer_tp;
-	if(curr_transfer_tp->next != NULL) curr_transfer_tp->next[0]->prev = curr_transfer_tp->prev;
-	if(curr_transfer_tp->prev != NULL) {
-		if(curr_transfer_tp->next != NULL) {
-			curr_transfer_tp->prev->next[0] = curr_transfer_tp->next[0];
-		} else {
-			free(curr_transfer_tp->prev->next);
-			curr_transfer_tp->prev->next = NULL;
-			curr_transfer_tp->prev->num_next_nodes = 0;
-		}
-	}
-
-	if(curr_transfer_tp->prev != NULL) curr_transfer_tp = curr_transfer_tp->prev;
-	else if(curr_transfer_tp->next != NULL) curr_transfer_tp = curr_transfer_tp->next[0];
-	else curr_transfer_tp = NULL;
-
-	free(rem_transfer->next);
-	free(rem_transfer);
+	curr_transfer_tp = unlink_itinerary_step(rem_transfer);
 	if(curr_transfer_tp != NULL) current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	// Neighbouring arcs changed, so velocities must be re-solved.

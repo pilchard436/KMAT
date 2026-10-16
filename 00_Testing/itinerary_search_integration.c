@@ -706,6 +706,142 @@ static void summarize_itineraries(struct ItinStep **departures, int num_departur
 	}
 }
 
+// Operations the transfer planner and porkchop analyzer perform on a stored route, run on real results.
+#define TEXT_GUARD_SIZE 16
+
+static int itinerary_structure_problem(struct ItinStep *first) {
+	if(first == NULL || first->prev != NULL || first->body == NULL) return 1;
+	for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL) {
+		if(s->next == NULL ? s->num_next_nodes != 0 : s->num_next_nodes != 1) return 2;
+		if(s->next != NULL && s->next[0]->prev != s) return 3;
+		if(s->next != NULL && !(s->next[0]->date > s->date)) return 4;
+		if(s->body == NULL && (s->prev == NULL || s->next == NULL)) return 5;
+		if(!isfinite(s->r.x + s->r.y + s->r.z + s->v_dep.x + s->v_dep.y + s->v_dep.z +
+			s->v_arr.x + s->v_arr.y + s->v_arr.z)) return 6;
+	}
+	return 0;
+}
+
+// Calls every text builder on every step with the planner's buffer sizes; returns nonzero on an overflow.
+static int guard_broken(const char *buffer, size_t size) {
+	for(size_t i = size; i < size + TEXT_GUARD_SIZE; i++)
+		if(buffer[i] != 0x5A) return 1;
+	return 0;
+}
+
+static int itinerary_text_problem(struct ItinStep *first, double dep_periapsis, double arr_periapsis) {
+	static char labels[ITIN_STEP_TEXT_SIZE + TEXT_GUARD_SIZE], values[ITIN_STEP_TEXT_SIZE + TEXT_GUARD_SIZE], overview[10000 + TEXT_GUARD_SIZE];
+	for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL) {
+		memset(labels, 0x5A, sizeof(labels));
+		memset(values, 0x5A, sizeof(values));
+		labels[0] = values[0] = 0;
+		itinerary_step_parameters_to_string(labels, values, DATE_ISO, dep_periapsis, arr_periapsis, s);
+		if(guard_broken(labels, ITIN_STEP_TEXT_SIZE) || guard_broken(values, ITIN_STEP_TEXT_SIZE)) return 1;
+	}
+	for(int detailed = 0; detailed < 2; detailed++) {
+		memset(overview, 0x5A, sizeof(overview));
+		overview[0] = 0;
+		if(detailed) itinerary_detailed_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
+		else itinerary_short_overview_to_string(first, DATE_ISO, dep_periapsis, arr_periapsis, overview);
+		if(guard_broken(overview, 10000) || strstr(overview, "nan") != NULL) return 2 + detailed;
+	}
+	return 0;
+}
+
+// Step delta-vs shown by the planner must add up to the totals of the itinerary overview.
+static double itinerary_dv_mismatch(struct ItinStep *first, double dep_periapsis, double arr_periapsis) {
+	struct PorkchopPoint pp = create_porkchop_point(get_last(first), dep_periapsis, arr_periapsis);
+	double worst = 0;
+	for(int type = TF_FLYBY; type <= TF_CIRC; type++) {
+		double expected = pp.dv_dep + pp.dv_dsm + pp.dv_flyby +
+			(type == TF_CAPTURE ? pp.dv_arr_cap : type == TF_CIRC ? pp.dv_arr_circ : 0);
+		if(!isfinite(expected)) continue;
+		double sum = 0;
+		for(struct ItinStep *s = first; s != NULL; s = s->next != NULL ? s->next[0] : NULL)
+			sum += itinerary_step_dv(s, dep_periapsis, arr_periapsis, type);
+		worst = fmax(worst, fabs(sum - expected));
+	}
+	return worst;
+}
+
+static int itinerary_recompute_problem(struct ItinStep *first, CelestSystem *system) {
+	update_itin_body_osvs(first, system);
+	calc_itin_v_vectors_from_dates_and_r(first, system);
+	return itinerary_structure_problem(first) != 0;
+}
+
+static int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system) {
+	int problems = 0, routes = 0, maneuver_routes = 0, reported = 0;
+#define OPERATION_PROBLEM(...) do { problems++; if(reported++ < 12) fprintf(stderr, __VA_ARGS__); } while(0)
+	int maneuver_budget = 30, plain_budget = 30;
+	for(int d = 0; d < num_departures; d++) {
+		int count = get_number_of_itineraries(departures[d]);
+		struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+		if(leaves == NULL) return 0;
+		int stored = 0;
+		store_itineraries_in_array(departures[d], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			int has_maneuver = 0, nodes = 0;
+			for(struct ItinStep *s = leaves[j]; s != NULL; s = s->prev) { has_maneuver |= s->body == NULL; nodes++; }
+			if(has_maneuver ? maneuver_budget <= 0 : (plain_budget <= 0 || j % 7 != 0)) continue;
+			if(has_maneuver) maneuver_budget--; else plain_budget--;
+			routes++; maneuver_routes += has_maneuver;
+
+			struct ItinStep *copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+			double dep = copy->body->atmo_alt + 50e3, arr = get_last(copy)->body->atmo_alt + 50e3;
+			int problem = itinerary_structure_problem(copy);
+			if(problem) OPERATION_PROBLEM("route %d.%d: structure problem %d\n", d, j, problem);
+			if(!is_valid_itinerary(get_last(copy))) OPERATION_PROBLEM("route %d.%d: is_valid_itinerary rejects a stored route\n", d, j);
+			if((problem = itinerary_text_problem(copy, dep, arr)) != 0) OPERATION_PROBLEM("route %d.%d: text builders problem %d (1 step text overflow, 2 short or 3 detailed overview overflow or nan)\n", d, j, problem);
+			double mismatch = itinerary_dv_mismatch(copy, dep, arr);
+			if(mismatch > 1e-3) OPERATION_PROBLEM("route %d.%d: step dv do not add up to the overview (%.4f m/s off)\n", d, j, mismatch);
+			if(itinerary_recompute_problem(copy, system)) OPERATION_PROBLEM("route %d.%d: recompute leaves non-finite nodes\n", d, j);
+			free_itinerary(copy);
+
+			for(int k = 0; k < nodes; k++) {
+				// Removing any step, including the first, last and maneuver nodes.
+				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+				struct ItinStep *victim = copy;
+				for(int n = 0; n < k; n++) victim = victim->next[0];
+				struct ItinStep *shown = unlink_itinerary_step(victim);
+				if(shown == NULL) { continue; }
+				struct ItinStep *first = get_first(shown);
+				if(first->body != NULL && get_last(first)->body != NULL) {
+					itinerary_recompute_problem(first, system);
+					if(itinerary_text_problem(first, 50e3, 50e3)) OPERATION_PROBLEM("route %d.%d: text overflow after removing step %d\n", d, j, k);
+				}
+				free_itinerary(first);
+
+				// Moving the step's date.
+				copy = get_first(create_itin_copy_from_arrival(leaves[j]));
+				struct ItinStep *moved = copy;
+				for(int n = 0; n < k; n++) moved = moved->next[0];
+				if(moved->prev == NULL) { free_itinerary(copy); continue; }
+				double original_date = moved->date;
+				Vector3 original_r = moved->r;
+				double target = moved->next != NULL ? original_date + 0.3 * (moved->next[0]->date - original_date)
+					: original_date - 0.3 * (original_date - moved->prev->date);
+				set_itinerary_step_date(moved, system, target);
+				problem = itinerary_structure_problem(copy);
+				if(problem) OPERATION_PROBLEM("route %d.%d: structure problem %d after moving step %d\n", d, j, problem, k);
+				itinerary_recompute_problem(copy, system);
+				if(itinerary_text_problem(copy, dep, arr)) OPERATION_PROBLEM("route %d.%d: text problem after moving step %d\n", d, j, k);
+				if(moved->body == NULL) {
+					set_itinerary_step_date(moved, system, original_date);
+					double shift = mag_vec3(subtract_vec3(moved->r, original_r)) / mag_vec3(original_r);
+					if(shift > 0.05) OPERATION_PROBLEM("route %d.%d: maneuver node moved %.3f of its radius after a date round trip\n", d, j, shift);
+				}
+				free_itinerary(copy);
+			}
+		}
+		free(leaves);
+	}
+#undef OPERATION_PROBLEM
+	if(problems == 0) printf("Itinerary operations check passed: %d routes (%d with maneuvers) survive structure, text, dv-sum, recompute, removal and date-change checks\n", routes, maneuver_routes);
+	else fprintf(stderr, "Itinerary operations check failed: %d problems on %d routes\n", problems, routes);
+	return problems == 0 && routes > 0;
+}
+
 static int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body,
 		Body *arrival_body, double departure_jd, double hohmann_duration) {
 	Body *flyby_bodies[] = {flyby_body, arrival_body};
@@ -795,31 +931,9 @@ static int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *
 				loaded_routes, saved_routes, loaded_maneuvers, saved_maneuvers, loaded_best, saved_best);
 			valid = 0;
 		} else {
-			// The transfer planner recomputes loaded routes from dates and positions; maneuver nodes must survive that.
-			int recomputed = 0, non_finite = 0;
-			for(int i = 0; i < loaded.header.num_deps; i++) {
-				int count = get_number_of_itineraries(loaded.departures[i]);
-				struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
-				if(leaves == NULL) continue;
-				int stored = 0;
-				store_itineraries_in_array(loaded.departures[i], leaves, &stored);
-				for(int j = 0; j < stored && recomputed < 20; j++) {
-					int has_maneuver = 0;
-					for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev) has_maneuver |= step->body == NULL;
-					if(!has_maneuver) continue;
-					struct ItinStep *first = get_first(leaves[j]);
-					update_itin_body_osvs(first, loaded.header.system);
-					calc_itin_v_vectors_from_dates_and_r(first, loaded.header.system);
-					for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev)
-						non_finite += !isfinite(step->v_dep.x + step->v_dep.y + step->v_dep.z + step->v_arr.x + step->v_arr.y + step->v_arr.z);
-					recomputed++;
-				}
-				free(leaves);
-			}
-			if(recomputed == 0 || non_finite > 0) {
-				fprintf(stderr, "DSM planner recompute failed: %d routes recomputed, %d non-finite nodes\n", recomputed, non_finite);
+			if(!check_itinerary_operations(loaded.departures, loaded.header.num_deps, loaded.header.system) ||
+				!check_itinerary_operations(with_dsm.departures, with_dsm.num_deps, system))
 				valid = 0;
-			}
 			printf("DSM file round trip passed: %d routes, %d maneuver nodes, best %.3f m/s\n",
 				loaded_routes, loaded_maneuvers, loaded_best);
 		}

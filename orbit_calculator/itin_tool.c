@@ -863,6 +863,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	sprintf(string, "");
 	if(step == NULL) return;
 	step = get_first(step);
+	if(step->next == NULL) return;
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
@@ -929,6 +930,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	sprintf(string, "");
 	if(step == NULL) return;
 	step = get_first(step);
+	if(step->next == NULL) return;
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
@@ -1014,7 +1016,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 }
 
 void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum DateType date_type, double dep_periapsis, double arr_periapsis, struct ItinStep *step) {
-	if(step == NULL) {sprintf(s_labels,""); sprintf(s_values,""); return;}
+	if(step == NULL || (step->prev == NULL && step->next == NULL)) {sprintf(s_labels,""); sprintf(s_values,""); return;}
 	if(step->body == NULL) {
 		double dt_in_days = step->date - get_first(step)->date;
 		if(date_type == DATE_KERBAL) dt_in_days *= 4;
@@ -1156,6 +1158,57 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 	}
 }
 
+
+double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
+	if(step->body == NULL) {
+		if(step->next == NULL || step->prev == NULL) return 0;
+		return mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+	}
+	if(step->prev == NULL) {
+		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
+		DepartureBurn3D burn;
+		if(calculate_free_plane_departure_burn(vinf, step->body, alt2radius(step->body, dep_periapsis), &burn))
+			return burn.burn_magnitude;
+		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
+	}
+	if(step->next == NULL) {
+		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
+		if(last_transfer_type == TF_CAPTURE) return dv_capture(step->body, alt2radius(step->body, arr_periapsis), vinf);
+		if(last_transfer_type == TF_CIRC) return dv_circ(step->body, alt2radius(step->body, arr_periapsis), vinf);
+		return 0;
+	}
+	PoweredFlybyResult flyby;
+	double minimum_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
+		return flyby.burn_delta_v;
+	return HUGE_VAL;
+}
+
+struct ItinStep *unlink_itinerary_step(struct ItinStep *step) {
+	struct ItinStep *remaining = step->prev != NULL ? step->prev : (step->next != NULL ? step->next[0] : NULL);
+	if(step->next != NULL) step->next[0]->prev = step->prev;
+	if(step->prev != NULL) {
+		if(step->next != NULL) {
+			step->prev->next[0] = step->next[0];
+		} else {
+			free(step->prev->next);
+			step->prev->next = NULL;
+			step->prev->num_next_nodes = 0;
+		}
+	}
+	free(step->next);
+	free(step);
+	return remaining;
+}
+
+void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date) {
+	if(step->body == NULL && step->prev != NULL)
+		step->r = propagate_osv_time((OSV){step->prev->r, step->v_dep}, system->cb, (date - step->prev->date) * 86400).r;
+	step->date = date;
+	for(struct ItinStep *node = step; node->next != NULL; node = node->next[0])
+		if(node->next[0]->date <= node->date) node->next[0]->date = node->date + 1;
+}
 
 void remove_step_from_itinerary(struct ItinStep *step) {
 	struct ItinStep *prev = step->prev;

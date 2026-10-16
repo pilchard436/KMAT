@@ -147,10 +147,22 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 
 void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string);
 
+// buffer size that fits every text produced by itinerary_step_parameters_to_string
+#define ITIN_STEP_TEXT_SIZE 512
+
 void itinerary_step_parameters_to_string(char *s_label, char *s_values, enum DateType date, double dep_periapsis, double arr_periapsis, struct ItinStep *step);
 
 // removes this and all now unneeded steps from itineraries (no next node before arrival)
 void remove_step_from_itinerary(struct ItinStep *step);
+
+// delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
+double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
+
+// unlinks and frees one step of a single itinerary; returns the step to show next (NULL if none is left)
+struct ItinStep *unlink_itinerary_step(struct ItinStep *step);
+
+// sets a step's date and pushes later steps back if needed; a maneuver node slides along its incoming arc
+void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date);
 
 // free to itinerary allocated memory
 void free_itinerary(struct ItinStep *step);

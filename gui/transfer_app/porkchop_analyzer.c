@@ -261,21 +261,10 @@ void pa_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 }
 
 double calc_step_dv_pa(struct ItinStep *step) {
-	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
-	if(step->body == NULL) {
-		if(step->next == NULL || step->num_next_nodes == 0 || step->prev == NULL)
-			return 0;
-		return mag_vec3(subtract_vec3(step->v_arr, step->next[0]->v_dep));
-	} else if(step->prev == NULL) {
-		double vinf = mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_body));
-		return dv_circ(step->body, altatmo2radius(step->body, pa_dep_periapsis), vinf);
-	} else if(step->next == NULL) {
-		if(pa_last_transfer_type == TF_FLYBY) return 0;
-		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
-		if(pa_last_transfer_type == TF_CAPTURE) return dv_capture(step->body, altatmo2radius(step->body, pa_arr_periapsis), vinf);
-		else if(pa_last_transfer_type == TF_CIRC) return dv_circ(step->body, altatmo2radius(step->body, pa_arr_periapsis), vinf);
-	}
-	return 0;
+	if(step == NULL) return 0;
+	struct ItinStep *departure = get_first(step), *arrival = get_last(step);
+	return itinerary_step_dv(step, departure->body->atmo_alt + pa_dep_periapsis,
+		arrival->body->atmo_alt + pa_arr_periapsis, pa_last_transfer_type);
 }
 
 double calc_total_dv_pa() {
