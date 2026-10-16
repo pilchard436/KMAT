@@ -1092,7 +1092,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			if(shortfall > 0) {
 				double unpowered_altitude = (get_flyby_periapsis(v_arr, v_dep, v_body, step->body) - step->body->radius) / 1e3;
 				sprintf(string, "%sWARNING: the unpowered periapsis altitude is %.0f km%s (minimum safe %.0f km); this flyby only works with the burn above.\n",
-					string, unpowered_altitude, unpowered_altitude < 0 ? ", inside the planet" : "",
+					string, unpowered_altitude, unpowered_altitude < 0 ? ", inside the planet" : (unpowered_altitude < step->body->atmo_alt / 1e3 ? ", inside the atmosphere" : ""),
 					(step->body->atmo_alt) / 1e3);
 			}
 		}
@@ -1262,6 +1262,12 @@ double flyby_periapsis_shortfall(struct ItinStep *step) {
 	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
 	if(!isfinite(unpowered)) return 0;
 	return unpowered < minimum_radius ? minimum_radius - unpowered : 0;
+}
+
+int flyby_hits_surface(struct ItinStep *step) {
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
+	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	return isfinite(unpowered) && unpowered < step->body->radius;
 }
 
 int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall) {

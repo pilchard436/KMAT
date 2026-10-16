@@ -128,7 +128,7 @@ static void draw_crash_symbol(cairo_t *cr, Vector2 p) {
 static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector2 p = p3d_to_p2d(camera, step->r);
-	int crashes = flyby_periapsis_shortfall(step) > 0;
+	int crashes = flyby_hits_surface(step);
 	cairo_new_path(cr);
 	if(crashes) draw_crash_symbol(cr, p);
 	cairo_set_source_rgb(cr, 1, 1, 1);
