@@ -1006,9 +1006,15 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 	if(step->body == NULL) {
 		double dt_in_days = step->date - get_first(step)->date;
 		if(date_type == DATE_KERBAL) dt_in_days *= 4;
-		double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
-		sprintf(s_labels, "Deep-Space Maneuver\nT+:\nBurn:");
-		sprintf(s_values, "\n%.2f days\n%.2f m/s", dt_in_days, maneuver_dv);
+		Vector3 dv_vec = step->next != NULL ? subtract_vec3(step->next[0]->v_dep, step->v_arr) : vec3(0, 0, 0);
+		// Components in the spacecraft frame: prograde, radial in, orbit normal.
+		Vector3 prograde = norm_vec3(step->v_arr);
+		Vector3 normal = norm_vec3(cross_vec3(step->r, step->v_arr));
+		Vector3 radial_in = norm_vec3(cross_vec3(normal, prograde));
+		sprintf(s_labels, "Deep-Space Maneuver\nT+:\nDistance to the Sun:\nDv Prograde:\nDv Radial:\nDv Normal:\nTotal:");
+		sprintf(s_values, "\n%.2f days\n%.3f AU\n%.3f m/s\n%.3f m/s\n%.3f m/s\n%.3f m/s",
+			dt_in_days, mag_vec3(step->r) / 1.495978707e11, dot_vec3(dv_vec, prograde),
+			dot_vec3(dv_vec, radial_in), dot_vec3(dv_vec, normal), mag_vec3(dv_vec));
 		return;
 	}
 	HyperbolaParams hyp_params;
