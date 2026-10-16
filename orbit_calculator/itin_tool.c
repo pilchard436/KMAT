@@ -1021,9 +1021,6 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	
 	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
 	
-	int unflyable_flybys = count_flybys_needing_burn(step, NULL);
-	if(unflyable_flybys > 0)
-		sprintf(string, "%s\nWARNING: %d flyby(s) cannot be flown as a gravity assist. Without a burn their trajectory would pass inside the planet or below the minimum safe altitude, so the route only works with the burns listed below.\n", string, unflyable_flybys);
 	sprintf(string, "%s\nDeparture dv: %.2f m/s\n", string, pp.dv_dep);
 	struct ItinStep *departure = get_first(step);
 	DepartureBurn3D departure_burn;
@@ -1088,13 +1085,6 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 				"Powered burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n",
 				string, (periapsis-step->body->radius)/1e3, rad2deg(incl), burn,
 				burn_radial, burn_tangential, burn_normal_component);
-			double shortfall = flyby_periapsis_shortfall(step);
-			if(shortfall > 0) {
-				double unpowered_altitude = (get_flyby_periapsis(v_arr, v_dep, v_body, step->body) - step->body->radius) / 1e3;
-				sprintf(string, "%sWARNING: the unpowered periapsis altitude is %.0f km%s (minimum safe %.0f km); this flyby only works with the burn above.\n",
-					string, unpowered_altitude, unpowered_altitude < 0 ? ", inside the planet" : (unpowered_altitude < step->body->atmo_alt / 1e3 ? ", inside the atmosphere" : ""),
-					(step->body->atmo_alt) / 1e3);
-			}
 		}
 		if(step->next != NULL) step = step->next[0];
 		else step = NULL;

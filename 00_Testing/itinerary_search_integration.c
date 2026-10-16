@@ -1338,13 +1338,6 @@ static int check_departure_sweep_fixture(void) {
 				altitude_line != NULL ? altitude_line : "?", minimum_altitude_km);
 			valid = 0;
 		}
-		// The unpowered trajectory is inside Earth here, so the user must be warned.
-		static char overview[10000];
-		itinerary_detailed_overview_to_string(first, DATE_ISO, dep, arr, overview);
-		if(count_flybys_needing_burn(first, NULL) < 1 || strstr(overview, "WARNING") == NULL || strstr(overview, "inside the planet") == NULL) {
-			fprintf(stderr, "Departure sweep: no warning for a flyby whose unpowered trajectory is inside the planet\n");
-			valid = 0;
-		}
 	}
 	free_itinerary(first);
 	if(loaded.system != NULL) free_celestial_system(loaded.system);
