@@ -83,6 +83,14 @@ the default fixture: 6 families, 3 covered, and the first-leg grid reaches 59 to
 229 days. Raising the seed budget or restricting refinement to local steps did not
 cover more, so coverage there is limited by first-leg reach, not seed budget.
 
+`--coverage-multi` runs only the Earth-Venus-Earth-Jupiter case (about 4 minutes).
+It has three free dates, so it scores a 15-day grid, finds valleys, and refines each
+with a local search on the exact objective before comparing with the search.
+Measured on the default fixture: reference best 10,959 m/s, search best 33,654 m/s
+for that sequence, 0 of 3 families covered. Widening the first-leg window to 3x
+Hohmann did not change this; a moderate seed budget has not been measured yet,
+because an unlimited budget did not finish in 6 minutes.
+
 Local Windows RelWithDebInfo measurements, profiling enabled:
 
 | Metric | Branch HEAD before edits | Budgeted implementation |
