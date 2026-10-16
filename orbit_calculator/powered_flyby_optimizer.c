@@ -18,14 +18,6 @@
 #define POWERED_OBJECTIVES_PER_ROUTE 96
 #define POWERED_REPAIR_OBJECTIVES_PER_ROUTE 144
 #define POWERED_REPAIR_DATE_BINS 64
-#define AUDIT_SAMPLE_SIZE POWERED_AUDIT_SAMPLE_SIZE
-#define AUDIT_OBJECTIVES_PER_ROUTE POWERED_AUDIT_OBJECTIVES_PER_ROUTE
-
-static _Thread_local int rejection_audit_enabled;
-static _Thread_local PoweredRejectionAudit rejection_audit;
-
-void set_powered_rejection_audit_enabled(int enabled) { rejection_audit_enabled = enabled != 0; }
-PoweredRejectionAudit get_powered_rejection_audit(void) { return rejection_audit; }
 
 static _Thread_local int objective_budget = -1;
 static _Thread_local unsigned long long objective_calls;
@@ -70,12 +62,12 @@ typedef struct PoweredRouteCandidate {
 	int *converged_out;
 } PoweredRouteCandidate;
 
-typedef struct AuditReservoir {
-	PoweredRouteCandidate *samples[AUDIT_SAMPLE_SIZE];
+typedef struct SampleReservoir {
+	PoweredRouteCandidate *samples[POWERED_CHALLENGE_SLOTS];
 	unsigned long long population;
 	uint64_t random;
 	int count;
-} AuditReservoir;
+} SampleReservoir;
 
 typedef struct RepairPool {
 	PoweredRouteCandidate *slots[POWERED_REPAIR_SLOTS];
@@ -85,7 +77,7 @@ typedef struct RepairPool {
 } RepairPool;
 
 typedef struct ExcludedPools {
-	AuditReservoir *challenge, *audit;
+	SampleReservoir *challenge;
 } ExcludedPools;
 
 static int is_finite_vector(Vector3 value) {
@@ -794,67 +786,31 @@ static void destroy_candidate(PoweredRouteCandidate *candidate) {
 	free(candidate);
 }
 
-static uint64_t audit_random(uint64_t *state) {
+static uint64_t sample_random(uint64_t *state) {
 	*state ^= *state >> 12;
 	*state ^= *state << 25;
 	*state ^= *state >> 27;
 	return *state * UINT64_C(2685821657736338717);
 }
 
-/* Algorithm R: every rejected route in this stratum has equal sampling probability. */
-static void audit_retain(AuditReservoir *pool, PoweredRouteCandidate *candidate) {
+/* Algorithm R: every excluded route has equal sampling probability. */
+static void reservoir_retain(SampleReservoir *pool, PoweredRouteCandidate *candidate) {
 	if(pool == NULL) { destroy_candidate(candidate); return; }
 	pool->population++;
 	unsigned long long slot;
-	if(pool->count < AUDIT_SAMPLE_SIZE) slot = (unsigned long long)pool->count++;
+	if(pool->count < POWERED_CHALLENGE_SLOTS) slot = (unsigned long long)pool->count++;
 	else {
 		uint64_t limit = UINT64_MAX - UINT64_MAX % pool->population, draw;
-		do { draw = audit_random(&pool->random); } while(draw >= limit);
+		do { draw = sample_random(&pool->random); } while(draw >= limit);
 		slot = draw % pool->population;
 	}
-	if(slot >= AUDIT_SAMPLE_SIZE) { destroy_candidate(candidate); return; }
+	if(slot >= POWERED_CHALLENGE_SLOTS) { destroy_candidate(candidate); return; }
 	destroy_candidate(pool->samples[slot]);
 	pool->samples[slot] = candidate;
 }
 
-static PoweredRouteCandidate *copy_candidate(const PoweredRouteCandidate *source) {
-	PoweredRouteCandidate *copy = calloc(1, sizeof(*copy));
-	if(copy == NULL) return NULL;
-	size_t n = source->num_steps;
-	*copy = *source;
-	copy->dsms = NULL;
-	copy->dsm_results = NULL;
-	copy->bodies = malloc(n * sizeof(*copy->bodies));
-	copy->signature_dates = malloc(n * sizeof(*copy->signature_dates));
-	copy->signature_positions = malloc(n * sizeof(*copy->signature_positions));
-	copy->signature_v_arr = malloc(n * sizeof(*copy->signature_v_arr));
-	copy->signature_v_dep = malloc(n * sizeof(*copy->signature_v_dep));
-	copy->times = malloc(n * sizeof(*copy->times));
-	copy->best_states = malloc(n * sizeof(*copy->best_states));
-	copy->best_legs = malloc((n - 1) * sizeof(*copy->best_legs));
-	if(copy->bodies == NULL || copy->signature_dates == NULL || copy->signature_positions == NULL ||
-		copy->signature_v_arr == NULL || copy->signature_v_dep == NULL || copy->times == NULL ||
-		copy->best_states == NULL || copy->best_legs == NULL) {
-		destroy_candidate(copy);
-		return NULL;
-	}
-	memcpy(copy->bodies, source->bodies, n * sizeof(*copy->bodies));
-	memcpy(copy->signature_dates, source->signature_dates, n * sizeof(*copy->signature_dates));
-	memcpy(copy->signature_positions, source->signature_positions, n * sizeof(*copy->signature_positions));
-	memcpy(copy->signature_v_arr, source->signature_v_arr, n * sizeof(*copy->signature_v_arr));
-	memcpy(copy->signature_v_dep, source->signature_v_dep, n * sizeof(*copy->signature_v_dep));
-	memcpy(copy->times, source->times, n * sizeof(*copy->times));
-	memcpy(copy->best_states, source->best_states, n * sizeof(*copy->best_states));
-	memcpy(copy->best_legs, source->best_legs, (n - 1) * sizeof(*copy->best_legs));
-	return copy;
-}
-
 static void retain_excluded(ExcludedPools *pools, PoweredRouteCandidate *candidate) {
-	if(pools->audit != NULL) {
-		PoweredRouteCandidate *copy = copy_candidate(candidate);
-		if(copy != NULL) audit_retain(pools->audit, copy);
-	}
-	audit_retain(pools->challenge, candidate);
+	reservoir_retain(pools->challenge, candidate);
 }
 
 /* Deterministic stratified sampling: one reservoir slot per departure-date/body-sequence hash. */
@@ -867,7 +823,7 @@ static void repair_pool_retain(RepairPool *pool, PoweredRouteCandidate *candidat
 	size_t slot = (size_t)((date_bin * 17 + sequence_hash % POWERED_REPAIR_SLOTS) % POWERED_REPAIR_SLOTS);
 	pool->total++;
 	unsigned long long seen = ++pool->population[slot];
-	if(seen == 1 || audit_random(&pool->random) % seen == 0) {
+	if(seen == 1 || sample_random(&pool->random) % seen == 0) {
 		destroy_candidate(pool->slots[slot]);
 		pool->slots[slot] = candidate;
 	} else {
@@ -1026,15 +982,13 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 }
 
 static void repair_candidate_timing(PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
-		uint64_t *random, int move_shared_prefix) {
+		uint64_t *random) {
 	size_t n = candidate->num_steps;
 	double *best_times = malloc(n * sizeof(*best_times));
 	OSV *trial_states = calloc(n, sizeof(*trial_states));
 	Lambert3 *trial_legs = calloc(n - 1, sizeof(*trial_legs));
 	if(best_times == NULL || trial_states == NULL || trial_legs == NULL) goto cleanup;
 	memcpy(best_times, candidate->times, n * sizeof(*best_times));
-	/* Audit copies may move shared-prefix dates; production repair keeps them tied to the tree. */
-	if(move_shared_prefix) candidate->mutable_start = 1;
 	size_t first = candidate->mutable_start;
 	int offset_attempts = 12 * (int)(n - first < 2 ? n - first : 2);
 	double latest = fmin(calc_data->jd_max_arr, candidate->times[0] + calc_data->max_duration);
@@ -1049,7 +1003,7 @@ static void repair_candidate_timing(PoweredRouteCandidate *candidate, const Itin
 				double lower = candidate->times[i - 1] + POWERED_MIN_LEG_DAYS;
 				double upper = latest - (n - 1 - i) * POWERED_MIN_LEG_DAYS;
 				if(upper < lower) break;
-				double fraction = (audit_random(random) >> 11) * (1.0 / 9007199254740992.0);
+				double fraction = (sample_random(random) >> 11) * (1.0 / 9007199254740992.0);
 				candidate->times[i] = attempt % 2 ? lower + fraction * (upper - lower) :
 					fmax(lower, fmin(upper, candidate->signature_dates[i] + (fraction * 2 - 1) * 60));
 			}
@@ -1069,49 +1023,6 @@ cleanup:
 	free(best_times);
 	free(trial_states);
 	free(trial_legs);
-}
-
-static void audit_group(AuditReservoir *pool, PoweredRejectionAuditGroup *result,
-		const Itin_Calc_Data *calc_data, const char *label) {
-	*result = (PoweredRejectionAuditGroup){.population = pool->population, .best_delta_v = DBL_MAX};
-	uint64_t random = UINT64_C(0x9e3779b97f4a7c15);
-	int best_index = -1;
-	for(int i = 0; i < pool->count && !itinerary_search_cancelled(NULL); i++) {
-		PoweredRouteCandidate *candidate = pool->samples[i];
-		double original = candidate->best_total_dv;
-		unsigned long long calls_before = objective_calls;
-		/* Reserve one independent re-evaluation of the repaired dates. */
-		objective_budget = AUDIT_OBJECTIVES_PER_ROUTE - 1;
-		repair_candidate_timing(candidate, calc_data, &random, 1);
-		if(candidate->best_total_dv < DBL_MAX && !itinerary_search_cancelled(NULL)) {
-			objective_budget = 1;
-			double verified = evaluate_route(candidate, calc_data, candidate->times,
-				candidate->best_states, candidate->best_legs);
-			candidate->best_total_dv = isfinite(verified) ? verified : DBL_MAX;
-		}
-		objective_budget = -1;
-		result->evaluations += objective_calls - calls_before;
-		result->sampled++;
-		double cost = candidate->best_total_dv;
-		if(!isfinite(cost) || cost >= DBL_MAX) continue;
-		result->feasible++;
-		if(original < DBL_MAX && cost + POWERED_IMPROVEMENT_THRESHOLD < original) result->improved++;
-		if(rejection_audit.retained_best < DBL_MAX && cost + POWERED_IMPROVEMENT_THRESHOLD < rejection_audit.retained_best)
-			result->beats_retained_best++;
-		if(rejection_audit.retained_worst < DBL_MAX && cost + POWERED_IMPROVEMENT_THRESHOLD < rejection_audit.retained_worst)
-			result->beats_retained_worst++;
-		if(cost < result->best_delta_v) { result->best_delta_v = cost; best_index = i; }
-	}
-	printf("Rejection audit %s: population %llu, sampled %d, feasible after repair %d, improved %d, beats retained best %d / worst %d, %llu evaluations\n",
-		label, result->population, result->sampled, result->feasible, result->improved,
-		result->beats_retained_best, result->beats_retained_worst, result->evaluations);
-	if(best_index >= 0) {
-		PoweredRouteCandidate *best = pool->samples[best_index];
-		printf("Audit witness %s: %.6f m/s;", label, best->best_total_dv);
-		for(size_t i = 0; i < best->num_steps; i++) printf(" %s@%.9f", best->bodies[i]->name, best->times[i]);
-		printf("\n");
-	}
-	for(int i = 0; i < pool->count; i++) destroy_candidate(pool->samples[i]);
 }
 
 static int vector_equal(Vector3 first, Vector3 second) {
@@ -1285,13 +1196,10 @@ static int insert_top_candidate(PoweredRouteCandidate *candidate, double cost,
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
 		const Itin_Calc_Data *calc_data, int max_routes, PoweredFlybyOptimizationStats *stats) {
-	rejection_audit = (PoweredRejectionAudit){.retained_best = DBL_MAX};
-	AuditReservoir failed = {.random = UINT64_C(0x123456789abcdef)},
-		discarded = {.random = UINT64_C(0xfedcba987654321)},
-		challenge = {.random = UINT64_C(0x2545f4914f6cdd1d)};
+	SampleReservoir challenge = {.random = UINT64_C(0x2545f4914f6cdd1d)};
 	RepairPool *repair_pool = calloc(1, sizeof(*repair_pool));
 	if(repair_pool != NULL) repair_pool->random = UINT64_C(0x9e3779b97f4a7c15);
-	ExcludedPools excluded = {.challenge = &challenge, .audit = rejection_audit_enabled ? &discarded : NULL};
+	ExcludedPools excluded = {.challenge = &challenge};
 	if(stats != NULL) *stats = (PoweredFlybyOptimizationStats) {
 		.best_unpowered_seed_total_dv = DBL_MAX,
 		.best_initial_total_dv = DBL_MAX,
@@ -1344,10 +1252,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 			candidate->best_states, candidate->best_legs);
 		if(!isfinite(candidate->best_total_dv) || candidate->best_total_dv >= DBL_MAX) {
 			candidate->best_total_dv = DBL_MAX;
-			if(rejection_audit_enabled) {
-				PoweredRouteCandidate *copy = copy_candidate(candidate);
-				if(copy != NULL) audit_retain(&failed, copy);
-			}
 			repair_pool_retain(repair_pool, candidate, num_departures);
 			continue;
 		}
@@ -1377,7 +1281,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats != NULL) stats->repairs_attempted++;
 		objective_budget = POWERED_REPAIR_OBJECTIVES_PER_ROUTE - 1;
-		repair_candidate_timing(candidate, calc_data, &repair_pool->random, 0);
+		repair_candidate_timing(candidate, calc_data, &repair_pool->random);
 		double verified = DBL_MAX;
 		if(candidate->best_total_dv < DBL_MAX && !itinerary_search_cancelled(NULL)) {
 			objective_budget = 1;
@@ -1416,8 +1320,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		stats->exact_scoring_seconds = wall_seconds() - exact_scoring_start;
 	}
 	if(itinerary_search_cancelled(NULL)) {
-		for(int i = 0; i < failed.count; i++) destroy_candidate(failed.samples[i]);
-		for(int i = 0; i < discarded.count; i++) destroy_candidate(discarded.samples[i]);
 		for(int candidate_index = 0; candidate_index < top_count; candidate_index++)
 			destroy_candidate(candidates[candidate_index]);
 		free(candidates);
@@ -1465,8 +1367,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		}
 		if(optimized &&
 			replace_candidate_route(departures, candidate)) {
-			rejection_audit.retained_best = fmin(rejection_audit.retained_best, candidate->best_total_dv);
-			rejection_audit.retained_worst = fmax(rejection_audit.retained_worst, candidate->best_total_dv);
 			if(stats != NULL) {
 				stats->routes_corrected++;
 				if(candidate_index < ranked_count)
@@ -1497,17 +1397,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		stats->timing_refinement_seconds = wall_seconds() - timing_refinement_start;
 		stats->objective_evaluations = objective_calls;
 		stats->multi_start_routes = multi_start_routes;
-	}
-	if(rejection_audit_enabled) {
-		double audit_start = wall_seconds();
-		unsigned long long production_calls = objective_calls;
-		audit_group(&failed, &rejection_audit.initial_failure, calc_data, "initial-failure");
-		audit_group(&discarded, &rejection_audit.refinement_cutoff, calc_data, "refinement-cutoff");
-		objective_calls = production_calls;
-		rejection_audit.seconds = wall_seconds() - audit_start;
-		rejection_audit.completed = !itinerary_search_cancelled(NULL);
-		printf("Rejection audit: %.3f wall seconds, retained corrected objective range %.6f..%.6f m/s; timing repair only, no DSM\n",
-			rejection_audit.seconds, rejection_audit.retained_best, rejection_audit.retained_worst);
 	}
 	return improvements;
 }

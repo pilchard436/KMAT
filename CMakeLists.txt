@@ -252,7 +252,6 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
     add_test(NAME KMATSearchIntegration COMMAND KMATSearchIntegration)
-    add_test(NAME KMATRejectionAudit COMMAND KMATSearchIntegration --audit-rejections)
     add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
     set_tests_properties(KMATIntegrationTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -265,11 +264,6 @@ if(BUILD_TESTING)
     set_tests_properties(KMATSearchIntegration PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS integration
-    )
-    set_tests_properties(KMATRejectionAudit PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        LABELS "integration;audit"
-        TIMEOUT 60
     )
 
     add_custom_target(run_tests ALL

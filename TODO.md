@@ -14,7 +14,6 @@
 - [x] Bound timing-refinement objective evaluations and allocate extra starts to competitive routes and distinct body sequences.
 - [x] Fix regression traversal to scan until a speed-changing encounter is found, using the actual outbound route leg.
 - [x] Add fallback-selection and pre-optimization speed-changing seed coverage checks.
-- [x] Add an opt-in rejected-route audit with bounded reservoir sampling and timing repair. See `00_Testing/rejection_audit.md`; this measures optimizer-stage losses, not seed-budget or DSM coverage.
 - [x] Run the full-year profile with route-constraint and corrected-objective checks; the budgeted search completed in 61.7 seconds locally. Baseline HEAD was stopped at 166 seconds before any departure completed. This establishes practical runtime on this fixture, not exhaustive coverage.
 - [x] Repair a bounded, stratified sample of initially rejected routes and let recovered routes compete for refinement by repaired full-mission cost.
 - [x] Give 32 sampled cutoff-excluded routes extra refinement slots to challenge the 500-route cutoff.

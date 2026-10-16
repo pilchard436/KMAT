@@ -5,10 +5,8 @@
 #include <stddef.h>
 
 #define POWERED_ROUTE_REFINEMENT_LIMIT 500
-#define POWERED_AUDIT_SAMPLE_SIZE 32
-#define POWERED_AUDIT_OBJECTIVES_PER_ROUTE 192
 #define POWERED_REPAIR_SLOTS 64
-#define POWERED_CHALLENGE_SLOTS POWERED_AUDIT_SAMPLE_SIZE
+#define POWERED_CHALLENGE_SLOTS 32
 
 #define POWERED_PROGRESS_DONE_COUNTER 6
 #define POWERED_PROGRESS_TOTAL_COUNTER 7
@@ -34,23 +32,6 @@ typedef struct PoweredLegDsm {
 	Vector3 position;
 	double date;
 } PoweredLegDsm;
-
-typedef struct PoweredRejectionAuditGroup {
-	unsigned long long population;
-	int sampled, feasible, improved, beats_retained_best, beats_retained_worst;
-	unsigned long long evaluations;
-	double best_delta_v;
-} PoweredRejectionAuditGroup;
-
-typedef struct PoweredRejectionAudit {
-	PoweredRejectionAuditGroup initial_failure, refinement_cutoff;
-	double retained_best, retained_worst, seconds;
-	int completed;
-} PoweredRejectionAudit;
-
-/* Opt-in diagnostic: private route copies, fixed deterministic sampling and work budgets. */
-void set_powered_rejection_audit_enabled(int enabled);
-PoweredRejectionAudit get_powered_rejection_audit(void);
 
 typedef struct PoweredFlybyOptimizationStats {
 	int routes_considered;
