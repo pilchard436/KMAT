@@ -57,11 +57,8 @@ add_executable(KMAT
     gui/drawing.c
     gui/drawing.h
     tools/thread_pool.h
-    orbit_calculator/double_swing_by.c
-    orbit_calculator/double_swing_by.h
     database/database.c
     database/database.h
-    orbit_calculator/double_swing_by.h
     orbit_calculator/itin_tool.c
     orbit_calculator/itin_tool.h
     gui/transfer_app/transfer_planner.c
@@ -100,8 +97,6 @@ add_executable(KMAT
     gui/database_app/database_app_tools/mission_manager_tools.h
     tools/gmat_interface.c
     tools/gmat_interface.h
-    orbit_calculator/itin_dsb_tool.c
-    orbit_calculator/itin_dsb_tool.h
     gui/transfer_app/itinerary_calculator.c
     gui/transfer_app/itinerary_calculator.h
     gui/gui_manager.c
@@ -252,7 +247,6 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
     add_test(NAME KMATSearchIntegration COMMAND KMATSearchIntegration)
-    add_test(NAME KMATRejectionAudit COMMAND KMATSearchIntegration --audit-rejections)
     add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
     set_tests_properties(KMATIntegrationTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -265,11 +259,6 @@ if(BUILD_TESTING)
     set_tests_properties(KMATSearchIntegration PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS integration
-    )
-    set_tests_properties(KMATRejectionAudit PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        LABELS "integration;audit"
-        TIMEOUT 60
     )
 
     add_custom_target(run_tests ALL

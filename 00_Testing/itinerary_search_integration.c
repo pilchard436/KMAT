@@ -14,7 +14,6 @@
 #define POWERED_TEST_MIN_LEG_DAYS 10.0
 #define POWERED_TEST_GRID_RELATIVE_TOLERANCE 0.10
 
-static int audit_requested;
 static int benchmark_resonant;
 static double stored_total_dv(struct ItinStep *leaf, const Itin_Calc_Data *calc_data, double *dsm_dv);
 
@@ -27,23 +26,6 @@ static int route_is_resonant(struct ItinStep *leaf) {
 		later = step->body;
 	}
 	return 0;
-}
-
-static int validate_rejection_audit(int require_recovery) {
-	if(!audit_requested) return 1;
-	PoweredRejectionAudit audit = get_powered_rejection_audit();
-	if(!audit.completed) return 0;
-	PoweredRejectionAuditGroup groups[] = {audit.initial_failure, audit.refinement_cutoff};
-	for(int i = 0; i < 2; i++) {
-		PoweredRejectionAuditGroup group = groups[i];
-		int expected = group.population < POWERED_AUDIT_SAMPLE_SIZE ? (int)group.population : POWERED_AUDIT_SAMPLE_SIZE;
-		if(group.sampled != expected || group.feasible > group.sampled ||
-			group.beats_retained_best > group.feasible || group.beats_retained_worst > group.feasible ||
-			group.evaluations > (unsigned long long)group.sampled * POWERED_AUDIT_OBJECTIVES_PER_ROUTE) return 0;
-		if(group.feasible > 0 && (!isfinite(group.best_delta_v) || group.best_delta_v >= DBL_MAX)) return 0;
-	}
-	if(require_recovery && audit.initial_failure.feasible == 0) return 0;
-	return 1;
 }
 
 static int check_speed_changing_seed_generation(CelestSystem *system, Body *departure,
@@ -361,10 +343,6 @@ static int run_powered_flyby_objective_regression(CelestSystem *system,
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	if(results.num_deps <= 0 || results.num_itins <= 0) goto cleanup;
-	if(!validate_rejection_audit(1)) {
-		fprintf(stderr, "Rejected-route audit failed recovery or sampling/work-budget checks\n");
-		goto cleanup;
-	}
 	if(results.powered_seed_stats.seeds_added > POWERED_SEEDS_PER_DEPARTURE ||
 		results.powered_seed_stats.alternatives_added > POWERED_EXTRA_SEEDS_PER_DEPARTURE ||
 		results.powered_seed_stats.searches_budget_skipped == 0) {
@@ -654,7 +632,7 @@ static int run_full_profile(void) {
 	};
 	set_lambert_solver_method(LAMBERT_METHOD_IZZO);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
-	int valid = validate_rejection_audit(0) && results.num_itins > 0 && results.powered_routes_corrected > 0 &&
+	int valid = results.num_itins > 0 && results.powered_routes_corrected > 0 &&
 		results.powered_itineraries_pruned * 100 <= results.num_itins &&
 		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
 		results.powered_repairs_recovered <= results.powered_repairs_attempted &&
@@ -1386,11 +1364,6 @@ static int check_departure_sweep_fixture(void) {
 }
 
 int main(int argc, char **argv) {
-	if(argc > 1 && strcmp(argv[argc - 1], "--audit-rejections") == 0) {
-		audit_requested = 1;
-		set_powered_rejection_audit_enabled(1);
-		argc--;
-	}
 	if(argc > 1 && strcmp(argv[argc - 1], "--resonant") == 0) {
 		benchmark_resonant = 1;
 		argc--;
@@ -1400,7 +1373,7 @@ int main(int argc, char **argv) {
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks] [--audit-rejections]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 

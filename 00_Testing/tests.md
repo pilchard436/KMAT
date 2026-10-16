@@ -41,10 +41,6 @@
 
 # Budgeted powered-flyby search (2026-10-15)
 
-The opt-in rejected-route audit and its measured recovery rates are documented
-in [rejection_audit.md](rejection_audit.md). Run its focused regression with
-`ctest --test-dir build --output-on-failure -R KMATRejectionAudit`.
-
 Build and run the focused checks from the repository root:
 
 ```powershell

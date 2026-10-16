@@ -8,13 +8,13 @@
 
 ## Speed-Changing Powered-Flyby Branch
 
+- [ ] Refactor the resonant (double swing-by) search into one module (`resonant_flybys.c/.h`): `find_resonant_flybys`, the resonant departure samples and the leg-variant helpers currently sit in `itin_tool.c`. The optimizer, GUI and test hooks stay where they are.
 - [x] Generate powered candidates independently of the near-equal excess-speed root search.
 - [x] Retain three distinct estimated candidates per date bucket, falling back when cheaper candidates fail feasibility.
 - [x] Rank feasible bucket winners by calculated periapsis burn, retaining distinct dates with a bounded expansion budget.
 - [x] Bound timing-refinement objective evaluations and allocate extra starts to competitive routes and distinct body sequences.
 - [x] Fix regression traversal to scan until a speed-changing encounter is found, using the actual outbound route leg.
 - [x] Add fallback-selection and pre-optimization speed-changing seed coverage checks.
-- [x] Add an opt-in rejected-route audit with bounded reservoir sampling and timing repair. See `00_Testing/rejection_audit.md`; this measures optimizer-stage losses, not seed-budget or DSM coverage.
 - [x] Run the full-year profile with route-constraint and corrected-objective checks; the budgeted search completed in 61.7 seconds locally. Baseline HEAD was stopped at 166 seconds before any departure completed. This establishes practical runtime on this fixture, not exhaustive coverage.
 - [x] Repair a bounded, stratified sample of initially rejected routes and let recovered routes compete for refinement by repaired full-mission cost.
 - [x] Give 32 sampled cutoff-excluded routes extra refinement slots to challenge the 500-route cutoff.
