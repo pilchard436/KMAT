@@ -85,6 +85,9 @@ add_executable(KMAT
     gui/transfer_app/transfer_planner_io.c
     gui/transfer_app/transfer_planner.h
     gui/transfer_app/porkchop_analyzer.c
+    gui/transfer_app/porkchop_analyzer_groups.c
+    gui/transfer_app/porkchop_analyzer_filter.c
+    gui/transfer_app/porkchop_analyzer_io.c
     gui/transfer_app/porkchop_analyzer.h
     gui/transfer_app/porkchop_analyzer_model.c
     gui/transfer_app/porkchop_analyzer_model.h

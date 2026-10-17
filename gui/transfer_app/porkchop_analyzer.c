@@ -1,17 +1,9 @@
-#include "porkchop_analyzer.h"
-#include "porkchop_analyzer_tools.h"
-#include "porkchop_analyzer_model.h"
-#include "gui/drawing.h"
-#include "gui/gui_manager.h"
+#include "porkchop_analyzer_internal.h"
 #include "gui/css_loader.h"
-#include "gui/settings.h"
-#include "tools/file_io.h"
-#include "gui/info_win_manager.h"
 
-#include <string.h>
 #include <locale.h>
 #include <math.h>
-#include <stdint.h>
+#include <string.h>
 
 int pa_num_deps, pa_num_itins;
 struct ItinStep **pa_departures;
@@ -22,8 +14,6 @@ double current_date_pa;
 int pa_num_groups = 0;
 struct PorkchopGroup *pa_groups;
 struct PorkchopAnalyzerPoint *pa_porkchop_points;
-static guint group_overview_source_id;
-static gpointer group_overview_build_data;
 
 ItinStepBinHeaderData pa_analysis_params;
 
@@ -31,8 +21,6 @@ CelestSystem *pa_system;
 
 double pa_min_vals[6], pa_max_vals[6];
 
-enum PaMinMaxType {PA_DEP, PA_ARR, PA_DUR, PA_TOTDV, PA_DEPDV, PA_SATDV};
-enum PaYAxisType {PA_YAXIS_DUR, PA_YAXIS_ARRDATE};
 
 enum PaYAxisType pa_yaxis_type = PA_YAXIS_DUR;
 double pa_dep_periapsis = 50e3;
@@ -58,7 +46,6 @@ double calc_total_dv_pa(void);
 double calc_periapsis_height_pa(void);
 
 void update_pa();
-static void update_pa_after_group_visibility_change(void);
 void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
 void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
@@ -286,406 +273,18 @@ double calc_periapsis_height_pa() {
 	return (rp-curr_transfer_pa->body->radius)*1e-3;
 }
 
-void free_all_porkchop_analyzer_itins() {
-	if(group_overview_source_id != 0) {
-		g_source_remove(group_overview_source_id);
-		group_overview_source_id = 0;
-	}
-	g_clear_pointer(&group_overview_build_data, g_free);
-	if(pa_departures != NULL) {
-		for(int i = 0; i < pa_num_deps; i++) free(pa_departures[i]);
-		free(pa_departures);
-		pa_departures = NULL;
-	}
-	if(pa_porkchop_points != NULL) free(pa_porkchop_points);
-	pa_porkchop_points = NULL;
-	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
-	curr_transfer_pa = NULL;
-	free(pa_groups);
-	pa_groups = NULL;
-	if(!is_available_system(pa_system)) free_celestial_system(pa_system);
-	pa_system = NULL;
-	
-	if(pa_analysis_params.num_deps > 0 && pa_analysis_params.file_type > 2) {
-		if(pa_analysis_params.calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) free(pa_analysis_params.calc_data.seq_info.to_target.flyby_bodies);
-		if(pa_analysis_params.calc_data.seq_info.spec_seq.type == ITIN_SEQ_INFO_SPEC_SEQ) free(pa_analysis_params.calc_data.seq_info.spec_seq.bodies);
-	}
-	pa_analysis_params.num_deps = 0;
-}
 
 void pa_update_body_show_status() {
 	if(pa_system == NULL || body_show_status_pa == NULL) return;
 	mark_itinerary_bodies_visible(body_show_status_pa, pa_system->num_bodies, get_last(curr_transfer_pa), pa_system);
 }
 
-typedef struct {
-	int next_group_idx;
-} GroupOverviewBuildData;
-
-static gboolean build_group_overview_batch(gpointer user_data) {
-	GroupOverviewBuildData *build_data = user_data;
-	int groups_built = 0;
-	while(build_data->next_group_idx < pa_num_groups && groups_built < 100) {
-		int group_idx = build_data->next_group_idx++;
-		if(!pa_groups[group_idx].has_itin_inside_filter) continue;
-		int row = group_idx * 2 + 3;
-		GString *route_label = g_string_new(NULL);
-		GString *route_tooltip = g_string_new(NULL);
-		GPtrArray *route_steps = g_ptr_array_new();
-		for(struct ItinStep *step = pa_groups[group_idx].sample_arrival_node; step != NULL; step = step->prev)
-			g_ptr_array_add(route_steps, step);
-		for(gint step_idx = (gint)route_steps->len - 1; step_idx >= 0; step_idx--) {
-			struct ItinStep *step = g_ptr_array_index(route_steps, step_idx);
-			if(step_idx != (gint)route_steps->len - 1) {
-				g_string_append(route_label, " - ");
-				g_string_append(route_tooltip, " - ");
-			}
-			if(step->body != NULL) {
-				g_string_append_printf(route_label, "%d", get_body_system_id(step->body, pa_system) + 1);
-				g_string_append(route_tooltip, step->body->name);
-			} else {
-				g_string_append(route_label, "DSM");
-				g_string_append(route_tooltip, "DSM");
-			}
-		}
-
-		GtkWidget *check_button = gtk_check_button_new();
-		gtk_widget_set_halign(check_button, GTK_ALIGN_CENTER);
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_button), pa_groups[group_idx].show_group);
-		g_signal_connect(check_button, "clicked", G_CALLBACK(on_change_itin_group_visibility), &pa_groups[group_idx]);
-		pa_groups[group_idx].cb_pa_show_group = check_button;
-		set_stable_tooltip(check_button, route_tooltip->str);
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), check_button, 1, row, 1, 1);
-		gtk_widget_show(check_button);
-
-		GtkWidget *route_label_widget = gtk_label_new(route_label->str);
-		gtk_widget_set_halign(route_label_widget, GTK_ALIGN_START);
-		set_css_class_for_widget(route_label_widget, "pag-group-itin");
-		// Labels have no window of their own, so an event box is needed to get hover events.
-		GtkWidget *route_label_box = gtk_event_box_new();
-		gtk_event_box_set_visible_window(GTK_EVENT_BOX(route_label_box), FALSE);
-		gtk_widget_set_halign(route_label_box, GTK_ALIGN_START);
-		gtk_container_add(GTK_CONTAINER(route_label_box), route_label_widget);
-		set_stable_tooltip(route_label_box, route_tooltip->str);
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_box, 3, row, 1, 1);
-		gtk_widget_show_all(route_label_box);
-
-		GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, 2, row, 1, 1);
-		gtk_widget_show(separator);
-		g_ptr_array_free(route_steps, TRUE);
-		g_string_free(route_label, TRUE);
-		g_string_free(route_tooltip, TRUE);
-		groups_built++;
-	}
-
-	if(build_data->next_group_idx < pa_num_groups) return G_SOURCE_CONTINUE;
-	group_overview_source_id = 0;
-	group_overview_build_data = NULL;
-	g_free(build_data);
-	return G_SOURCE_REMOVE;
-}
-
-void update_group_overview() {
-	if(group_overview_source_id != 0) {
-		g_source_remove(group_overview_source_id);
-		group_overview_source_id = 0;
-	}
-	g_clear_pointer(&group_overview_build_data, g_free);
-	if(grid_pa_groups != NULL && GTK_WIDGET(vp_pa_groups) == gtk_widget_get_parent(grid_pa_groups))
-		gtk_container_remove(GTK_CONTAINER(vp_pa_groups), grid_pa_groups);
-
-	grid_pa_groups = gtk_grid_new();
-	GtkWidget *show_header = gtk_label_new("Show");
-	gtk_widget_set_size_request(show_header, 50, -1);
-	set_css_class_for_widget(show_header, "pag-header");
-	gtk_widget_set_halign(show_header, GTK_ALIGN_START);
-	gtk_grid_attach(GTK_GRID(grid_pa_groups), show_header, 1, 1, 1, 1);
-	GtkWidget *itinerary_header = gtk_label_new("Itinerary");
-	set_css_class_for_widget(itinerary_header, "pag-header");
-	gtk_widget_set_halign(itinerary_header, GTK_ALIGN_START);
-	gtk_grid_attach(GTK_GRID(grid_pa_groups), itinerary_header, 3, 1, 1, 1);
-	GtkWidget *header_separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-	gtk_grid_attach(GTK_GRID(grid_pa_groups), header_separator, 2, 1, 1, 1);
-	gtk_container_add(GTK_CONTAINER(vp_pa_groups), grid_pa_groups);
-	gtk_widget_show_all(grid_pa_groups);
-
-	GroupOverviewBuildData *build_data = g_new0(GroupOverviewBuildData, 1);
-	group_overview_build_data = build_data;
-	group_overview_source_id = g_idle_add(build_group_overview_batch, build_data);
-}
-
-void reset_min_max_feedback(int take_hidden_group_into_account) {
-	if(pa_num_itins == 0) return;
-	int cap = pa_last_transfer_type == TF_CAPTURE, circ = pa_last_transfer_type == TF_CIRC;
-
-	int first_show_idx = 0;
-	while(first_show_idx < pa_num_itins &&
-		(!pa_porkchop_points[first_show_idx].inside_filter ||
-		 (!take_hidden_group_into_account && !pa_porkchop_points[first_show_idx].group->show_group)))
-		first_show_idx++;
-	if(first_show_idx >= pa_num_itins) return;
-	struct PorkchopPoint pp = pa_porkchop_points[first_show_idx].data;
-
-	double min[6] = {
-			/* depdate */ pp.dep_date,
-			/* arrdate */ pp.dep_date + pp.dur,
-			/* duration */ pp.dur,
-			/* total dv */ pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
-			/* dep dv */ pp.dv_dep,
-			/* sat dv */ pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
-	};
-	double max[6];
-	memcpy(max, min, sizeof(max));
-
-	for(int i = first_show_idx + 1; i < pa_num_itins; i++) {
-		if(!pa_porkchop_points[i].inside_filter ||
-			(!take_hidden_group_into_account && !pa_porkchop_points[i].group->show_group)) continue;
-		pp = pa_porkchop_points[i].data;
-		double values[6] = {
-			pp.dep_date,
-			pp.dep_date + pp.dur,
-			pp.dur,
-			pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
-			pp.dv_dep,
-			pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap * cap + pp.dv_arr_circ * circ,
-		};
-		for(int value_idx = 0; value_idx < 6; value_idx++) {
-			min[value_idx] = MIN(min[value_idx], values[value_idx]);
-			max[value_idx] = MAX(max[value_idx], values[value_idx]);
-		}
-	}
-
-	char string[32];
-	date_to_string(convert_JD_date(min[PA_DEP], get_settings_datetime_type()), string, 0);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]), string);
-	date_to_string(convert_JD_date(min[PA_ARR], get_settings_datetime_type()), string, 0);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_ARR]), string);
-	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? min[PA_DUR] * 4 : min[PA_DUR]);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DUR]), string);
-	for(int i = 3; i < 6; i++) {
-		sprintf(string, "%.2f", min[i]);
-		gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[i]), string);
-	}
-	date_to_string(convert_JD_date(max[PA_DEP], get_settings_datetime_type()), string, 0);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DEP]), string);
-	date_to_string(convert_JD_date(max[PA_ARR], get_settings_datetime_type()), string, 0);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_ARR]), string);
-	sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? max[PA_DUR] * 4 : max[PA_DUR]);
-	gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DUR]), string);
-	for(int i = 3; i < 6; i++) {
-		sprintf(string, "%.2f", max[i]);
-		gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[i]), string);
-	}
-	memcpy(pa_min_vals, min, sizeof(min));
-	memcpy(pa_max_vals, max, sizeof(max));
-}
 
 G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) {
 	pa_yaxis_type = pa_yaxis_type != PA_YAXIS_DUR ? PA_YAXIS_DUR : PA_YAXIS_ARRDATE;
 	update_pa();
 }
 
-G_MODULE_EXPORT void on_change_itin_group_visibility(GtkWidget* widget, gpointer data) {
-	struct PorkchopGroup *group = (struct PorkchopGroup *) data;
-	int visibility = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
-	group->show_group = visibility;
-	update_pa_after_group_visibility_change();
-}
-
-static void set_all_visible_groups_shown(int show) {
-	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
-		struct PorkchopGroup *group = &pa_groups[group_idx];
-		if(!group->has_itin_inside_filter) continue;
-		group->show_group = show;
-		// set_active emits "toggled", not "clicked", so this does not re-enter the handler.
-		if(group->cb_pa_show_group != NULL)
-			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(group->cb_pa_show_group), show);
-	}
-	update_pa_after_group_visibility_change();
-}
-
-G_MODULE_EXPORT void on_pa_select_all_groups(GtkWidget* widget, gpointer data) {
-	set_all_visible_groups_shown(1);
-}
-
-G_MODULE_EXPORT void on_pa_deselect_all_groups(GtkWidget* widget, gpointer data) {
-	set_all_visible_groups_shown(0);
-}
-
-// Comparison function for group qsort
-int compare_by_count(const void *a, const void *b) {
-	const struct PorkchopGroup *groupA = (const struct PorkchopGroup *) a;
-	const struct PorkchopGroup *groupB = (const struct PorkchopGroup *) b;
-	// Compare based on the count field
-	return (groupB->count - groupA->count);
-}
-
-static size_t hash_itinerary_route(struct ItinStep *arrival) {
-	size_t hash = (size_t)1469598103934665603ULL;
-	for(struct ItinStep *step = arrival; step != NULL; step = step->prev) {
-		hash ^= (size_t)(uintptr_t)step->body;
-		hash *= (size_t)1099511628211ULL;
-	}
-	return hash;
-}
-
-static int itineraries_have_same_route(struct ItinStep *first, struct ItinStep *second) {
-	while(first != NULL && second != NULL) {
-		if(first->body != second->body) return 0;
-		if(first->prev == NULL || second->prev == NULL) return first->prev == NULL && second->prev == NULL;
-		first = first->prev;
-		second = second->prev;
-	}
-	return first == NULL && second == NULL;
-}
-
-void initialize_itinerary_groups() {
-	if(pa_num_itins <= 0) {
-		pa_num_groups = 0;
-		pa_groups = NULL;
-		return;
-	}
-
-	size_t group_table_size = (size_t)pa_num_itins * 2 + 1;
-	int *group_slots = calloc(group_table_size, sizeof(int));
-	pa_groups = calloc(pa_num_itins, sizeof(struct PorkchopGroup));
-	pa_num_groups = 0;
-	if(group_slots == NULL || pa_groups == NULL) {
-		free(group_slots);
-		free(pa_groups);
-		pa_groups = NULL;
-		return;
-	}
-
-	for(int i = 0; i < pa_num_itins; i++) {
-		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
-		size_t slot = hash_itinerary_route(arrival) % group_table_size;
-		while(group_slots[slot] != 0) {
-			int group_idx = group_slots[slot] - 1;
-			if(itineraries_have_same_route(arrival, pa_groups[group_idx].sample_arrival_node)) {
-				pa_groups[group_idx].count++;
-				break;
-			}
-			slot = (slot + 1) % group_table_size;
-		}
-		if(group_slots[slot] == 0) {
-			int group_idx = pa_num_groups++;
-			group_slots[slot] = group_idx + 1;
-			pa_groups[group_idx].sample_arrival_node = arrival;
-			pa_groups[group_idx].count = 1;
-			pa_groups[group_idx].num_steps = 1;
-			pa_groups[group_idx].show_group = 1;
-			pa_groups[group_idx].has_itin_inside_filter = 1;
-			for(struct ItinStep *step = arrival; step->prev != NULL; step = step->prev)
-				pa_groups[group_idx].num_steps++;
-		}
-	}
-
-	qsort(pa_groups, pa_num_groups, sizeof(struct PorkchopGroup), compare_by_count);
-
-	memset(group_slots, 0, group_table_size * sizeof(int));
-	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
-		size_t slot = hash_itinerary_route(pa_groups[group_idx].sample_arrival_node) % group_table_size;
-		while(group_slots[slot] != 0) slot = (slot + 1) % group_table_size;
-		group_slots[slot] = group_idx + 1;
-	}
-	for(int i = 0; i < pa_num_itins; i++) {
-		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
-		size_t slot = hash_itinerary_route(arrival) % group_table_size;
-		while(group_slots[slot] != 0) {
-			int group_idx = group_slots[slot] - 1;
-			if(itineraries_have_same_route(arrival, pa_groups[group_idx].sample_arrival_node)) {
-				pa_porkchop_points[i].group = &pa_groups[group_idx];
-				break;
-			}
-			slot = (slot + 1) % group_table_size;
-		}
-	}
-	free(group_slots);
-
-	update_group_overview();
-}
-
-void update_best_itin() {
-	if(pa_porkchop_points == NULL || pa_num_itins <= 0) return;
-	int best_show_ind = find_first_visible_porkchop_point(pa_porkchop_points, pa_num_itins);
-	if(best_show_ind < 0 || best_show_ind >= pa_num_itins) return;
-	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
-	curr_transfer_pa = create_itin_copy_from_arrival(pa_porkchop_points[best_show_ind].data.arrival);
-	current_date_pa = get_last(curr_transfer_pa)->date;
-	pa_update_body_show_status();
-	camera_zoom_to_fit_itinerary(pa_itin_preview_camera, curr_transfer_pa);
-}
-
-void analyze_departure_itins() {
-	int num_itins = 0, tot_num_itins = 0;
-	for(int i = 0; i < pa_num_deps; i++) num_itins += get_number_of_itineraries(pa_departures[i]);
-	for(int i = 0; i < pa_num_deps; i++) tot_num_itins += get_total_number_of_stored_steps(pa_departures[i]);
-
-	printf("\n%d itineraries found!\nNumber of Nodes: %d\n", num_itins, tot_num_itins);
-
-	int index = 0;
-	struct ItinStep **arrivals = (struct ItinStep**) malloc(num_itins * sizeof(struct ItinStep*));
-	for(int i = 0; i < pa_num_deps; i++) store_itineraries_in_array(pa_departures[i], arrivals, &index);
-	pa_porkchop_points = malloc(num_itins * sizeof(struct PorkchopAnalyzerPoint));
-	for(int i = 0; i < num_itins; i++) {
-		pa_porkchop_points[i].data = create_porkchop_point(arrivals[i], get_first(arrivals[0])->body->atmo_alt + pa_dep_periapsis, arrivals[0]->body->atmo_alt + pa_arr_periapsis);
-		pa_porkchop_points[i].inside_filter = 1;
-		pa_porkchop_points[i].group = NULL;
-	}
-	free(arrivals);
-
-	pa_num_itins = num_itins;
-	initialize_itinerary_groups();
-	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
-	update_best_itin();
-	reset_min_max_feedback(1);
-}
-
-G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath, ".itins", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
-
-	free_all_porkchop_analyzer_itins();
-	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
-	char param_string[1000];
-	print_header_data_to_string(load_results.header, param_string, sizeof(param_string), get_settings_datetime_type());
-	printf("%s\n", param_string);
-	if(load_results.departures == NULL) return;
-	
-	if(pa_analysis_params.num_deps > 0 && pa_analysis_params.file_type > 2) {
-		if(pa_analysis_params.calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) free(pa_analysis_params.calc_data.seq_info.to_target.flyby_bodies);
-		if(pa_analysis_params.calc_data.seq_info.spec_seq.type == ITIN_SEQ_INFO_SPEC_SEQ) free(pa_analysis_params.calc_data.seq_info.spec_seq.bodies);
-	}
-	pa_analysis_params = load_results.header;
-	pa_num_deps = load_results.header.num_deps;
-	pa_departures = load_results.departures;
-	pa_system = load_results.header.system;
-	update_camera_to_celestial_system(pa_itin_preview_camera, pa_system, deg2rad(90), 0);
-	if(body_show_status_pa != NULL) free(body_show_status_pa);
-	body_show_status_pa = (int*) calloc(pa_system->num_bodies, sizeof(int));
-	analyze_departure_itins();
-
-	update_pa_porkchop_diagram();
-	update_pa_itinerary_preview();
-}
-
-G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
-	struct ItinStep *first = get_first(curr_transfer_pa);
-	if(first == NULL) return;
-
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_single_itinerary_in_bfile(first, pa_system, filepath);
-}
-
-G_MODULE_EXPORT void show_pa_analysis_parameters() {
-	if(pa_analysis_params.num_deps == 0) return;
-	char param_string[1000];
-	print_header_data_to_string(pa_analysis_params, param_string, sizeof(param_string), get_settings_datetime_type());
-	show_msg_window(param_string);
-}
 
 G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointer data) {
 	if(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) return;
@@ -711,104 +310,6 @@ void update_pa() {
 	reset_min_max_feedback(1);
 }
 
-// Rebuilding the group list here would reset its scroll position.
-static void update_pa_after_group_visibility_change(void) {
-	update_best_itin();
-	update_pa_porkchop_diagram();
-	update_pa_itinerary_preview();
-	reset_min_max_feedback(1);
-}
-
-gboolean are_any_porkchop_points_in_filter(const double min[6], const double max[6]) {
-	// show only groups inside filter in gui (setting visible below)
-	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) pa_groups[group_idx].has_itin_inside_filter = 0;
-
-	int init_num_itins = 0;
-
-	struct PorkchopPoint pp;
-	for(int i = 0; i < pa_num_itins; i++) {
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) init_num_itins++;
-		pp = pa_porkchop_points[i].data;
-
-		double dv_sat = pp.dv_dsm;
-		if(pa_last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
-		if(pa_last_transfer_type == TF_CIRC)	dv_sat += pp.dv_arr_circ;
-
-		if(	!(pp.dep_date 			< min[PA_DEP] || pp.dep_date 			> max[PA_DEP] ||
-			  pp.dep_date+pp.dur 	< min[PA_ARR] || pp.dep_date+pp.dur 	> max[PA_ARR] ||
-			  pp.dur 				< min[PA_DUR] || pp.dur 				> max[PA_DUR] ||
-			  pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
-			  pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
-			  dv_sat + pp.dv_flyby 	< min[PA_SATDV] || dv_sat + pp.dv_flyby 	> max[PA_SATDV])) return TRUE;
-	}
-	return FALSE;
-}
-
-void apply_filter() {
-	if(pa_porkchop_points == NULL) return;
-	double min[6], max[6];
-	char *string;
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]));
-	min[PA_DEP] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))-1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[PA_DEP]));
-	max[PA_DEP] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))+1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[PA_ARR]));
-	min[PA_ARR] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))-1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[PA_ARR]));
-	max[PA_ARR] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))+1;	// rounding imprecision in filter entry field
-	for(int i = 2; i < 6; i++) {
-		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[i]));
-		min[i] = strtod(string, NULL)-1;	// rounding imprecision in filter entry field
-		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[i]));
-		max[i] = strtod(string, NULL)+1;	// rounding imprecision in filter entry field
-		if(get_settings_datetime_type() == DATE_KERBAL && i == 1) {min[i] /= 4; max[i] /= 4;}
-	}
-
-	for(int i = 0; i < 6; i++) {
-		if(min[i] > max[i]) {
-			double temp = min[i];
-			min[i] = max[i];
-			max[i] = temp;
-		}
-	}
-
-	if(!are_any_porkchop_points_in_filter(min, max)) return;
-
-	// show only groups inside filter in gui (setting visible below)
-	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) pa_groups[group_idx].has_itin_inside_filter = 0;
-
-	int init_num_itins = 0, rem_num_itins = 0;
-
-	struct PorkchopPoint pp;
-	for(int i = 0; i < pa_num_itins; i++) {
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) init_num_itins++;
-
-		pa_porkchop_points[i].inside_filter = 1;
-		pp = pa_porkchop_points[i].data;
-
-		double dv_sat = pp.dv_dsm;
-		if(pa_last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
-		if(pa_last_transfer_type == TF_CIRC)	dv_sat += pp.dv_arr_circ;
-
-		if(	pp.dep_date 		< min[PA_DEP] 	|| pp.dep_date 			> max[PA_DEP] ||
-			pp.dep_date+pp.dur 	< min[PA_ARR] 	|| pp.dep_date+pp.dur 	> max[PA_ARR] ||
-			pp.dur 				< min[PA_DUR] 	|| pp.dur 				> max[PA_DUR] ||
-			pp.dv_dep + dv_sat + pp.dv_flyby	< min[PA_TOTDV] || pp.dv_dep + dv_sat + pp.dv_flyby	> max[PA_TOTDV] ||
-			pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
-			dv_sat + pp.dv_flyby 	< min[PA_SATDV] || dv_sat + pp.dv_flyby 	> max[PA_SATDV]) pa_porkchop_points[i].inside_filter = 0;
-		else pa_porkchop_points[i].group->has_itin_inside_filter = 1;
-
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) rem_num_itins++;
-	}
-}
-
-G_MODULE_EXPORT void on_apply_filter(GtkWidget* widget, gpointer data) {
-	if(pa_porkchop_points == NULL) return;
-	apply_filter();
-	reset_min_max_feedback(0);
-	apply_filter();
-	update_pa();
-}
 
 G_MODULE_EXPORT void on_pa_update(GtkWidget* widget, gpointer data) {
 	if(pa_porkchop_points == NULL) return;
@@ -817,12 +318,6 @@ G_MODULE_EXPORT void on_pa_update(GtkWidget* widget, gpointer data) {
 	update_pa();
 }
 
-G_MODULE_EXPORT void on_reset_porkchop(GtkWidget* widget, gpointer data) {
-	if(pa_porkchop_points == NULL) return;
-	for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].inside_filter = 1;
-	for(int i = 0; i < pa_num_groups; i++) {pa_groups[i].show_group = 1; pa_groups[i].has_itin_inside_filter = 1;}
-	update_pa();
-}
 
 G_MODULE_EXPORT void on_prev_transfer_pa(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_pa == NULL) return;
