@@ -146,12 +146,23 @@ void draw_coordinate_system(cairo_t *cr, double width, double height, enum Coord
 }
 
 void draw_data_point(cairo_t *cr, double x, double y, double radius) {
-	if(radius > 3) {
-		cairo_arc(cr, x, y, radius,0,M_PI*2);
-		cairo_fill(cr);
-	} else {
-		cairo_rectangle(cr, x-radius, y-radius, radius, radius);
-		cairo_fill(cr);
+	cairo_arc(cr, x, y, radius, 0, M_PI*2);
+	cairo_fill(cr);
+}
+
+// The best route; a dark outline keeps the red cross visible on red and orange points.
+static void draw_best_route_marker(cairo_t *cr, double x, double y) {
+	const double arm = 6;
+	double widths[2] = {5, 2.5};
+	for(int pass = 0; pass < 2; pass++) {
+		if(pass == 0) cairo_set_source_rgb(cr, 0.05, 0.05, 0.05);
+		else cairo_set_source_rgb(cr, 1, 0, 0);
+		cairo_set_line_width(cr, widths[pass]);
+		cairo_move_to(cr, x - arm, y - arm);
+		cairo_line_to(cr, x + arm, y + arm);
+		cairo_move_to(cr, x - arm, y + arm);
+		cairo_line_to(cr, x + arm, y - arm);
+		cairo_stroke(cr);
 	}
 }
 
@@ -298,6 +309,10 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	cairo_surface_t* buffer_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int) width, (int) height);
 	cairo_t* buffer_cr = cairo_create(buffer_surface);
 
+	// Dot size falls smoothly from 5 px for a few points to 1.5 px for 100,000 or more.
+	double point_radius = 5 - 3.5 * log10(fmax(num_draw_itins, 100) / 100.0) / 3;
+	if(point_radius < 1.5) point_radius = 1.5;
+
 	// draw points
 	double color_bias;
 	int i = num_draw_itins-1;
@@ -315,14 +330,13 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 
 		// color coding
 		color_bias = (dv - min_dv) / (max_dv - min_dv);
-		double r = 1, g = 0, b = 0;
-		if(i != 0) porkchop_color(color_bias, &r, &g, &b);
+		double r, g, b;
+		porkchop_color(color_bias, &r, &g, &b);
 		cairo_set_source_rgb(buffer_cr, r,g,b);
 
 		Vector2 data_point = vec2(origin.x + m_depdate*(depdate - min_depdate), origin.y + (dur0arrdate1 ? (m_arrdate*(arrdate - min_arrdate)) : (m_dur*(dur - min_dur))));
-		int radius = i > 0 ? 2 : 5;
-		if(num_draw_itins < 10000) radius += 2;
-		draw_data_point(buffer_cr, data_point.x, data_point.y, radius);
+		if(i > 0) draw_data_point(buffer_cr, data_point.x, data_point.y, point_radius);
+		else draw_best_route_marker(buffer_cr, data_point.x, data_point.y);
 
 		i--;
 	}
