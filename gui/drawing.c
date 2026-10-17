@@ -232,6 +232,24 @@ static Vector3 leg_drawing_velocity(CelestSystem *system, struct ItinStep *tf) {
 	return tf->next[0]->v_dep;
 }
 
+int itinerary_spacecraft_position(CelestSystem *system, struct ItinStep *itin, double date, Vector3 *r) {
+	if(itin == NULL) return 0;
+	struct ItinStep *step = get_first(itin);
+	while(step->next != NULL && date >= step->next[0]->date) step = step->next[0];
+	if(step->next != NULL && date > step->date) {
+		double dt = date - step->date;
+		OSV start = {step->r, leg_drawing_velocity(system, step)};
+		*r = propagate_osv_time(start, system->cb, dt * 86400).r;
+		return 1;
+	}
+	// Before the departure and after the arrival the craft sits with its body.
+	if(step->body == NULL) { *r = step->r; return 1; }
+	*r = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(step->body->orbit, date).r :
+		osv_from_ephem(step->body->ephem, step->body->num_ephems, date, system->cb).r;
+	return 1;
+}
+
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time) {
 	if(tf == NULL) return;
 	cairo_t *cr = get_camera_screen_cairo(camera);

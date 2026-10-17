@@ -125,6 +125,8 @@ void init_transfer_planner(GtkBuilder *builder) {
 // TRANSFER PLANNER SYSTEM VIEW CALLBACKS -----------------------------------------------
 // The body the view is centered on; NULL is the central body at the origin.
 static Body *tp_focus_body;
+// Set when the view follows the spacecraft instead of a body.
+static int tp_focus_spacecraft;
 
 static Vector3 tp_body_position(Body *body, double jd) {
 	if(body == NULL || body == tp_system->cb) return vec3(0, 0, 0);
@@ -136,12 +138,20 @@ static Vector3 tp_body_position(Body *body, double jd) {
 
 // Keeps the view on a moving body as the date changes.
 static void tp_follow_focus_body(void) {
+	if(tp_focus_spacecraft) {
+		Vector3 r;
+		if(curr_transfer_tp != NULL && itinerary_spacecraft_position(tp_system, curr_transfer_tp, current_date_tp, &r))
+			camera_set_focus(tp_system_camera, r);
+		else tp_focus_spacecraft = 0;
+		return;
+	}
 	if(tp_focus_body == NULL) return;
 	camera_set_focus(tp_system_camera, tp_body_position(tp_focus_body, current_date_tp));
 }
 
 static void tp_focus_on(Body *body) {
 	if(tp_system == NULL) return;
+	tp_focus_spacecraft = 0;
 	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
 	// A straight-down view loses its direction to rounding once the focus is far from the origin.
 	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
@@ -162,6 +172,20 @@ static void tp_focus_on(Body *body) {
 	camera_look_to_center(tp_system_camera);
 }
 
+static void tp_focus_on_spacecraft(Vector3 r) {
+	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
+	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
+	if(pitch < -1.5) pitch = -1.5;
+	if(!isfinite(yaw)) yaw = 0;
+	double distance = get_camera_distance_to_center(tp_system_camera);
+	tp_focus_body = NULL;
+	tp_focus_spacecraft = 1;
+	camera_set_focus(tp_system_camera, r);
+	update_camera_position_from_angles(tp_system_camera, pitch, yaw, distance);
+	tp_system_camera->min_pos_dist = 1e6;
+	camera_look_to_center(tp_system_camera);
+}
+
 static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
 	(void)widget; (void)ptr;
 	if(event->type != GDK_2BUTTON_PRESS || event->button != 1 || tp_system == NULL) return FALSE;
@@ -174,6 +198,15 @@ static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *eve
 		if(hypot(p.x - event->x, p.y - event->y) > pick_radius) continue;
 		// Overlapping markers resolve to the parent, which is the more massive body.
 		if(hit == NULL || body->mu > hit->mu) hit = body;
+	}
+	Vector3 craft;
+	if(hit == NULL && curr_transfer_tp != NULL && itinerary_spacecraft_position(tp_system, curr_transfer_tp, current_date_tp, &craft)) {
+		Vector2 p = p3d_to_p2d(tp_system_camera, craft);
+		if(hypot(p.x - event->x, p.y - event->y) <= pick_radius) {
+			tp_focus_on_spacecraft(craft);
+			update_tp_system_view();
+			return FALSE;
+		}
 	}
 	tp_focus_on(hit);
 	update_tp_system_view();
@@ -245,7 +278,7 @@ G_MODULE_EXPORT void on_tp_system_change() {
 
 	tp_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system))];
 	update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
@@ -260,7 +293,7 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 	gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 1);
 	tp_system = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
 
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
@@ -851,7 +884,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
 	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
 	update();
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL;
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	camera_zoom_to_fit_itinerary(tp_system_camera, curr_transfer_tp);
 	update_tp_system_view();
 	char system_name[50];
