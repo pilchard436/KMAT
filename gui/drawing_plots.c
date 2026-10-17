@@ -150,20 +150,16 @@ void draw_data_point(cairo_t *cr, double x, double y, double radius) {
 	cairo_fill(cr);
 }
 
-// The best route; a dark outline keeps the red cross visible on red and orange points.
+// The best route, semi-transparent so its own dot shows through.
 static void draw_best_route_marker(cairo_t *cr, double x, double y) {
 	const double arm = 3.5;
-	double widths[2] = {3.5, 1.5};
-	for(int pass = 0; pass < 2; pass++) {
-		if(pass == 0) cairo_set_source_rgb(cr, 0.05, 0.05, 0.05);
-		else cairo_set_source_rgb(cr, 1, 0, 0);
-		cairo_set_line_width(cr, widths[pass]);
-		cairo_move_to(cr, x - arm, y - arm);
-		cairo_line_to(cr, x + arm, y + arm);
-		cairo_move_to(cr, x - arm, y + arm);
-		cairo_line_to(cr, x + arm, y - arm);
-		cairo_stroke(cr);
-	}
+	cairo_set_source_rgba(cr, 1, 0, 0, 0.6);
+	cairo_set_line_width(cr, 1.5);
+	cairo_move_to(cr, x - arm, y - arm);
+	cairo_line_to(cr, x + arm, y + arm);
+	cairo_move_to(cr, x - arm, y + arm);
+	cairo_line_to(cr, x + arm, y - arm);
+	cairo_stroke(cr);
 }
 
 const int porkchop_dur_yaxis_x = 40;
