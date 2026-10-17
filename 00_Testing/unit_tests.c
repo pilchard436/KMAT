@@ -218,17 +218,11 @@ static int check_parking_orbit(int *checks) {
 int main(void) {
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
-    const int total_checks_before_parking = 94;
+    const int total_checks_before_parking = 93;
     int parking_checks = 0;
     int failures = check_seed_fallback();
     failures += check_parking_orbit(&parking_checks);
     const int total_checks = total_checks_before_parking + parking_checks;
-
-    failures += expect_int("Izzo is the default Lambert solver", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
-    set_lambert_solver_method(LAMBERT_METHOD_LEGACY);
-    failures += expect_int("Legacy Lambert solver can be selected", get_lambert_solver_method(), LAMBERT_METHOD_LEGACY);
-    set_lambert_solver_method(LAMBERT_METHOD_IZZO);
-    failures += expect_int("Izzo Lambert solver can be selected", get_lambert_solver_method(), LAMBERT_METHOD_IZZO);
 
     failures += expect_near("deg2rad", deg2rad(180), pi, tolerance);
     failures += expect_near("rad2deg", rad2deg(pi), 180, tolerance);
@@ -271,24 +265,16 @@ int main(void) {
     double hohmann_time = pi * sqrt(pow(transfer_semi_major_axis, 3) / earth_cb.mu);
     Lambert3 hohmann_transfer = calc_lambert3(
         vec3(start_radius, 0, 0), vec3(0, end_radius, 0), hohmann_time, &earth_cb);
-    Lambert3 izzo_transfer = calc_lambert3_izzo(
-        vec3(start_radius, 0, 0), vec3(0, end_radius, 0), hohmann_time, &earth_cb);
+    OSV hohmann_start = {vec3(start_radius, 0, 0), hohmann_transfer.v0};
+    double hohmann_miss = mag_vec3(subtract_vec3(propagate_osv_time(hohmann_start, &earth_cb, hohmann_time).r, vec3(0, end_radius, 0)));
     failures += expect_int("Lambert Hohmann transfer converges", hohmann_transfer.success, LAMBERT_SUCCESS);
     failures += expect_int("Lambert Hohmann velocities are finite",
                            isfinite(hohmann_transfer.v0.x) && isfinite(hohmann_transfer.v0.y) &&
                            isfinite(hohmann_transfer.v0.z) && isfinite(hohmann_transfer.v1.x) &&
                            isfinite(hohmann_transfer.v1.y) && isfinite(hohmann_transfer.v1.z), 1);
-    failures += expect_int("Izzo Lambert Hohmann transfer converges", izzo_transfer.success, LAMBERT_SUCCESS);
-    failures += expect_vector3("Izzo Lambert departure velocity matches existing solver",
-                               izzo_transfer.v0, hohmann_transfer.v0, 10);
-    failures += expect_vector3("Izzo Lambert arrival velocity matches existing solver",
-                               izzo_transfer.v1, hohmann_transfer.v1, 10);
-    failures += expect_int("Izzo Lambert velocities are finite",
-                           isfinite(izzo_transfer.v0.x) && isfinite(izzo_transfer.v0.y) &&
-                           isfinite(izzo_transfer.v0.z) && isfinite(izzo_transfer.v1.x) &&
-                           isfinite(izzo_transfer.v1.y) && isfinite(izzo_transfer.v1.z), 1);
+    failures += expect_near("Lambert transfer propagates to the target position", hohmann_miss, 0, 8000);
     int lambert_cancel_requested = 1;
-    Lambert3 cancelled_transfer = calc_lambert3_selected_cancellable(
+    Lambert3 cancelled_transfer = calc_lambert3_cancellable(
         vec3(start_radius, 0, 0), vec3(0, end_radius, 0), hohmann_time, &earth_cb,
         cancel_requested, &lambert_cancel_requested);
     failures += expect_int("cancellable Lambert solver stops before solving",
@@ -308,7 +294,7 @@ int main(void) {
         Vector3 sample_r1 = vec3(sample_end_radius * cos(transfer_angle),
                      sample_end_radius * sin(transfer_angle) * cos(inclination),
                      sample_end_radius * sin(transfer_angle) * sin(inclination));
-        Lambert3 izzo_solution = calc_lambert3_izzo(sample_r0, sample_r1, sample_duration, &solar_central_body);
+        Lambert3 izzo_solution = calc_lambert3(sample_r0, sample_r1, sample_duration, &solar_central_body);
         OSV initial_state = {sample_r0, izzo_solution.v0};
         OSV propagated_arrival = propagate_osv_time(initial_state, &solar_central_body, sample_duration);
         double relative_endpoint_miss = mag_vec3(subtract_vec3(propagated_arrival.r, sample_r1)) /
@@ -319,6 +305,38 @@ int main(void) {
     }
     failures += expect_int("Izzo solver reaches endpoints across representative inclined corpus",
                            izzo_corpus_closes, 1);
+
+    int revolution_solutions = 0, revolution_misses = 0, branches_differ = 0;
+    for(int sample_index = 0; sample_index < 120; sample_index++) {
+        int revolutions = 1 + sample_index % 3;
+        double sample_start_radius = 1.5e11 * (1 + (sample_index % 7) * 0.08);
+        double sample_end_radius = sample_start_radius * (0.9 + (sample_index % 5) * 0.1);
+        double transfer_angle = 0.3 + (sample_index % 11) * 0.55;
+        double circular_period = 2 * pi * sqrt(pow(sample_start_radius, 3) / solar_central_body.mu);
+        double sample_duration = circular_period * (revolutions + 0.2 + (sample_index % 9) * 0.12);
+        Vector3 sample_r0 = vec3(sample_start_radius, 0, 0);
+        Vector3 sample_r1 = vec3(sample_end_radius * cos(transfer_angle),
+                     sample_end_radius * sin(transfer_angle), 0);
+        Lambert3 branch_solutions[2];
+        for(int branch = 0; branch < 2; branch++) {
+            branch_solutions[branch] = calc_lambert3_revs(sample_r0, sample_r1, sample_duration,
+                &solar_central_body, revolutions, branch);
+            if(branch_solutions[branch].success != LAMBERT_SUCCESS) continue;
+            revolution_solutions++;
+            OSV arrival = propagate_osv_time((OSV){sample_r0, branch_solutions[branch].v0},
+                &solar_central_body, sample_duration);
+            if(!(mag_vec3(subtract_vec3(arrival.r, sample_r1)) / sample_end_radius < 1e-4)) revolution_misses++;
+        }
+        if(branch_solutions[0].success == LAMBERT_SUCCESS && branch_solutions[1].success == LAMBERT_SUCCESS &&
+            mag_vec3(subtract_vec3(branch_solutions[0].v0, branch_solutions[1].v0)) > 1) branches_differ++;
+    }
+    failures += expect_int("multi-revolution Lambert finds solutions", revolution_solutions > 40, 1);
+    failures += expect_int("multi-revolution Lambert solutions reach the endpoint", revolution_misses, 0);
+    failures += expect_int("multi-revolution Lambert left and right branches differ", branches_differ > 10, 1);
+    Lambert3 too_fast = calc_lambert3_revs(vec3(1.5e11, 0, 0), vec3(0, 1.5e11, 0), 1e6,
+        &solar_central_body, 2, 0);
+    failures += expect_int("multi-revolution Lambert rejects a time below the minimum",
+                           too_fast.success != LAMBERT_SUCCESS, 1);
 
     Body powered_flyby_body = {
         .mu = 3.9860043543609598e14,
@@ -342,6 +360,18 @@ int main(void) {
         flyby_minimum_radius, &powered_flyby_result);
     failures += expect_int("sub-1 m/s speed difference retains a powered burn",
         near_equal_speed_flyby_valid && powered_flyby_result.burn_delta_v > 1e-3, 1);
+    // Near-equal speeds in either direction must stay feasible with a small burn, not a one-periapsis overestimate.
+    for(int near_equal_case = 0; near_equal_case < 4; near_equal_case++) {
+        static const double speed_offsets[] = {-0.9, -0.5, 0.5, 0.9};
+        double near_speed = 6000 + speed_offsets[near_equal_case];
+        Vector3 near_outgoing = vec3(near_speed * cos(flyby_turn_angle), near_speed * sin(flyby_turn_angle), 0);
+        PoweredFlybyResult near_result;
+        int near_valid = calculate_powered_flyby(incoming_vinf, near_outgoing, vec3(0, 0, 0),
+            &powered_flyby_body, flyby_minimum_radius, &near_result);
+        failures += expect_int("near-equal-speed flyby is feasible in either direction", near_valid, 1);
+        failures += expect_int("near-equal-speed flyby burn stays small",
+            near_valid && near_result.burn_delta_v < 5.0, 1);
+    }
     double flyby_inclination = deg2rad(20);
     Vector3 unequal_speed_outgoing_vinf = vec3(6500 * cos(flyby_turn_angle),
         6500 * sin(flyby_turn_angle) * cos(flyby_inclination),

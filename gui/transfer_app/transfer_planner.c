@@ -6,6 +6,7 @@
 #include "gui/css_loader.h"
 #include "tools/file_io.h"
 #include "gui/info_win_manager.h"
+#include "orbit_calculator/powered_flyby_optimizer.h"
 
 #include <string.h>
 #include <gtk/gtk.h>
@@ -35,10 +36,17 @@ GObject *bt_tp_1d1minp;
 GObject *bt_tp_1d1minm;
 GObject *lb_tp_transfer_dv;
 GObject *lb_tp_total_dv;
+GObject *lb_tp_dv_warning;
 GObject *lb_tp_param_labels;
 GObject *lb_tp_param_values;
 GObject *vp_tp_bodies;
 GtkWidget *grid_tp_bodies;
+
+// Simulated days per real second for each entry of the speed dropdown.
+static const double tp_animation_speeds[] = {1.0 / 24, 0.25, 1, 5, 10, 30, 100, 365.25};
+static GtkWidget *tb_tp_animate, *cb_tp_anim_speed;
+static guint tp_animation_source;
+static gint64 tp_animation_last_time;
 
 gboolean *body_show_status_tp, fix_tfbody;
 double current_date_tp;
@@ -55,6 +63,8 @@ void update_tp_system_view();
 void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
 void on_tp_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_tp_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
+static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+static void on_tp_view_destroyed(GtkWidget *widget, gpointer data);
 
 
 void init_transfer_planner(GtkBuilder *builder) {
@@ -78,13 +88,18 @@ void init_transfer_planner(GtkBuilder *builder) {
 	bt_tp_1d1minm = gtk_builder_get_object(builder, "bt_tp_1d1minm");
 	lb_tp_transfer_dv = gtk_builder_get_object(builder, "lb_tp_transfer_dv");
 	lb_tp_total_dv = gtk_builder_get_object(builder, "lb_tp_total_dv");
+	lb_tp_dv_warning = gtk_builder_get_object(builder, "lb_tp_dv_warning");
 	lb_tp_param_labels = gtk_builder_get_object(builder, "lb_tp_param_labels");
 	lb_tp_param_values = gtk_builder_get_object(builder, "lb_tp_param_values");
 	lb_tp_date = gtk_builder_get_object(builder, "lb_tp_date");
 	da_tp = gtk_builder_get_object(builder, "da_tp");
 	vp_tp_bodies = gtk_builder_get_object(builder, "vp_tp_bodies");
+	tb_tp_animate = GTK_WIDGET(gtk_builder_get_object(builder, "tb_tp_animate"));
+	cb_tp_anim_speed = GTK_WIDGET(gtk_builder_get_object(builder, "cb_tp_anim_speed"));
 
 	tp_system_camera = new_camera(GTK_WIDGET(da_tp), &on_tp_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_tp_screen_mouse_move, &on_tp_screen_scroll);
+	g_signal_connect(da_tp, "button-press-event", G_CALLBACK(on_tp_screen_button_press), NULL);
+	g_signal_connect(da_tp, "destroy", G_CALLBACK(on_tp_view_destroyed), NULL);
 
 
 	tp_system = NULL;
@@ -110,26 +125,125 @@ void init_transfer_planner(GtkBuilder *builder) {
 
 
 // TRANSFER PLANNER SYSTEM VIEW CALLBACKS -----------------------------------------------
-void update_tp_system_view() {
-	clear_camera_screen(tp_system_camera);
+// The body the view is centered on; NULL is the central body at the origin.
+static Body *tp_focus_body;
+// Set when the view follows the spacecraft instead of a body.
+static int tp_focus_spacecraft;
+
+static Vector3 tp_body_position(Body *body, double jd) {
+	if(body == NULL || body == tp_system->cb) return vec3(0, 0, 0);
+	OSV osv = tp_system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(body->orbit, jd) :
+		osv_from_ephem(body->ephem, body->num_ephems, jd, tp_system->cb);
+	return osv.r;
+}
+
+// Keeps the view on a moving body as the date changes.
+static void tp_follow_focus_body(void) {
+	if(tp_focus_spacecraft) {
+		Vector3 r;
+		if(curr_transfer_tp != NULL && itinerary_spacecraft_position(tp_system, curr_transfer_tp, current_date_tp, &r))
+			camera_set_focus(tp_system_camera, r);
+		else tp_focus_spacecraft = 0;
+		return;
+	}
+	if(tp_focus_body == NULL) return;
+	camera_set_focus(tp_system_camera, tp_body_position(tp_focus_body, current_date_tp));
+}
+
+static void tp_focus_on(Body *body) {
 	if(tp_system == NULL) return;
+	tp_focus_spacecraft = 0;
+	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
+	// A straight-down view loses its direction to rounding once the focus is far from the origin.
+	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
+	if(pitch < -1.5) pitch = -1.5;
+	if(!isfinite(yaw)) yaw = 0;
+	if(body == NULL || body == tp_system->cb) {
+		tp_focus_body = NULL;
+		update_camera_to_celestial_system(tp_system_camera, tp_system, pitch, yaw);
+		return;
+	}
+	tp_focus_body = body;
+	camera_set_focus(tp_system_camera, tp_body_position(body, current_date_tp));
+	// Frame the sphere of influence, and allow zooming in close to the surface.
+	double soi = fabs(body->orbit.a) * pow(body->mu / tp_system->cb->mu, 0.4);
+	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
+	update_camera_position_from_angles(tp_system_camera, pitch, yaw, soi * 7);
+	tp_system_camera->min_pos_dist = body->radius * 15;
+	camera_look_to_center(tp_system_camera);
+}
+
+static void tp_focus_on_spacecraft(Vector3 r) {
+	double pitch = get_camera_pos_pitch(tp_system_camera), yaw = get_camera_pos_yaw(tp_system_camera);
+	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
+	if(pitch < -1.5) pitch = -1.5;
+	if(!isfinite(yaw)) yaw = 0;
+	double distance = get_camera_distance_to_center(tp_system_camera);
+	tp_focus_body = NULL;
+	tp_focus_spacecraft = 1;
+	camera_set_focus(tp_system_camera, r);
+	update_camera_position_from_angles(tp_system_camera, pitch, yaw, distance);
+	tp_system_camera->min_pos_dist = 1e6;
+	camera_look_to_center(tp_system_camera);
+}
+
+static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
+	(void)widget; (void)ptr;
+	if(event->type != GDK_2BUTTON_PRESS || event->button != 1 || tp_system == NULL) return FALSE;
+	const double pick_radius = 12;
+	Body *hit = NULL;
+	for(int i = -1; i < tp_system->num_bodies; i++) {
+		Body *body = i < 0 ? tp_system->cb : tp_system->bodies[i];
+		if(i >= 0 && !body_show_status_tp[i]) continue;
+		Vector2 p = p3d_to_p2d(tp_system_camera, tp_body_position(body, current_date_tp));
+		if(hypot(p.x - event->x, p.y - event->y) > pick_radius) continue;
+		// Overlapping markers resolve to the parent, which is the more massive body.
+		if(hit == NULL || body->mu > hit->mu) hit = body;
+	}
+	Vector3 craft;
+	if(hit == NULL && curr_transfer_tp != NULL && itinerary_spacecraft_position(tp_system, curr_transfer_tp, current_date_tp, &craft)) {
+		Vector2 p = p3d_to_p2d(tp_system_camera, craft);
+		if(hypot(p.x - event->x, p.y - event->y) <= pick_radius) {
+			tp_focus_on_spacecraft(craft);
+			update_tp_system_view();
+			return FALSE;
+		}
+	}
+	tp_focus_on(hit);
+	update_tp_system_view();
+	return FALSE;
+}
+
+void update_tp_system_view() {
+	int previous_restriction = set_flyby_unrestricted_periapsis(1);
+	clear_camera_screen(tp_system_camera);
+	if(tp_system == NULL) { set_flyby_unrestricted_periapsis(previous_restriction); return; }
+	tp_follow_focus_body();
+	register_body_occluders(tp_system, current_date_tp);
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
 
 	for(int i = 0; i < tp_system->num_bodies; i++) {
 		if(!body_show_status_tp[i]) continue;
 		draw_body(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
+		draw_body_label(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
 		struct Orbit orbit = tp_system->bodies[i]->orbit;
 		if(tp_system->prop_method == EPHEMS) {
 			struct OSV body_osv = osv_from_ephem(tp_system->bodies[i]->ephem, tp_system->bodies[i]->num_ephems, current_date_tp, tp_system->cb);
 			orbit = constr_orbit_from_osv(body_osv.r, body_osv.v, tp_system->cb);
 		}
+		// Body orbits are kept faint so the trajectory stands out.
+		cairo_set_source_rgba(get_camera_screen_cairo(tp_system_camera), tp_system->bodies[i]->color[0],
+			tp_system->bodies[i]->color[1], tp_system->bodies[i]->color[2], 0.4);
 		draw_orbit(tp_system_camera, orbit);
 	}
 
 	draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
+	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
 	draw_camera_image(tp_system_camera);
+	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr) {
@@ -166,7 +280,7 @@ G_MODULE_EXPORT void on_tp_system_change() {
 
 	tp_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system))];
 	update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
@@ -181,29 +295,22 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 	gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 1);
 	tp_system = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
 
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
 }
 
+// Set when the flyby iteration did not settle and the shown delta-v is only the last iterate.
+static int tp_route_unconverged;
+// Identifies the itinerary details text in the shared message window.
+static char tp_details_owner;
+
 double calc_step_dv(struct ItinStep *step) {
-	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
-	if(step->body == NULL) {
-		if(step->next == NULL || step->next[0]->next == NULL || step->prev == NULL)
-			return 0;
-		if(step->v_body.x == 0) return 0;
-		return mag_vec3(subtract_vec3(step->v_arr, step->next[0]->v_dep));
-	} else if(step->prev == NULL) {
-		double vinf = mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_body));
-		return dv_circ(step->body, altatmo2radius(step->body, tp_dep_periapsis), vinf);
-	} else if(step->next == NULL) {
-		if(tp_last_transfer_type == TF_FLYBY) return 0;
-		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
-		if(tp_last_transfer_type == TF_CAPTURE) return dv_capture(step->body, altatmo2radius(step->body, tp_arr_periapsis), vinf);
-		else if(tp_last_transfer_type == TF_CIRC) return dv_circ(step->body, altatmo2radius(step->body, tp_arr_periapsis), vinf);
-	}
-	return 0;
+	int previous = set_flyby_unrestricted_periapsis(1);
+	double dv = itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
+	set_flyby_unrestricted_periapsis(previous);
+	return dv;
 }
 
 double calc_total_dv() {
@@ -224,13 +331,38 @@ double calc_periapsis_height_tp() {
 	return (rp-curr_transfer_tp->body->radius)*1e-3;
 }
 
+// Direct routes have no flyby, so plain Lambert arcs are exact; routes with flybys keep their stored velocities
+// if even the approximate powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
+static int tp_resolve_route_unrestricted(void) {
+	struct ItinStep *first = get_first(curr_transfer_tp);
+	update_itin_body_osvs(first, tp_system);
+	int encounters = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) encounters += node->body != NULL;
+	if(encounters < 3) {
+		calc_itin_v_vectors_from_dates_and_r(first, tp_system);
+		tp_route_unconverged = 0;
+		return 1;
+	}
+	int converged = 1;
+	int resolved = resolve_itinerary_with_powered_flybys_approximate(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type, &converged);
+	if(resolved) tp_route_unconverged = !converged;
+	return resolved;
+}
+
+// The planner lets a flyby dip below the safe periapsis (even into the planet) and warns instead of refusing.
+static int tp_resolve_route(void) {
+	int previous = set_flyby_unrestricted_periapsis(1);
+	int resolved = tp_resolve_route_unrestricted();
+	set_flyby_unrestricted_periapsis(previous);
+	return resolved;
+}
+
 void update_itinerary() {
 	if(curr_transfer_tp != NULL) {
 		tp_dep_periapsis = get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
 		tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
+		tp_resolve_route();
 	}
-	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
-	calc_itin_v_vectors_from_dates_and_r(get_first(curr_transfer_tp), tp_system);
 	update();
 }
 
@@ -253,6 +385,14 @@ void update() {
 	update_date_label();
 	update_transfer_panel();
 	update_tp_system_view();
+	// Keep an open itinerary details window in step with the route.
+	if(curr_transfer_tp != NULL && msg_window_shows_owner(&tp_details_owner)) {
+		char text[10000];
+		int previous = set_flyby_unrestricted_periapsis(1);
+		itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
+		set_flyby_unrestricted_periapsis(previous);
+		update_msg_window_if_owned(text, &tp_details_owner);
+	}
 }
 
 void update_date_label() {
@@ -266,25 +406,38 @@ void update_date_label() {
 }
 
 void update_transfer_panel() {
+	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	if(curr_transfer_tp == NULL) {
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), get_settings_datetime_type() == DATE_ISO ? "0000-00-00" : "0000-000");
 		update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), NULL);
 		fix_tfbody = TRUE;
+		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), "");
 	} else {
 		struct Datetime date = convert_JD_date(curr_transfer_tp->date, get_settings_datetime_type());
 		char date_string[10];
 		date_to_string(date, date_string, 0);
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), date_string);
-		if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody)) < 0) update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), tp_system);
-		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), get_body_system_id(curr_transfer_tp->body, tp_system));
+		if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody)) < 0) {
+			update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), tp_system);
+			append_combobox_entry(GTK_COMBO_BOX(cb_tp_tfbody), "Deep-Space Maneuver");
+		}
+		fix_tfbody = TRUE;
+		int body_id = curr_transfer_tp->body != NULL ? get_body_system_id(curr_transfer_tp->body, tp_system) : tp_system->num_bodies;
+		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_tfbody), body_id);
 		fix_tfbody = FALSE;
-		char s_dv[20];
+		char s_dv[64];
 		sprintf(s_dv, "%6.0f m/s", calc_step_dv(curr_transfer_tp));
 		gtk_label_set_label(GTK_LABEL(lb_tp_transfer_dv), s_dv);
 		sprintf(s_dv, "%6.0f m/s", calc_total_dv());
 		gtk_label_set_label(GTK_LABEL(lb_tp_total_dv), s_dv);
+		// Route warnings go on their own red, bold lines under the total.
+		char s_warning[96];
+		int below_safe = count_flybys_below_min_safe(curr_transfer_tp) > 0;
+		g_snprintf(s_warning, sizeof(s_warning), "%s%s%s", tp_route_unconverged ? "Approximate: the flyby solution did not settle" : "",
+			tp_route_unconverged && below_safe ? "\n" : "", below_safe ? "Flyby hits planet" : "");
+		gtk_label_set_text(GTK_LABEL(lb_tp_dv_warning), s_warning);
 		if(curr_transfer_tp->prev != NULL || curr_transfer_tp->num_next_nodes > 0) {
-			char s_tfprop_labels[200], s_tfprop_values[100];
+			char s_tfprop_labels[ITIN_STEP_TEXT_SIZE], s_tfprop_values[ITIN_STEP_TEXT_SIZE];
 			itinerary_step_parameters_to_string(s_tfprop_labels, s_tfprop_values, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, curr_transfer_tp);
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_labels), s_tfprop_labels);
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_values), s_tfprop_values);
@@ -293,7 +446,7 @@ void update_transfer_panel() {
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_values), "");
 		}
 	}
-
+	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void tp_update_show_body_list() {
@@ -377,6 +530,35 @@ void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 	update();
 }
 
+// A maneuver node slides along its incoming arc when its date changes.
+static void tp_set_current_step_date(double date) {
+	struct ItinStep *first = get_first(curr_transfer_tp);
+	int count = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) count++;
+	double *dates = malloc(count * sizeof(*dates));
+	Vector3 *positions = malloc(count * sizeof(*positions));
+	if(dates == NULL || positions == NULL) { free(dates); free(positions); return; }
+	int index = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
+		dates[index] = node->date;
+		positions[index] = node->r;
+	}
+
+	set_itinerary_step_date(curr_transfer_tp, tp_system, date);
+	if(!tp_resolve_route()) {
+		index = 0;
+		for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
+			node->date = dates[index];
+			node->r = positions[index];
+		}
+		update_itin_body_osvs(first, tp_system);
+		show_msg_window("This route cannot be re-solved at that date, so the edit was ignored.");
+	}
+	free(dates);
+	free(positions);
+	update();
+}
+
 G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 	const char *name = gtk_widget_get_name(widget);
 	// Date
@@ -405,11 +587,80 @@ G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 			return;
 		}
-		curr_transfer_tp->date = current_date_tp;
-		sort_transfer_dates(get_first(curr_transfer_tp));
+		tp_set_current_step_date(current_date_tp);
+		return;
 	}
 
-	update_itinerary();
+	// Only the clock moved, so the route and its delta-v stay as they are.
+	update();
+}
+
+static void tp_stop_animation(void) {
+	if(tp_animation_source != 0) {
+		g_source_remove(tp_animation_source);
+		tp_animation_source = 0;
+	}
+	if(tb_tp_animate != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_animate)))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_animate), FALSE);
+}
+
+static void on_tp_view_destroyed(GtkWidget *widget, gpointer data) {
+	(void)widget; (void)data;
+	if(tp_animation_source != 0) {
+		g_source_remove(tp_animation_source);
+		tp_animation_source = 0;
+	}
+	// The window is closing, so the tick must not touch these any more.
+	tb_tp_animate = NULL;
+	cb_tp_anim_speed = NULL;
+}
+
+static gboolean tp_animation_tick(gpointer data) {
+	(void)data;
+	if(cb_tp_anim_speed == NULL) return G_SOURCE_REMOVE;
+	gint64 now = g_get_monotonic_time();
+	double elapsed = (now - tp_animation_last_time) / 1e6;
+	tp_animation_last_time = now;
+	int speed_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_anim_speed));
+	if(speed_index < 0 || speed_index >= (int)G_N_ELEMENTS(tp_animation_speeds)) speed_index = 0;
+	current_date_tp += elapsed * tp_animation_speeds[speed_index];
+
+	// An itinerary is played once and stops where it ends.
+	if(curr_transfer_tp != NULL && current_date_tp >= get_last(curr_transfer_tp)->date) {
+		current_date_tp = get_last(curr_transfer_tp)->date;
+		tp_animation_source = 0;
+		update_date_label();
+		update_tp_system_view();
+		tp_stop_animation();
+		return G_SOURCE_REMOVE;
+	}
+	update_date_label();
+	update_tp_system_view();
+	return G_SOURCE_CONTINUE;
+}
+
+G_MODULE_EXPORT void on_tp_animate_toggled(GtkToggleButton *button, gpointer data) {
+	(void)data;
+	if(!gtk_toggle_button_get_active(button)) {
+		if(tp_animation_source != 0) {
+			g_source_remove(tp_animation_source);
+			tp_animation_source = 0;
+		}
+		gtk_button_set_label(GTK_BUTTON(button), "Animate");
+		return;
+	}
+	if(tp_system == NULL) {
+		gtk_toggle_button_set_active(button, FALSE);
+		return;
+	}
+	// Start from the departure when the clock is outside the itinerary.
+	if(curr_transfer_tp != NULL) {
+		struct ItinStep *first = get_first(curr_transfer_tp), *last = get_last(curr_transfer_tp);
+		if(current_date_tp < first->date || current_date_tp >= last->date) current_date_tp = first->date;
+	}
+	gtk_button_set_label(GTK_BUTTON(button), "Stop");
+	tp_animation_last_time = g_get_monotonic_time();
+	if(tp_animation_source == 0) tp_animation_source = g_timeout_add_full(G_PRIORITY_DEFAULT_IDLE, 33, tp_animation_tick, NULL, NULL);
 }
 
 G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
@@ -420,11 +671,11 @@ G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 			return;
 		}
-		curr_transfer_tp->date = current_date_tp;
-		sort_transfer_dates(get_first(curr_transfer_tp));
+		tp_set_current_step_date(current_date_tp);
+		return;
 	}
 	
-	update_itinerary();
+	update();
 }
 
 G_MODULE_EXPORT void on_tp_switch_clocktime_date(GtkWidget* widget, gpointer data) {
@@ -484,7 +735,9 @@ G_MODULE_EXPORT void on_next_transfer(GtkWidget* widget, gpointer data) {
 
 G_MODULE_EXPORT void on_transfer_body_change(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_tp == NULL || fix_tfbody) return;
-	curr_transfer_tp->body = tp_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody))];
+	int body_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_tfbody));
+	if(body_index < 0 || body_index >= tp_system->num_bodies) return;
+	curr_transfer_tp->body = tp_system->bodies[body_index];
 	update_itinerary();
 }
 
@@ -502,94 +755,21 @@ G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer da
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 		return;
 	}
-	if(curr_transfer_tp->body == NULL)
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate)))
 		current_date_tp = curr_transfer_tp->date;
-	update_itinerary();
+	// Locking or releasing only changes what the date buttons move; the route stays as it is.
+	update();
 }
 
 G_MODULE_EXPORT void on_goto_transfer_date(GtkWidget* widget, gpointer data) {
 	if(curr_transfer_tp == NULL) return;
 	current_date_tp = curr_transfer_tp->date;
-	update_itinerary();
-}
-
-G_MODULE_EXPORT void on_add_transfer(GtkWidget* widget, gpointer data) {
-	if(tp_system == NULL) return;
-	struct ItinStep *new_transfer = (struct ItinStep *) malloc(sizeof(struct ItinStep));
-	new_transfer->body = tp_system->home_body ? : tp_system->bodies[0];
-	new_transfer->prev = NULL;
-	new_transfer->next = NULL;
-	new_transfer->num_next_nodes = 0;
-
-	struct ItinStep *next = (curr_transfer_tp != NULL && curr_transfer_tp->next != NULL) ? curr_transfer_tp->next[0] : NULL;
-
-	// date
-	new_transfer->date = current_date_tp;
-	if(curr_transfer_tp != NULL) {
-		if(current_date_tp <= curr_transfer_tp->date) new_transfer->date = curr_transfer_tp->date + 1;
-		if(next != NULL) {
-			if(next->date - curr_transfer_tp->date < 2) {
-				free(new_transfer);
-				return;    // no space between this and next transfer...
-			}
-			if(new_transfer->date >= next->date) new_transfer->date = next->date - 1;
-		}
-	}
-
-	// next and prev pointers
-	if(curr_transfer_tp != NULL) {
-		if(next != NULL) {
-			next->prev = new_transfer;
-			new_transfer->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-			new_transfer->next[0] = next;
-			new_transfer->num_next_nodes = 1;
-		} else {
-			curr_transfer_tp->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-			curr_transfer_tp->num_next_nodes = 1;
-		}
-		new_transfer->prev = curr_transfer_tp;
-		curr_transfer_tp->next[0] = new_transfer;
-	}
-
-	// Location and Velocity vectors
-	update_itinerary();
-
-	curr_transfer_tp = new_transfer;
-	current_date_tp = curr_transfer_tp->date;
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
-	update_itinerary();
-}
-
-G_MODULE_EXPORT void on_remove_transfer(GtkWidget* widget, gpointer data) {
-	if(tp_system == NULL) return;
-	if(curr_transfer_tp == NULL) return;
-	struct ItinStep *rem_transfer = curr_transfer_tp;
-	if(curr_transfer_tp->next != NULL) curr_transfer_tp->next[0]->prev = curr_transfer_tp->prev;
-	if(curr_transfer_tp->prev != NULL) {
-		if(curr_transfer_tp->next != NULL) {
-			curr_transfer_tp->prev->next[0] = curr_transfer_tp->next[0];
-		} else {
-			free(curr_transfer_tp->prev->next);
-			curr_transfer_tp->prev->next = NULL;
-			curr_transfer_tp->prev->num_next_nodes = 0;
-		}
-	}
-
-	if(curr_transfer_tp->prev != NULL) curr_transfer_tp = curr_transfer_tp->prev;
-	else if(curr_transfer_tp->next != NULL) curr_transfer_tp = curr_transfer_tp->next[0];
-	else curr_transfer_tp = NULL;
-
-	free(rem_transfer->next);
-	free(rem_transfer);
-	if(curr_transfer_tp != NULL) current_date_tp = curr_transfer_tp->date;
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	update();
 }
 
 int find_closest_transfer(struct ItinStep *step) {
-	if(step == NULL || step->prev == NULL || step->prev->prev == NULL) return 0;
+	// A maneuver node has no body to search for, and a maneuver predecessor has no state to search from.
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->prev->prev == NULL || step->prev->body == NULL) return 0;
 	struct ItinStep *prev = step->prev;
 	struct ItinStep *temp = (struct ItinStep*) malloc(sizeof(struct ItinStep));
 	copy_step_body_vectors_and_date(prev, temp);
@@ -599,7 +779,10 @@ int find_closest_transfer(struct ItinStep *step) {
 	find_viable_flybys(temp, tp_system, step->body, 86400, 86400*365.25*50);
 
 	if(temp->next != NULL) {
+		// Resonant returns come grouped by leg variant, so take the one closest to the current date.
 		struct ItinStep *new_step = temp->next[0];
+		for(int i = 1; i < temp->num_next_nodes && step->body == prev->body; i++)
+			if(fabs(temp->next[i]->date - step->date) < fabs(new_step->date - step->date)) new_step = temp->next[i];
 		copy_step_body_vectors_and_date(new_step, step);
 		for(int i = 0; i < temp->num_next_nodes; i++) free(temp->next[i]);
 		free(temp->next);
@@ -616,6 +799,18 @@ int find_closest_transfer(struct ItinStep *step) {
 G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data) {
 	if(tp_system == NULL) return;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
+	if(curr_transfer_tp != NULL && curr_transfer_tp->body == NULL) {
+		// On a maneuver node the button re-optimizes the route's maneuvers.
+		struct ItinStep *first = get_first(curr_transfer_tp);
+		if(optimize_itinerary_maneuvers(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type)) {
+			curr_transfer_tp = first;
+			for(struct ItinStep *step = first; step != NULL; step = step->next != NULL ? step->next[0] : NULL)
+				if(step->body == NULL) { curr_transfer_tp = step; break; }
+			current_date_tp = curr_transfer_tp->date;
+			update_itinerary();
+		}
+		return;
+	}
 	int success = find_closest_transfer(curr_transfer_tp);
 	if(success) update_itinerary();
 }
@@ -623,8 +818,10 @@ G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data) 
 G_MODULE_EXPORT void on_show_itin_overview() {
 	if(curr_transfer_tp == NULL) return;
 	char text[10000];
+	int previous = set_flyby_unrestricted_periapsis(1);
 	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
-	show_msg_window(text);
+	set_flyby_unrestricted_periapsis(previous);
+	show_msg_window_owned(text, &tp_details_owner);
 }
 
 //G_MODULE_EXPORT void on_find_itinerary(GtkWidget* widget, gpointer data) {
@@ -689,13 +886,19 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system)) == get_num_available_systems()) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
 
 	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
+	if(load_results.itin == NULL) return;
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
+	tp_route_unconverged = 0;
 	current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	tp_update_bodies();
-	update_itinerary();
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
+	// Keep the saved velocities: re-solving from body centers would change a powered-flyby route's delta-v.
+	tp_dep_periapsis = get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
+	tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
+	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
+	update();
+	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	camera_zoom_to_fit_itinerary(tp_system_camera, curr_transfer_tp);
 	update_tp_system_view();
 	char system_name[50];
@@ -795,6 +998,7 @@ G_MODULE_EXPORT void on_create_gmat_script() {
 }
 
 void end_transfer_planner() {
+	tp_stop_animation();
 	remove_all_transfers();
 	if(body_show_status_tp != NULL) free(body_show_status_tp);
 	destroy_camera(tp_system_camera);

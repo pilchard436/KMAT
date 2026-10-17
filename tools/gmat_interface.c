@@ -80,6 +80,12 @@ void write_gmat_script(struct ItinStep *step2pr, const char *filepath) {
 		printf("\nCannot create GMAT Optimizing Script for simple transfers (Must have at least one fly-by before arrial)\n");
 		return;
 	}
+	for(struct ItinStep *step = step2pr; step != NULL; step = step->num_next_nodes > 0 ? step->next[0] : NULL) {
+		if(step->body == NULL) {
+			printf("\nCannot create GMAT Optimizing Script for itineraries with deep-space maneuvers yet\n");
+			return;
+		}
+	}
 
 	// Open the file in write mode
 	FILE *filePointer = fopen(filepath, "w");

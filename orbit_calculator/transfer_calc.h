@@ -10,6 +10,7 @@ typedef struct Itin_Calc_Data {
 	double jd_max_dep;
 	double jd_max_arr;
 	double max_duration;
+	int allow_dsm;
 	double step_dep_date;
 	int num_deps_per_date;
 	int max_num_waiting_orbits;
@@ -26,6 +27,8 @@ typedef struct Itin_Calc_Results {
 	unsigned long long powered_initial_rejections;
 	int powered_repairs_attempted, powered_repairs_recovered, powered_repairs_competing;
 	int powered_challenges_refined;
+	int powered_dsm_routes_optimized, powered_dsm_routes_improved;
+	double powered_best_dsm_saving;
 	double best_unpowered_seed_total_dv;
 	double best_powered_initial_total_dv;
 	double best_powered_refined_total_dv;

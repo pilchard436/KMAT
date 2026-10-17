@@ -1,11 +1,23 @@
 #include "itin_tool.h"
-#include "double_swing_by.h"
 #include "powered_seed_selection.h"
 #include "tools/thread_pool.h"
 #include "tools/parking_orbit.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Per thread, so the planner can relax the limit without touching search workers.
+static _Thread_local int unrestricted_flyby_periapsis;
+
+int set_flyby_unrestricted_periapsis(int enable) {
+	int previous = unrestricted_flyby_periapsis;
+	unrestricted_flyby_periapsis = enable;
+	return previous;
+}
+
+double flyby_minimum_periapsis(Body *body) {
+	return unrestricted_flyby_periapsis ? body->radius * 0.1 : body->radius + body->atmo_alt + 1e4;
+}
 
 #define POWERED_FLYBY_SEED_SUBDIVISIONS 2
 
@@ -96,7 +108,7 @@ static int evaluate_powered_flyby_seed(struct ItinStep *tf, CelestSystem *system
 #else
 	(void)right_side;
 #endif
-	seed->transfer = calc_lambert3_selected_cancellable(tf->r, seed->target_state.r,
+	seed->transfer = calc_lambert3_cancellable(tf->r, seed->target_state.r,
 		dt, system->cb, itinerary_search_cancelled, NULL);
 	if(itinerary_search_cancelled(NULL) ||
 		seed->transfer.success == LAMBERT_FAIL_NAN ||
@@ -111,7 +123,7 @@ static int evaluate_powered_flyby_seed(struct ItinStep *tf, CelestSystem *system
 	double incoming_speed = mag_vec3(incoming);
 	double outgoing_speed = mag_vec3(outgoing);
 	seed->diff_vinf = outgoing_speed - incoming_speed;
-	double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+	double minimum_periapsis = flyby_minimum_periapsis(tf->body);
 	if(!(incoming_speed > 0) || !(outgoing_speed > 0) || !isfinite(seed->diff_vinf) ||
 		!(tf->body->mu > 0) ||
 		!(minimum_periapsis > 0)) return 0;
@@ -133,12 +145,157 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 	if(itinerary_search_cancelled(NULL)) return HUGE_VAL;
 	PoweredFlybyResult flyby;
 	if(!calculate_powered_flyby(tf->v_arr, seed->transfer.v0, tf->v_body,
-		tf->body, tf->body->radius + tf->body->atmo_alt + 1e4, &flyby)) return HUGE_VAL;
+		tf->body, flyby_minimum_periapsis(tf->body), &flyby)) return HUGE_VAL;
 	return flyby.burn_delta_v;
+}
+
+Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, int variant,
+		LambertCancelCheck cancel_check, void *cancel_context) {
+	if(variant <= 0) return calc_lambert3_cancellable(r0, r1, dt, cb, cancel_check, cancel_context);
+	return calc_lambert3_revs_cancellable(r0, r1, dt, cb, (variant + 1) / 2, (variant - 1) % 2,
+		cancel_check, cancel_context);
+}
+
+static int is_usable_lambert(Lambert3 leg) {
+	return leg.success != LAMBERT_FAIL_NAN && leg.success != LAMBERT_FAIL_ECC &&
+		leg.success != LAMBERT_MAX_ITERATIONS && isfinite(leg.v0.x + leg.v0.y + leg.v0.z) &&
+		isfinite(leg.v1.x + leg.v1.y + leg.v1.z);
+}
+
+int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg, int *variant) {
+	double best_distance = HUGE_VAL;
+	for(int candidate_variant = 0; candidate_variant < LEG_VARIANT_COUNT; candidate_variant++) {
+		Lambert3 candidate = calc_leg_variant_lambert(cb, r0, r1, dt, candidate_variant, NULL, NULL);
+		if(!is_usable_lambert(candidate)) continue;
+		double distance = mag_vec3(subtract_vec3(candidate.v0, v_ref));
+		if(distance < best_distance) {
+			best_distance = distance;
+			*leg = candidate;
+			if(variant != NULL) *variant = candidate_variant;
+		}
+	}
+	return best_distance < HUGE_VAL;
+}
+
+#define RESONANT_MAX_ROOTS 12
+#define RESONANT_MAX_BODY_REVS 2
+#define RESONANT_SAMPLE_SECONDS (6 * 86400.0)
+#define RESONANT_DEPARTURE_STEPS 16
+
+int resonant_departure_sample_count(void) {
+	return (1 + 2 * 2 * 1) * RESONANT_DEPARTURE_STEPS + (1 + 2 * 2 * 2) * RESONANT_DEPARTURE_STEPS;
+}
+
+void resonant_departure_sample(int index, double period_days, double *duration_days, int *variant) {
+	int first_group = (1 + 2 * 2 * 1) * RESONANT_DEPARTURE_STEPS;
+	int body_revs = index < first_group ? 1 : 2;
+	int local = index < first_group ? index : index - first_group;
+	*variant = local / RESONANT_DEPARTURE_STEPS;
+	*duration_days = body_revs * period_days * (0.75 + 0.5 * (local % RESONANT_DEPARTURE_STEPS + 0.5) / RESONANT_DEPARTURE_STEPS);
+}
+
+// Outgoing minus incoming excess speed for a return to the same body dt seconds later on the given leg variant.
+static int resonant_speed_difference(struct ItinStep *tf, CelestSystem *system, double incoming_speed,
+		double dt, int variant, Lambert3 *leg, double *difference) {
+	double epoch = tf->date + dt / 86400;
+	OSV target = system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(tf->body->orbit, epoch) :
+		osv_from_ephem(tf->body->ephem, tf->body->num_ephems, epoch, system->cb);
+	if(!isfinite(target.r.x + target.r.y + target.r.z)) return 0;
+	*leg = calc_leg_variant_lambert(system->cb, tf->r, target.r, dt, variant, itinerary_search_cancelled, NULL);
+	if(itinerary_search_cancelled(NULL) || !is_usable_lambert(*leg)) return 0;
+	*difference = mag_vec3(subtract_vec3(leg->v0, tf->v_body)) - incoming_speed;
+	return isfinite(*difference);
+}
+
+static void find_resonant_flybys(struct ItinStep *tf, CelestSystem *system, double min_dt, double max_dt) {
+	if(tf->prev == NULL || tf->body == NULL) return;
+	double incoming_speed = mag_vec3(subtract_vec3(tf->v_arr, tf->v_body));
+	double period = calc_orbital_period(constr_orbit_from_osv(tf->r, tf->v_body, system->cb));
+	if(!(incoming_speed > 0) || !(period > 0) || !isfinite(period)) return;
+	double minimum_periapsis = flyby_minimum_periapsis(tf->body);
+	struct ItinStep *new_steps[RESONANT_MAX_ROOTS];
+	int counter = 0;
+	for(int body_revs = 1; body_revs <= RESONANT_MAX_BODY_REVS && counter < RESONANT_MAX_ROOTS; body_revs++) {
+		double window_start = fmax(min_dt, body_revs * period * 0.75);
+		double window_end = fmin(max_dt, body_revs * period * 1.25);
+		if(window_end <= window_start) continue;
+		int variants = 1 + 2 * 2 * body_revs;
+		if(variants > LEG_VARIANT_COUNT) variants = LEG_VARIANT_COUNT;
+		for(int variant = 0; variant < variants && counter < RESONANT_MAX_ROOTS &&
+			!itinerary_search_cancelled(NULL); variant++) {
+			double previous_dt = 0, previous_difference = 0;
+			int has_previous = 0;
+			for(double dt = window_start; counter < RESONANT_MAX_ROOTS; dt += RESONANT_SAMPLE_SECONDS) {
+				if(dt > window_end) dt = window_end;
+				Lambert3 leg;
+				double difference;
+				int valid = resonant_speed_difference(tf, system, incoming_speed, dt, variant, &leg, &difference);
+				if(valid && has_previous && previous_difference * difference < 0) {
+					double low = previous_dt, high = dt, low_difference = previous_difference;
+					Lambert3 root_leg = leg;
+					double root_difference = difference;
+					for(int iteration = 0; iteration < 40; iteration++) {
+						double middle = (low + high) / 2;
+						Lambert3 middle_leg;
+						double middle_difference;
+						if(!resonant_speed_difference(tf, system, incoming_speed, middle, variant, &middle_leg, &middle_difference)) break;
+						root_leg = middle_leg;
+						root_difference = middle_difference;
+						if(fabs(middle_difference) < 1e-3) { low = high = middle; break; }
+						if(low_difference * middle_difference < 0) high = middle;
+						else { low = middle; low_difference = middle_difference; }
+					}
+					double root_dt = (low + high) / 2;
+					PoweredFlybyResult flyby;
+					Orbit leg_orbit = constr_orbit_from_osv(tf->r, root_leg.v0, system->cb);
+					// A leg that dips into the central body, or a bisection that did not settle, is not a flyby.
+					if(fabs(root_difference) < 1 && leg_orbit.e < 1 && leg_orbit.a * (1 - leg_orbit.e) > 2 * system->cb->radius &&
+						calculate_powered_flyby(tf->v_arr, root_leg.v0, tf->v_body, tf->body, minimum_periapsis, &flyby) &&
+						flyby.burn_delta_v < 1) {
+						double epoch = tf->date + root_dt / 86400;
+						int duplicate = 0;
+						for(int i = 0; i < counter; i++) if(fabs(new_steps[i]->date - epoch) < 1e-6) duplicate = 1;
+						struct ItinStep *new_step = duplicate ? NULL : calloc(1, sizeof(*new_step));
+						if(new_step != NULL) {
+							OSV target = system->prop_method == ORB_ELEMENTS ?
+								osv_from_elements(tf->body->orbit, epoch) :
+								osv_from_ephem(tf->body->ephem, tf->body->num_ephems, epoch, system->cb);
+							new_step->body = tf->body;
+							new_step->date = epoch;
+							new_step->r = target.r;
+							new_step->v_body = target.v;
+							new_step->v_dep = root_leg.v0;
+							new_step->v_arr = root_leg.v1;
+							new_step->prev = tf;
+							new_steps[counter++] = new_step;
+						}
+					}
+				}
+				previous_dt = dt;
+				previous_difference = difference;
+				has_previous = valid;
+				if(dt >= window_end) break;
+			}
+		}
+	}
+	if(counter == 0) return;
+	struct ItinStep **next = realloc(tf->next, (size_t)(tf->num_next_nodes + counter) * sizeof(*next));
+	if(next == NULL) {
+		for(int i = 0; i < counter; i++) free(new_steps[i]);
+		return;
+	}
+	tf->next = next;
+	for(int i = 0; i < counter; i++) tf->next[tf->num_next_nodes + i] = new_steps[i];
+	tf->num_next_nodes += counter;
 }
 
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
 	if(itinerary_search_cancelled(NULL)) return;
+	if(next_body == tf->body) {
+		find_resonant_flybys(tf, system, min_dt, max_dt);
+		return;
+	}
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	ItinFlybyProfileStats *profile_stats = get_flyby_profile_stats(next_body);
 	if(profile_stats != NULL) profile_stats->searches++;
@@ -227,7 +384,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 
 			if(fabs(diff_vinf) < 1) {
 				PoweredFlybyResult flyby_result;
-				double minimum_periapsis = tf->body->radius + tf->body->atmo_alt + 1e4;
+				double minimum_periapsis = flyby_minimum_periapsis(tf->body);
 				if(calculate_powered_flyby(tf->v_arr, new_transfer.v0, tf->v_body,
 					tf->body, minimum_periapsis, &flyby_result)) {
 					new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
@@ -342,85 +499,6 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 }
 
 
-//void find_viable_dsb_flybys(struct ItinStep *tf, struct Ephem **ephems, struct Body *body1, double min_dt0, double max_dt0, double min_dt1, double max_dt1) {
-//	int max_new_steps0 = (int) (max_dt0/86400-min_dt0/86400+1);
-//	int max_new_steps1 = (int) (max_dt1/86400-min_dt1/86400+1);
-//	struct ItinStep *new_steps[max_new_steps0*max_new_steps1];
-//	struct Body *body0 = tf->body;
-//
-//	int counter = 0;
-//
-//	struct OSV s0 = {tf->r, tf->v_arr};
-//	struct OSV p0 = {tf->r, tf->v_body};
-//	struct OSV s1;
-//	double dt0, dt1, jd_sb2, jd_arr;
-//
-//
-//	for(int i = 0; i <= max_dt0/86400-min_dt0/86400; i++) {
-//
-//		dt0 = min_dt0/86400 + i;
-//		jd_sb2 = tf->date+dt0;
-//		struct OSV osv_sb2 = osv_from_ephem(ephems[0], jd_sb2, SUN());
-//
-//		for(int j = 0; j <= max_dt1/86400-min_dt1/86400; j++) {
-//			dt1 = min_dt1/86400 + j;
-//			jd_arr = jd_sb2 + dt1;
-//
-//			struct OSV osv_arr = osv_from_ephem(ephems[1], jd_arr, SUN());
-//			struct Transfer transfer_after_dsb = calc_transfer(circfb, body0, body1, osv_sb2.r, osv_sb2.v, osv_arr.r, osv_arr.v, (jd_arr-jd_sb2)*86400, SUN(), NULL, 0, 0);
-//
-//			s1.r = transfer_after_dsb.r0;
-//			s1.v = transfer_after_dsb.v0;
-//
-//			struct DSB dsb = calc_double_swing_by(s0, p0, s1, osv_sb2, dt0, body0);
-//
-//			if(dsb.dv < 10000) {
-//				new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
-//				new_steps[counter]->body = NULL;
-//				new_steps[counter]->date = tf->date + dsb.man_time/86400;
-//				new_steps[counter]->r = dsb.osv[1].r;
-//				new_steps[counter]->v_dep = dsb.osv[0].v;
-//				new_steps[counter]->v_arr = dsb.osv[1].v;
-//				new_steps[counter]->v_body = vec(0,0,0);
-//				new_steps[counter]->num_next_nodes = 1;
-//				new_steps[counter]->prev = tf;
-//				new_steps[counter]->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-//				new_steps[counter]->next[0] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
-//				new_steps[counter]->next[0]->prev = new_steps[counter];
-//
-//				struct ItinStep *curr = new_steps[counter]->next[0];
-//				curr->body = body0;
-//				curr->date = jd_sb2;
-//				curr->r = osv_sb2.r;
-//				curr->v_dep = dsb.osv[2].v;
-//				curr->v_arr = dsb.osv[3].v;
-//				curr->v_body = osv_sb2.v;
-//				curr->num_next_nodes = 1;
-//				curr->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
-//				curr->next[0] = (struct ItinStep*) malloc(sizeof(struct ItinStep));
-//				curr->next[0]->prev = curr;
-//
-//				curr = curr->next[0];
-//				curr->body = body1;
-//				curr->date = jd_arr;
-//				curr->r = osv_arr.r;
-//				curr->v_dep = transfer_after_dsb.v0;
-//				curr->v_arr = transfer_after_dsb.v1;
-//				curr->v_body = osv_arr.v;
-//				curr->num_next_nodes = 0;
-//				curr->next = NULL;
-//				counter++;
-//			}
-//		}
-//	}
-//
-//	// if there were next nodes found, store them
-//	if(counter > 0) {
-//		tf->next = (struct ItinStep **) malloc(counter * sizeof(struct ItinStep *));
-//		for(int i = 0; i < counter; i++) tf->next[i] = new_steps[i];
-//		tf->num_next_nodes = counter;
-//	}
-//}
 
 
 
@@ -511,12 +589,13 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	pp.dv_dsm = 0;
 	pp.dv_flyby = 0;
 	while(itin->prev->prev != NULL) {
-		if(itin->body == NULL) {
+		if(itin->body == NULL)
 			pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
-		} else if(itin->prev->body != NULL && itin->prev->prev != NULL) {
+		// A DSM right after a flyby must not hide that flyby's burn.
+		if(itin->prev->body != NULL && itin->prev->prev != NULL) {
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
-			double minimum_periapsis = flyby->body->radius + flyby->body->atmo_alt + 1e4;
+			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
 			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
 				flyby->body, minimum_periapsis, &flyby_result))
 				pp.dv_flyby += flyby_result.burn_delta_v;
@@ -525,6 +604,9 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		}
 		itin = itin->prev;
 	}
+	// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
+	if(itin->body == NULL && itin->next != NULL && itin->num_next_nodes > 0)
+		pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
 
 	pp.dep_date = itin->prev->date;
 	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
@@ -554,7 +636,7 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				double dv_sat = porkchop_point.dv_dsm;
 				if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-						if(dv_sat > dv_filter->max_satdv ||
+						if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
@@ -595,7 +677,11 @@ int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenc
 	if(itinerary_search_cancelled(NULL)) return curr_step->num_next_nodes > 0;
 	for(int i = 0; i < seq_info->num_flyby_bodies && !itinerary_search_cancelled(NULL); i++) {
 		if(get_thread_counter(3) > 0) break;
-		if(seq_info->flyby_bodies[i] == curr_step->body) continue;
+		if(seq_info->flyby_bodies[i] == curr_step->body) {
+			// Only one resonant return per visit, and none once the route has reached its target.
+			if(!seq_info->allow_resonant || curr_step->prev == NULL || curr_step->prev->body == curr_step->body ||
+				curr_step->body == seq_info->arr_body) continue;
+		}
 		double jd_max;
 		if(get_first(curr_step)->date + max_total_duration < jd_max_arr)
 			jd_max = get_first(curr_step)->date + max_total_duration;
@@ -686,7 +772,7 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 			double dv_sat = porkchop_point.dv_dsm;
 		if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 		if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-			if(dv_sat > dv_filter->max_satdv ||
+			if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 				porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
@@ -720,7 +806,7 @@ void update_itin_body_osvs(struct ItinStep *step, CelestSystem *system) {
 					osv_from_ephem(step->body->ephem, step->body->num_ephems, step->date, system->cb);
 			step->r = body_osv.r;
 			step->v_body = body_osv.v;
-		} else step->v_body = vec3(0, 0, 0);	// don't draw the trajectory (except changed in later calc)
+		} else step->v_body = vec3(1, 0, 0);	// non-zero marks a valid maneuver node so its trajectory is drawn
 		step = step->next != NULL ? step->next[0] : NULL;
 	}
 }
@@ -730,50 +816,11 @@ void calc_itin_v_vectors_from_dates_and_r(struct ItinStep *step, CelestSystem *s
 	struct ItinStep *next;
 	while(step->next != NULL) {
 		next = step->next[0];
-
-		if(next->body == NULL) {
-			if(next->next == NULL) {
-				step = next;
-				continue;
-			} else if(next->next[0]->next == NULL) {
-				next = next->next[0];
-				double dt = (next->date - step->date) * 86400;
-				Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
-				next->v_dep = transfer.v0;
-				next->v_arr = transfer.v1;
-			} else {
-				struct ItinStep *sb2 = next->next[0];
-				struct ItinStep *arr = next->next[0]->next[0];
-				OSV osv_sb2 = {next->next[0]->r, next->next[0]->v_body};
-				OSV osv_arr = {next->next[0]->next[0]->r, next->next[0]->next[0]->v_body};
-				Lambert3 transfer_after_dsb = calc_lambert3_selected(osv_sb2.r, osv_arr.r, (arr->date - sb2->date) * 86400, system->cb);
-
-				OSV s0 = {step->r, step->v_arr};
-				OSV p0 = {step->r, step->v_body};
-				OSV s1 = {transfer_after_dsb.r0, transfer_after_dsb.v0};
-
-				double dt = sb2->date - step->date;
-				struct DSB dsb = calc_double_swing_by(s0, p0, s1, osv_sb2, dt, sb2->body);
-				if(dsb.dv < 10000) {
-					next->r = dsb.osv[1].r;
-					next->v_dep = dsb.osv[0].v;
-					next->v_arr = dsb.osv[1].v;
-					next->date = step->date + dsb.man_time / 86400;
-					next->v_body = vec3(1, 0, 0);    // draw the trajectory
-				} else {
-					next = next->next[0];
-					dt = (next->date - step->date) * 86400;
-					Lambert3 transfer= calc_lambert3_selected(step->r, next->r, dt, system->cb);
-					next->v_dep = transfer.v0;
-					next->v_arr = transfer.v1;
-				}
-			}
-		} else {
-			double dt = (next->date - step->date) * 86400;
-			Lambert3 transfer = calc_lambert3_selected(step->r, next->r, dt, system->cb);
-			next->v_dep = transfer.v0;
-			next->v_arr = transfer.v1;
-		}
+		// A deep-space maneuver node keeps its stored position, so its two arcs are ordinary Lambert legs.
+		double dt = (next->date - step->date) * 86400;
+		Lambert3 transfer = calc_lambert3(step->r, next->r, dt, system->cb);
+		next->v_dep = transfer.v0;
+		next->v_arr = transfer.v1;
 		step = next;
 	}
 }
@@ -882,14 +929,25 @@ void store_itineraries_in_file(struct ItinStep **departures, int num_nodes, int 
 	fclose(file);
 }
 
+// Heliocentric radial (outward), tangential (prograde) and normal components of a maneuver node's burn.
+static Vector3 dsm_burn_rtn(const struct ItinStep *step) {
+	if(step->next == NULL || step->prev == NULL) return vec3(0, 0, 0);
+	Vector3 burn = subtract_vec3(step->next[0]->v_dep, step->v_arr);
+	Vector3 radial = norm_vec3(step->r);
+	Vector3 normal = norm_vec3(cross_vec3(step->r, step->v_arr));
+	Vector3 tangential = cross_vec3(normal, radial);
+	return vec3(dot_vec3(burn, radial), dot_vec3(burn, tangential), dot_vec3(burn, normal));
+}
+
 void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string) {
 	sprintf(string, "");
 	if(step == NULL) return;
 	step = get_first(step);
+	if(step->next == NULL) return;
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
-		sprintf(string, "%s%s", string, step->body->name);
+		sprintf(string, "%s%s", string, step->body != NULL ? step->body->name : "DSM");
 		if(step->next != NULL) step = step->next[0];
 		else break;
 	}
@@ -906,13 +964,24 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
-	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
+	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
 	
 	step = get_first(step);
 	int step_id = 0;
 	
 	while(step != NULL) {
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
+		if(step->body == NULL) {
+			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
+			Vector3 rtn = dsm_burn_rtn(step);
+			sprintf(string, "%sDeep-Space Maneuver: | %s | Burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n", string, date_string, maneuver_dv, rtn.x, rtn.y, rtn.z);
+			step = step->next != NULL ? step->next[0] : NULL;
+			continue;
+		}
 		if(step_id == 0) sprintf(string, "%sDeparture", string);
 		else if(step->next == NULL) sprintf(string, "%sArrival", string);
 		else sprintf(string, "%sFly-By %d", string, step_id);
@@ -928,7 +997,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 			Vector3 v_dep = step->next[0]->v_dep;
 			Vector3 v_body = step->v_body;
 			PoweredFlybyResult flyby;
-			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			double min_periapsis = flyby_minimum_periapsis(step->body);
 			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
@@ -945,10 +1014,11 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	sprintf(string, "");
 	if(step == NULL) return;
 	step = get_first(step);
+	if(step->next == NULL) return;
 	char date_string[32];
 	while(step != NULL) {
 		if(step->prev != NULL) sprintf(string, "%s - ", string);
-		sprintf(string, "%s%s", string, step->body->name);
+		sprintf(string, "%s%s", string, step->body != NULL ? step->body->name : "DSM");
 		if(step->next != NULL) step = step->next[0];
 		else break;
 	}
@@ -980,13 +1050,25 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n", string, pp.dv_arr_circ);
-	sprintf(string, "%sPowered flyby burns: %.2f m/s\n\n--\n", string, pp.dv_flyby);
+	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
+	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
+	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
 	
 	step = get_first(step);
 	int step_id = 0;
 	
 	while(step != NULL) {
 		date_to_string(convert_JD_date(step->date, date_type), date_string, 1);
+		if(step->body == NULL) {
+			double maneuver_dv = step->next != NULL ? mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr)) : 0;
+			Vector3 rtn = dsm_burn_rtn(step);
+			sprintf(string, "%s\nDeep-Space Maneuver:\nDate: %s  (T+%.2f days)\nBurn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n", string,
+				date_string, step->date-get_first(step)->date, maneuver_dv, rtn.x, rtn.y, rtn.z);
+			step = step->next != NULL ? step->next[0] : NULL;
+			continue;
+		}
 		if(step_id == 0) sprintf(string, "%s\nDeparture", string);
 		else if(step->next == NULL) sprintf(string, "%s\nArrival", string);
 		else sprintf(string, "%s\nFly-By %d", string, step_id);
@@ -1001,7 +1083,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			Vector3 v_body = step->v_body;
 			double incl = get_flyby_inclination(v_arr, v_dep, v_body, get_body_equatorial_plane(step->body));
 			PoweredFlybyResult flyby;
-			double min_periapsis = step->body->radius + step->body->atmo_alt + 1e4;
+			double min_periapsis = flyby_minimum_periapsis(step->body);
 			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
@@ -1022,7 +1104,21 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 }
 
 void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum DateType date_type, double dep_periapsis, double arr_periapsis, struct ItinStep *step) {
-	if(step == NULL) {sprintf(s_labels,""); sprintf(s_values,""); return;}
+	if(step == NULL || (step->prev == NULL && step->next == NULL)) {sprintf(s_labels,""); sprintf(s_values,""); return;}
+	if(step->body == NULL) {
+		double dt_in_days = step->date - get_first(step)->date;
+		if(date_type == DATE_KERBAL) dt_in_days *= 4;
+		Vector3 dv_vec = step->next != NULL ? subtract_vec3(step->next[0]->v_dep, step->v_arr) : vec3(0, 0, 0);
+		// Components in the spacecraft frame: prograde, radial in, orbit normal.
+		Vector3 prograde = norm_vec3(step->v_arr);
+		Vector3 normal = norm_vec3(cross_vec3(step->r, step->v_arr));
+		Vector3 radial_in = norm_vec3(cross_vec3(normal, prograde));
+		sprintf(s_labels, "Deep-Space Maneuver\nT+:\nDistance to the Sun:\nDv Prograde:\nDv Radial:\nDv Normal:\nTotal:");
+		sprintf(s_values, "\n%.2f days\n%.3f AU\n%.3f m/s\n%.3f m/s\n%.3f m/s\n%.3f m/s",
+			dt_in_days, mag_vec3(step->r) / 1.495978707e11, dot_vec3(dv_vec, prograde),
+			dot_vec3(dv_vec, radial_in), dot_vec3(dv_vec, normal), mag_vec3(dv_vec));
+		return;
+	}
 	HyperbolaParams hyp_params;
 
 	// is departure step
@@ -1081,6 +1177,12 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 
 			hyp_params = get_hyperbola_params(step->v_arr, step->next[0]->v_dep,
 											  step->v_body, step->body, 0, HYP_FLYBY);
+			// The unpowered periapsis can lie below the surface; the route actually flies the powered one.
+			PoweredFlybyResult powered_flyby;
+			int powered_valid = calculate_powered_flyby(v_arr, v_dep, v_body, step->body,
+				flyby_minimum_periapsis(step->body), &powered_flyby);
+			double periapsis_radius = powered_valid ? powered_flyby.periapsis_radius : hyp_params.rp;
+			double flyby_burn = powered_valid ? powered_flyby.burn_delta_v : 0;
 			double dt_in_days = step->date - get_first(step)->date;
 			if(date_type == DATE_KERBAL) dt_in_days *= 4;
 
@@ -1088,6 +1190,8 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "T+:\n"
 							  "RadPer:\n"
 							  "AltPer:\n"
+							  "Burn:\n"
+							  "Unpowered AltPer:\n"
 							  "Inclination:\n\n"
 							  "C3Energy:\n"
 							  "RHA (in):\n"
@@ -1100,6 +1204,8 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 			sprintf(s_values, "\n%.2f days\n"
 							  "%.0f km\n"
 							  "%.0f km\n"
+							  "%.1f m/s\n"
+							  "%.0f km%s\n"
 							  "%.2f°\n\n"
 							  "%.2f km²/s²\n"
 							  "%.2f°\n"
@@ -1108,7 +1214,7 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 							  "%.2f°\n"
 							  "%.2f°\n"
 							  "%.2f°",
-					dt_in_days, hyp_params.rp / 1000, (hyp_params.rp-step->body->radius) / 1000, rad2deg(incl),
+					dt_in_days, periapsis_radius / 1000, (periapsis_radius-step->body->radius) / 1000, flyby_burn, (hyp_params.rp - step->body->radius) / 1000, flyby_periapsis_shortfall(step) > 0 ? " (!)" : "", rad2deg(incl),
 					hyp_params.c3_energy / 1e6,
 					rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl),
 					rad2deg(hyp_params.incoming.bvazi),
@@ -1150,6 +1256,112 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 	}
 }
 
+
+// Drawing asks about the same flybys every animation frame, and each solve scans many periapsis radii.
+typedef struct {
+	Vector3 v_arr, v_dep, v_body;
+	Body *body;
+	int unrestricted, feasible;
+	double periapsis;
+} FlybyCacheEntry;
+static _Thread_local FlybyCacheEntry flyby_cache[32];
+static _Thread_local int flyby_cache_next;
+
+static int same_vec(Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+
+static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double *periapsis) {
+	for(int i = 0; i < 32; i++) {
+		FlybyCacheEntry *entry = &flyby_cache[i];
+		if(entry->body == body && entry->unrestricted == unrestricted_flyby_periapsis &&
+				same_vec(entry->v_arr, v_arr) && same_vec(entry->v_dep, v_dep) && same_vec(entry->v_body, v_body)) {
+			if(periapsis != NULL) *periapsis = entry->periapsis;
+			return entry->feasible;
+		}
+	}
+	PoweredFlybyResult flyby;
+	int feasible = calculate_powered_flyby(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), &flyby);
+	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, unrestricted_flyby_periapsis,
+		feasible, feasible ? flyby.periapsis_radius : 0};
+	flyby_cache_next = (flyby_cache_next + 1) % 32;
+	if(periapsis != NULL) *periapsis = feasible ? flyby.periapsis_radius : 0;
+	return feasible;
+}
+
+double flyby_periapsis_shortfall(struct ItinStep *step) {
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
+	double minimum_radius = step->body->radius + step->body->atmo_alt;
+	double unpowered = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	if(!isfinite(unpowered)) return 0;
+	return unpowered < minimum_radius ? minimum_radius - unpowered : 0;
+}
+
+int flyby_below_min_safe(struct ItinStep *step) {
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
+	double safe_radius = step->body->radius + step->body->atmo_alt + 1e4;
+	double flown;
+	if(!cached_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, &flown))
+		flown = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	return isfinite(flown) && flown < safe_radius - 1;
+}
+
+int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
+	return cached_powered_flyby(v_arr, v_dep, v_body, body, NULL);
+}
+
+int count_flybys_below_min_safe(struct ItinStep *step_in_route) {
+	int count = 0;
+	for(struct ItinStep *step = get_first(step_in_route); step != NULL; step = step->next != NULL ? step->next[0] : NULL)
+		count += flyby_below_min_safe(step);
+	return count;
+}
+
+int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall) {
+	int count = 0;
+	double largest = 0;
+	for(struct ItinStep *step = get_first(step_in_route); step != NULL; step = step->next != NULL ? step->next[0] : NULL) {
+		double shortfall = flyby_periapsis_shortfall(step);
+		if(shortfall > 0) {
+			count++;
+			largest = fmax(largest, shortfall);
+		}
+	}
+	if(largest_shortfall != NULL) *largest_shortfall = largest;
+	return count;
+}
+
+double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
+	if(step->body == NULL) {
+		if(step->next == NULL || step->prev == NULL) return 0;
+		return mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+	}
+	if(step->prev == NULL) {
+		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
+		DepartureBurn3D burn;
+		if(calculate_free_plane_departure_burn(vinf, step->body, alt2radius(step->body, dep_periapsis), &burn))
+			return burn.burn_magnitude;
+		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
+	}
+	if(step->next == NULL) {
+		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
+		if(last_transfer_type == TF_CAPTURE) return dv_capture(step->body, alt2radius(step->body, arr_periapsis), vinf);
+		if(last_transfer_type == TF_CIRC) return dv_circ(step->body, alt2radius(step->body, arr_periapsis), vinf);
+		return 0;
+	}
+	PoweredFlybyResult flyby;
+	double minimum_periapsis = flyby_minimum_periapsis(step->body);
+	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
+		return flyby.burn_delta_v;
+	return HUGE_VAL;
+}
+
+void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date) {
+	if(step->body == NULL && step->prev != NULL)
+		step->r = propagate_osv_time((OSV){step->prev->r, step->v_dep}, system->cb, (date - step->prev->date) * 86400).r;
+	step->date = date;
+	for(struct ItinStep *node = step; node->next != NULL; node = node->next[0])
+		if(node->next[0]->date <= node->date) node->next[0]->date = node->date + 1;
+}
 
 void remove_step_from_itinerary(struct ItinStep *step) {
 	struct ItinStep *prev = step->prev;

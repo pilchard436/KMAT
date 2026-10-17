@@ -5,9 +5,10 @@
 #include "orbit_calculator/itin_tool.h"
 
 
-Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), void (*button_press_func)(), void (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)()) {
+Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), gboolean (*button_press_func)(), gboolean (*button_release_func)(), void (*mouse_motion_func)(), void (*scroll_func)()) {
 	Camera *new_camera = malloc(sizeof(Camera));
 	new_camera->pos = vec3(1, 0, 0);
+	new_camera->focus = vec3(0, 0, 0);
 	camera_look_to_center(new_camera);
 	new_camera->min_pos_dist = 10;
 	new_camera->max_pos_dist = 0.1;
@@ -25,6 +26,7 @@ Camera * new_camera(GtkWidget *drawing_area, void (*resize_func)(), void (*butto
 
 void reset_camera(Camera *camera) {
 	camera->pos = vec3(1,0,0);
+	camera->focus = vec3(0, 0, 0);
 	camera_look_to_center(camera);
 	camera->min_pos_dist = 10;
 	camera->max_pos_dist = 0.1;
@@ -33,6 +35,7 @@ void reset_camera(Camera *camera) {
 
 void update_camera_to_celestial_system(Camera *camera, CelestSystem *system, double initial_pos_pitch, double initial_pos_yaw) {
 	if(system == NULL) { reset_camera(camera); return; }
+	camera->focus = vec3(0, 0, 0);
 	double min_r = calc_orbit_periapsis(system->bodies[0]->orbit);
 	double max_r = calc_orbit_apoapsis(system->bodies[0]->orbit);
 	for(int i = 0; i < system->num_bodies; i++) {
@@ -90,36 +93,54 @@ Vector2 p3d_to_p2d(Camera *camera, Vector3 p3d) {
 	return (Vector2){px, py};
 }
 
+double camera_depth(Camera *camera, Vector3 p3d) {
+	return dot_vec3(subtract_vec3(p3d, camera->pos), camera->looking);
+}
+
+// Pixels covered by one metre at the given depth, matching p3d_to_p2d.
+double camera_pixels_per_meter(Camera *camera, double depth) {
+	double hw = camera->screen->width < camera->screen->height ? camera->screen->width : camera->screen->height;
+	return M_PI * 2 * (hw / 2.0) / depth;
+}
+
 void update_camera_position_from_angles(Camera *camera, double pos_pitch, double pos_yaw, double dist) {
-	camera->pos = (Vector3) {0, dist * cos(pos_pitch), dist * sin(pos_pitch)}; // yaw = 0 -> x: right, y: up/forward
-	camera->pos = rotate_vector_around_axis(camera->pos, vec3(0, 0, 1), pos_yaw);
+	Vector3 offset = (Vector3) {0, dist * cos(pos_pitch), dist * sin(pos_pitch)}; // yaw = 0 -> x: right, y: up/forward
+	camera->pos = add_vec3(camera->focus, rotate_vector_around_axis(offset, vec3(0, 0, 1), pos_yaw));
 }
 
 void update_camera_distance_wrt_width_at_center(Camera *camera, double visible_width) {
-	camera->pos = scale_vec3(norm_vec3(camera->pos), visible_width*7);	// 7 from trial and error
+	camera->pos = add_vec3(camera->focus, scale_vec3(norm_vec3(subtract_vec3(camera->pos, camera->focus)), visible_width*7));	// 7 from trial and error
 }
 
 void update_camera_distance_to_center(Camera *camera, double new_distance) {
-	camera->pos = scale_vec3(norm_vec3(camera->pos), new_distance);
+	camera->pos = add_vec3(camera->focus, scale_vec3(norm_vec3(subtract_vec3(camera->pos, camera->focus)), new_distance));
 }
 
 void camera_look_to_center(Camera *camera) {
-	camera->looking = norm_vec3(scale_vec3(camera->pos, -1));
+	camera->looking = norm_vec3(subtract_vec3(camera->focus, camera->pos));
+}
+
+// Moving the focus carries the camera along, so the view direction and distance stay as they were.
+void camera_set_focus(Camera *camera, Vector3 focus) {
+	camera->pos = add_vec3(camera->pos, subtract_vec3(focus, camera->focus));
+	camera->focus = focus;
 }
 
 double get_camera_pos_pitch(Camera *camera) {
-	return M_PI/2 - angle_vec3_vec3(vec3(0,0,1), camera->pos);
+	Vector3 offset = subtract_vec3(camera->pos, camera->focus);
+	return M_PI/2 - angle_vec3_vec3(vec3(0,0,1), offset);
 }
 
 double get_camera_pos_yaw(Camera *camera) {
-	Vector3 pos_proj = vec3(camera->pos.x, camera->pos.y, 0);
+	Vector3 offset = subtract_vec3(camera->pos, camera->focus);
+	Vector3 pos_proj = vec3(offset.x, offset.y, 0);
 	double pos_yaw = angle_vec3_vec3(vec3(0,1,0), pos_proj);
 	if(angle_vec3_vec3(vec3(-1,0,0), pos_proj) > M_PI/2) pos_yaw = 2*M_PI - pos_yaw;
 	return pos_yaw;
 }
 
 double get_camera_distance_to_center(Camera *camera) {
-	return mag_vec3(camera->pos);
+	return mag_vec3(subtract_vec3(camera->pos, camera->focus));
 }
 
 cairo_t * get_camera_screen_cairo(Camera *camera) {
@@ -150,19 +171,22 @@ void resize_camera_screen(Camera *camera) {
 
 void on_camera_zoom(GtkWidget *widget, GdkEventScroll *event, Camera *camera) {
 	double distance = get_camera_distance_to_center(camera);
-	if(event->direction == GDK_SCROLL_UP && mag_vec3(camera->pos) / 1.2 > camera->min_pos_dist) distance /= 1.2;
-	if(event->direction == GDK_SCROLL_DOWN && mag_vec3(camera->pos) * 1.2 < camera->max_pos_dist) distance *= 1.2;
+	if(event->direction == GDK_SCROLL_UP && distance / 1.2 > camera->min_pos_dist) distance /= 1.2;
+	if(event->direction == GDK_SCROLL_DOWN && distance * 1.2 < camera->max_pos_dist) distance *= 1.2;
 
 	update_camera_distance_to_center(camera, distance);
 }
 
-void on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
+// Returns FALSE so later press handlers (e.g. double-click focus) still run.
+gboolean on_enable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
 	camera->rotation_sensitive = TRUE;
 	camera->screen->last_mouse_pos = (Vector2) {event->x, event->y};
+	return FALSE;
 }
 
-void on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
+gboolean on_disable_camera_rotation(GtkWidget *widget, GdkEventButton *event, Camera *camera) {
 	camera->rotation_sensitive = FALSE;
+	return FALSE;
 }
 
 void on_camera_rotate(Camera *camera, GdkEventButton *event) {

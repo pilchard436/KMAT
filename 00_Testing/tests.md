@@ -41,10 +41,6 @@
 
 # Budgeted powered-flyby search (2026-10-15)
 
-The opt-in rejected-route audit and its measured recovery rates are documented
-in [rejection_audit.md](rejection_audit.md). Run its focused regression with
-`ctest --test-dir build --output-on-failure -R KMATRejectionAudit`.
-
 Build and run the focused checks from the repository root:
 
 ```powershell
@@ -72,6 +68,23 @@ raises the mismatch from 0.000 to about 849,000 m/s. The same run requires that
 rejected routes are repaired, recovered routes reach refinement, and counts stay
 consistent (recovered at most attempted, attempted at most rejected). The unit
 suite also checks that a 0.5 m/s excess-speed change keeps a powered burn.
+
+Deep-space maneuvers (`allow_dsm`, off by default) are tested in the same run. Each
+leg may have one maneuver: the departure velocity changes by a delta-v, the route
+coasts for a fraction eta of the leg, and a second Lambert arc reaches the next
+encounter. A zero delta-v reproduces the plain route within the evaluator's
+convergence noise (checked to 10 m/s), and a maneuver counts toward the satellite
+delta-v limit. The checks are:
+
+- fixed-date routes: the optimizer never returns more than the plain cost, its
+  returned maneuvers re-evaluate to the same cost, a known route saves more than 100
+  m/s, and a tight satellite limit rejects the maneuver;
+- full search with and without DSMs on Earth-Venus-Jupiter: the best flyby route must
+  not get worse and must improve by at least 50 m/s (measured 26,570.9 to 26,408.5
+  m/s), and every route carrying a maneuver must cost at least 1 m/s less than the
+  same route recomputed from its dates without it;
+- a `.itins` save and reload keeps every maneuver node and the best total delta-v
+  (without the loader fix for body id -1 this crashes).
 
 Local Windows RelWithDebInfo measurements, profiling enabled:
 

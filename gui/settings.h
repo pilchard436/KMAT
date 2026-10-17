@@ -8,7 +8,6 @@ enum DefaultDepartureDate {
 	DEFAULT_DEPARTURE_DATE_TODAY
 };
 
-enum LambertSolverMethod get_settings_lambert_solver_method();
 
 void init_global_settings(GtkBuilder *builder);
 enum DateType get_settings_datetime_type();
@@ -20,6 +19,5 @@ enum DefaultDepartureDate get_settings_default_departure_date();
 G_MODULE_EXPORT void on_change_datetime_type();
 G_MODULE_EXPORT void on_change_default_system();
 G_MODULE_EXPORT void on_change_default_departure_date();
-G_MODULE_EXPORT void on_change_lambert_solver();
 
 #endif //KSP_SETTINGS_H

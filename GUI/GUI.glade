@@ -883,23 +883,11 @@ The departure burn is minimized over the orbit.</property>
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
                         <property name="halign">end</property>
-                        <property name="label" translatable="yes">Max Total dv:</property>
-                      </object>
-                      <packing>
-                        <property name="left-attach">0</property>
-                        <property name="top-attach">0</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkLabel">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="halign">end</property>
                         <property name="label" translatable="yes">Max Departure dv:</property>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>
-                        <property name="top-attach">1</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
@@ -911,20 +899,7 @@ The departure burn is minimized over the orbit.</property>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>
-                        <property name="top-attach">2</property>
-                      </packing>
-                    </child>
-                    <child>
-                      <object class="GtkEntry" id="tf_ic_totdv">
-                        <property name="visible">True</property>
-                        <property name="can-focus">True</property>
-                        <property name="has-frame">False</property>
-                        <property name="text" translatable="yes">100000</property>
-                        <property name="xalign">1</property>
-                      </object>
-                      <packing>
-                        <property name="left-attach">1</property>
-                        <property name="top-attach">0</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
@@ -937,7 +912,7 @@ The departure burn is minimized over the orbit.</property>
                       </object>
                       <packing>
                         <property name="left-attach">1</property>
-                        <property name="top-attach">1</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
@@ -951,7 +926,7 @@ The departure burn is minimized over the orbit.</property>
                       </object>
                       <packing>
                         <property name="left-attach">1</property>
-                        <property name="top-attach">2</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
@@ -987,6 +962,34 @@ The departure burn is minimized over the orbit.</property>
                           <packing>
                             <property name="left-attach">0</property>
                             <property name="top-attach">1</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_allow_dsm">
+                            <property name="label" translatable="yes">Allow deep-space maneuvers</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">2</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_allow_resonant">
+                            <property name="label" translatable="yes">Allow resonant flybys</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">3</property>
                           </packing>
                         </child>
                       </object>
@@ -2671,6 +2674,42 @@ The departure burn is minimized over the orbit.</property>
                             <property name="top-attach">1</property>
                           </packing>
                         </child>
+                        <child>
+                          <object class="GtkToggleButton" id="tb_tp_animate">
+                            <property name="label" translatable="yes">Animate</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">True</property>
+                            <signal name="toggled" handler="on_tp_animate_toggled" swapped="no"/>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">2</property>
+                            <property name="width">2</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="cb_tp_anim_speed">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="active">3</property>
+                            <items>
+                              <item translatable="yes">1 hour / s</item>
+                              <item translatable="yes">6 hours / s</item>
+                              <item translatable="yes">1 day / s</item>
+                              <item translatable="yes">5 days / s</item>
+                              <item translatable="yes">10 days / s</item>
+                              <item translatable="yes">30 days / s</item>
+                              <item translatable="yes">100 days / s</item>
+                              <item translatable="yes">1 year / s</item>
+                            </items>
+                          </object>
+                          <packing>
+                            <property name="left-attach">2</property>
+                            <property name="top-attach">2</property>
+                            <property name="width">3</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>
@@ -2751,34 +2790,6 @@ The departure burn is minimized over the orbit.</property>
                           <packing>
                             <property name="left-attach">3</property>
                             <property name="top-attach">0</property>
-                          </packing>
-                        </child>
-                        <child>
-                          <object class="GtkButton" id="bt_tp_add_transfer">
-                            <property name="label" translatable="yes">Add Transfer</property>
-                            <property name="visible">True</property>
-                            <property name="can-focus">True</property>
-                            <property name="receives-default">True</property>
-                            <signal name="clicked" handler="on_add_transfer" swapped="no"/>
-                          </object>
-                          <packing>
-                            <property name="left-attach">0</property>
-                            <property name="top-attach">2</property>
-                            <property name="width">2</property>
-                          </packing>
-                        </child>
-                        <child>
-                          <object class="GtkButton" id="bt_tp_remove_transfer">
-                            <property name="label" translatable="yes">Remove Transfer</property>
-                            <property name="visible">True</property>
-                            <property name="can-focus">True</property>
-                            <property name="receives-default">True</property>
-                            <signal name="clicked" handler="on_remove_transfer" swapped="no"/>
-                          </object>
-                          <packing>
-                            <property name="left-attach">2</property>
-                            <property name="top-attach">2</property>
-                            <property name="width">2</property>
                           </packing>
                         </child>
                         <child>
@@ -2869,6 +2880,24 @@ The departure burn is minimized over the orbit.</property>
                           </packing>
                         </child>
                         <child>
+                          <object class="GtkLabel" id="lb_tp_dv_warning">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="halign">center</property>
+                            <property name="justify">center</property>
+                            <property name="wrap">True</property>
+                            <attributes>
+                              <attribute name="weight" value="bold"/>
+                              <attribute name="foreground" value="#ff3333"/>
+                            </attributes>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">7</property>
+                            <property name="width">4</property>
+                          </packing>
+                        </child>
+                        <child>
                           <object class="GtkScrolledWindow">
                             <property name="visible">True</property>
                             <property name="can-focus">True</property>
@@ -2918,7 +2947,7 @@ The departure burn is minimized over the orbit.</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
-                            <property name="top-attach">7</property>
+                            <property name="top-attach">8</property>
                             <property name="width">4</property>
                           </packing>
                         </child>
@@ -5827,32 +5856,6 @@ ISO-like Kerbal:</property>
               <packing>
                 <property name="left-attach">1</property>
                 <property name="top-attach">3</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Lambert Solver:</property>
-              </object>
-              <packing>
-                <property name="left-attach">0</property>
-                <property name="top-attach">4</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkComboBoxText" id="cb_settings_lambert_solver">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <items>
-                  <item id="izzo" translatable="yes">Izzo (fast)</item>
-                  <item id="legacy" translatable="yes">Legacy</item>
-                </items>
-                <signal name="changed" handler="on_change_lambert_solver" swapped="no"/>
-              </object>
-              <packing>
-                <property name="left-attach">1</property>
-                <property name="top-attach">4</property>
               </packing>
             </child>
           </object>

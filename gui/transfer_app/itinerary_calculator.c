@@ -25,7 +25,8 @@ GObject *tf_ic_maxdur;
 static GObject *rb_ic_maxarrdate;
 static GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
-GObject *tf_ic_totdv;
+static GtkWidget *cb_ic_allow_dsm;
+static GtkWidget *cb_ic_allow_resonant;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
 GObject *vp_ic_fbbodies;
@@ -340,7 +341,7 @@ static void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data
 
 static gboolean update_ic_reference_defaults(void) {
 	if(ic_system == NULL || tf_ic_mindepdate == NULL || tf_ic_maxarrdate == NULL ||
-		tf_ic_maxdur == NULL || tf_ic_totdv == NULL || tf_ic_depdv == NULL || tf_ic_satdv == NULL) return FALSE;
+		tf_ic_maxdur == NULL || tf_ic_depdv == NULL || tf_ic_satdv == NULL) return FALSE;
 	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
 	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
 	if(departure_index < 0 || departure_index >= ic_system->num_bodies ||
@@ -375,8 +376,6 @@ static gboolean update_ic_reference_defaults(void) {
 	gtk_entry_set_text(GTK_ENTRY(tf_ic_depdv), value_text);
 	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_satellite_dv);
 	gtk_entry_set_text(GTK_ENTRY(tf_ic_satdv), value_text);
-	g_snprintf(value_text, sizeof(value_text), "%.0f", defaults.max_total_dv);
-	gtk_entry_set_text(GTK_ENTRY(tf_ic_totdv), value_text);
 	return TRUE;
 }
 
@@ -424,7 +423,12 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
 	}
 	cb_ic_transfertype = gtk_builder_get_object(builder, "cb_ic_transfertype");
-	tf_ic_totdv = gtk_builder_get_object(builder, "tf_ic_totdv");
+	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
+	if(cb_ic_allow_dsm != NULL)
+		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
+	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
+	if(cb_ic_allow_resonant != NULL)
+		set_stable_tooltip(cb_ic_allow_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search several times slower.");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
@@ -704,14 +708,16 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.jd_max_arr = time_limits.max_arrival_jd;
 	ic_calc_data.max_duration = time_limits.max_duration_days;
 
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_totdv));
-	ic_calc_data.dv_filter.max_totdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_depdv));
 	ic_calc_data.dv_filter.max_depdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_satdv));
 	ic_calc_data.dv_filter.max_satdv = strtod(string, NULL);
+	// Departure burn is capped by its own limit and every later burn by the satellite limit.
+	ic_calc_data.dv_filter.max_totdv = ic_calc_data.dv_filter.max_depdv + ic_calc_data.dv_filter.max_satdv;
 	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
 	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
+	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
+		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
 
 	ic_calc_data.dv_filter.dep_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))]->atmo_alt + ic_dep_periapsis;
 	ic_calc_data.dv_filter.arr_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody))]->atmo_alt + ic_arr_periapsis;
@@ -732,6 +738,8 @@ static void prepare_ic_calc_data_from_widgets() {
 			.dep_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))],
 			.arr_body = arr_body,
 			.num_flyby_bodies = get_num_selected_bodies_from_grid(grid_ic_fbbodies),
+			.allow_resonant = cb_ic_allow_resonant != NULL &&
+				gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_resonant)),
 	};
 	seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
 	ic_calc_data.seq_info.to_target = seq_info;

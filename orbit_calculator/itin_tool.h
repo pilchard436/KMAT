@@ -2,6 +2,7 @@
 #define KSP_ITIN_TOOL_H
 
 #include "tools/celestial_systems.h"
+#include "orbitlib_transfer.h"
 #include <stdio.h>
 
 struct ItinStep {
@@ -22,6 +23,7 @@ typedef union ItinSequenceInfo {
 		CelestSystem *system;
 		Body *dep_body, *arr_body, **flyby_bodies;
 		int num_flyby_bodies;
+		int allow_resonant;	// also search flybys that return to the same body after revolutions
 	} to_target;
 
 	struct ItinSequenceInfoSpecItin {
@@ -67,15 +69,25 @@ void begin_powered_seed_search(PoweredSeedSearchStats *stats);
 
 enum LastTransferType {TF_FLYBY, TF_CAPTURE, TF_CIRC};
 
-// find viable flybys to next body with a given arrival trajectory
+// find viable flybys to next body with a given arrival trajectory; the same body gives resonant (multi-revolution) returns
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);
+
+// A leg is solved as variant 0 (no revolutions) or as 1..LEG_VARIANT_COUNT-1: revolutions (v+1)/2, branch (v-1)%2.
+#define LEG_VARIANT_MAX_REVS 4
+#define LEG_VARIANT_COUNT (1 + 2 * LEG_VARIANT_MAX_REVS)
+Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, int variant,
+		LambertCancelCheck cancel_check, void *cancel_context);
+// Picks the variant whose departure velocity is closest to v_ref; returns 0 if none exists.
+int nearest_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, Vector3 v_ref, Lambert3 *leg, int *variant);
+// Samples of (duration, variant) for a first leg that returns to the departure body, around 1 and 2 of its periods.
+int resonant_departure_sample_count(void);
+void resonant_departure_sample(int index, double period_days, double *duration_days, int *variant);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 void set_itin_search_lambert_counter(unsigned long long *counter);
 void set_itin_search_flyby_profile(Body **bodies, int num_bodies, ItinFlybyProfileStats *stats);
 #endif
 
 // find viable flybys to next body with a given arrival trajectory
-void find_viable_dsb_flybys(struct ItinStep *tf, Ephem **ephems, Body *next_body, double min_dt0, double max_dt0, double min_dt1, double max_dt1);
 
 // return departure step
 struct ItinStep * get_first(struct ItinStep *tf);
@@ -147,10 +159,35 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 
 void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string);
 
+// buffer size that fits every text produced by itinerary_step_parameters_to_string
+#define ITIN_STEP_TEXT_SIZE 512
+
 void itinerary_step_parameters_to_string(char *s_label, char *s_values, enum DateType date, double dep_periapsis, double arr_periapsis, struct ItinStep *step);
 
 // removes this and all now unneeded steps from itineraries (no next node before arrival)
 void remove_step_from_itinerary(struct ItinStep *step);
+
+// delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
+double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
+
+// Smallest periapsis radius a powered flyby may use: surface, atmosphere and 10 km, or 10% of the body radius
+// (inside the body) while unrestricted. Unrestricted mode is per thread; it returns the previous setting.
+double flyby_minimum_periapsis(Body *body);
+int set_flyby_unrestricted_periapsis(int enable);
+// Metres by which the unpowered periapsis of a flyby step lies below the minimum safe radius (surface, atmosphere
+// and 10 km); 0 if it can be flown as a gravity assist or the step is not a flyby. A positive value means the
+// unpowered trajectory would enter the planet or its atmosphere and the route only works with the flyby burn.
+double flyby_periapsis_shortfall(struct ItinStep *step);
+// 1 if the flown periapsis of a flyby step is below the minimum safe radius (surface, atmosphere and 10 km): no burn can fix it.
+int flyby_below_min_safe(struct ItinStep *step);
+// 1 if a powered flyby with these velocities can be flown at or above the minimum periapsis (cached).
+int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body);
+int count_flybys_below_min_safe(struct ItinStep *step_in_route);
+// Number of flybys in the route with a shortfall, and the largest shortfall in metres (largest may be NULL).
+int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall);
+
+// sets a step's date and pushes later steps back if needed; a maneuver node slides along its incoming arc
+void set_itinerary_step_date(struct ItinStep *step, CelestSystem *system, double date);
 
 // free to itinerary allocated memory
 void free_itinerary(struct ItinStep *step);

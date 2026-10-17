@@ -13,8 +13,13 @@ enum CoordAxisLabelType {COORD_LABEL_NUMBER, COORD_LABEL_DATE, COORD_LABEL_DURAT
 void draw_stroke(cairo_t *cr, Vector2 p1, Vector2 p2);
 void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date);
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date);
+void register_body_occluders(CelestSystem *system, double jd_date);
 void draw_orbit(Camera *camera, Orbit orbit);
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
+// Where the spacecraft is on the itinerary at a date; 0 if there is no itinerary.
+int itinerary_spacecraft_position(CelestSystem *system, struct ItinStep *itin, double date, Vector3 *r);
+void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
+void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date);
 void draw_orbit_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r, Vector3 v, Body *attractor);
 void draw_body_2d(cairo_t *cr, Vector2 center, double scale, Vector3 r);
 double calc_scale(int area_width, int area_height, Body *farthest_body);

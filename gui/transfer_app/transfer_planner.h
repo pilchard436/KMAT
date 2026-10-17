@@ -31,8 +31,6 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_tp(GtkWidget* widget, gpointe
 G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_goto_transfer_date(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_transfer_body_select(GtkWidget* widget, gpointer data);
-G_MODULE_EXPORT void on_add_transfer(GtkWidget* widget, gpointer data);
-G_MODULE_EXPORT void on_remove_transfer(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data);
 //G_MODULE_EXPORT void on_find_itinerary(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_show_itin_overview();
