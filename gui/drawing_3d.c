@@ -363,9 +363,11 @@ static int hyperbola_from_asymptote(Body *body, Vector3 direction, double excess
 	if(!(soi > periapsis_radius) || !(excess_speed > 0) || !(body->mu > 0)) return 0;
 	double impact = periapsis_radius * sqrt(1 + 2 * body->mu / (periapsis_radius * excess_speed * excess_speed));
 	if(!(soi > impact)) return 0;
-	Vector3 axis = fabs(direction.z) < 0.95 ? vec3(0, 0, 1) : vec3(1, 0, 0);
-	Vector3 normal = norm_vec3(cross_vec3(direction, axis));
-	Vector3 side = cross_vec3(normal, direction);
+	// The plane that holds the asymptote and lies closest to the ecliptic, flown prograde.
+	Vector3 up = vec3(0, 0, 1);
+	Vector3 flat = subtract_vec3(up, scale_vec3(direction, dot_vec3(up, direction)));
+	Vector3 normal = mag_vec3(flat) > 1e-6 ? norm_vec3(flat) : vec3(1, 0, 0);
+	Vector3 side = cross_vec3(direction, normal);
 	double along = sqrt(soi * soi - impact * impact);
 	Vector3 r = add_vec3(scale_vec3(direction, incoming ? -along : along), scale_vec3(side, impact));
 	Vector3 v = scale_vec3(direction, sqrt(excess_speed * excess_speed + 2 * body->mu / soi));
@@ -438,12 +440,23 @@ void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct Iti
 			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 0, &orbit)) {
 				set_leg_color(cr, leg, past, 1);
 				draw_conic_arc(camera, orbit, 0, wrapped_true_anomaly(orbit.ta), offset);
+				// The departure date is the periapsis passage; the craft leaves along the hyperbola from there.
+				double exit = step->date + fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
+				if(current_time >= step->date && current_time <= exit) {
+					Orbit at_periapsis = orbit;
+					at_periapsis.ta = 0;
+					draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(osv_from_orbit(at_periapsis), planet, (current_time - step->date) * 86400).r, offset));
+				}
 			}
 		} else if(step->prev != NULL) {
 			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
 			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 1, &orbit)) {
 				set_leg_color(cr, leg - 1, past, 1);
 				draw_conic_arc(camera, orbit, wrapped_true_anomaly(orbit.ta), 0, offset);
+				// The arrival date is the periapsis passage; the craft comes in along the hyperbola before it.
+				double entry = step->date - fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
+				if(current_time >= entry && current_time <= step->date)
+					draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(osv_from_orbit(orbit), planet, (current_time - entry) * 86400).r, offset));
 			}
 		}
 		set_stroke_width(1);
