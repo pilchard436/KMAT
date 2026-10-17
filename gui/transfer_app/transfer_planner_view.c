@@ -203,15 +203,23 @@ void tp_update_show_body_list() {
 		gtk_widget_set_halign(widget, GTK_ALIGN_START);
 		gtk_grid_attach(GTK_GRID(grid_tp_bodies), widget, 0, row++, 1, 1);
 
+		// The moons are listed only while their planet is shown.
 		CelestSystem *moons = tp_system->bodies[body_idx]->system;
-		for(int j = 0; moons != NULL && j < moons->num_bodies && moon_idx < tp_num_moons; j++, moon_idx++) {
+		if(moons == NULL || moons->num_bodies == 0) continue;
+		GtkWidget *moon_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		gtk_widget_set_no_show_all(moon_box, TRUE);
+		for(int j = 0; j < moons->num_bodies && moon_idx < tp_num_moons; j++, moon_idx++) {
 			GtkWidget *moon_widget = gtk_check_button_new_with_label(tp_moons[moon_idx]->name);
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(moon_widget), tp_moon_show[moon_idx]);
 			g_signal_connect(moon_widget, "clicked", G_CALLBACK(on_body_toggle), &tp_moon_show[moon_idx]);
 			gtk_widget_set_halign(moon_widget, GTK_ALIGN_START);
 			gtk_widget_set_margin_start(moon_widget, 16);
-			gtk_grid_attach(GTK_GRID(grid_tp_bodies), moon_widget, 0, row++, 1, 1);
+			gtk_box_pack_start(GTK_BOX(moon_box), moon_widget, FALSE, FALSE, 0);
+			gtk_widget_show(moon_widget);
 		}
+		gtk_widget_set_visible(moon_box, body_show_status_tp[body_idx]);
+		g_object_set_data(G_OBJECT(widget), "moon-box", moon_box);
+		gtk_grid_attach(GTK_GRID(grid_tp_bodies), moon_box, 0, row++, 1, 1);
 	}
 	gtk_container_add (GTK_CONTAINER (vp_tp_bodies), grid_tp_bodies);
 	gtk_widget_show_all(GTK_WIDGET(vp_tp_bodies));
@@ -261,6 +269,8 @@ void tp_update_bodies() {
 G_MODULE_EXPORT void on_body_toggle(GtkWidget* widget, gpointer data) {
 	gboolean *show_body = (gboolean *) data;  // Cast data back to group struct
 	*show_body = !*show_body;
+	GtkWidget *moon_box = g_object_get_data(G_OBJECT(widget), "moon-box");
+	if(moon_box != NULL) gtk_widget_set_visible(moon_box, *show_body);
 	update_tp_system_view();
 }
 
