@@ -150,6 +150,18 @@ add_executable(KMAT
     00_Testing/testing.h
     00_Testing/testing_algorithms.c
     00_Testing/testing_algorithms.h
+    00_Testing/test_support.c
+    00_Testing/unit_tests.c
+    00_Testing/unit_tests_math.c
+    00_Testing/unit_tests_lambert.c
+    00_Testing/unit_tests_powered_flyby.c
+    00_Testing/unit_tests_starting_orbit.c
+    00_Testing/unit_tests_formats.c
+    00_Testing/unit_tests_porkchop.c
+    00_Testing/unit_tests_reference_defaults.c
+    00_Testing/unit_tests_itinerary.c
+    00_Testing/unit_tests_moon_flyby.c
+    00_Testing/unit_tests_optimizer.c
     gui/gui_tools/camera.c
     gui/gui_tools/camera.h
     gui/gui_tools/screen.c
@@ -159,68 +171,16 @@ add_executable(KMAT
     tools/celestial_systems.c
 )
 
-add_executable(KMATUnitTests
-    00_Testing/unit_tests.c
-    00_Testing/test_support.c
-    00_Testing/unit_tests_math.c
-    00_Testing/unit_tests_lambert.c
-    00_Testing/unit_tests_powered_flyby.c
-    00_Testing/unit_tests_starting_orbit.c
-    00_Testing/unit_tests_formats.c
-    00_Testing/unit_tests_porkchop.c
-    00_Testing/unit_tests_reference_defaults.c
-    tools/file_io_format.c
-    tools/itinerary_date_limits.c
-    tools/itinerary_reference_defaults.c
-    tools/starting_orbit.c
-    gui/transfer_app/porkchop_analyzer_model.c
-    tools/tool_funcs.c
-)
-
-target_link_libraries(KMATUnitTests PRIVATE orbitlib geometrylib)
-target_include_directories(KMATUnitTests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
-)
-
-add_executable(KMATItineraryUnitTests
-    00_Testing/unit_tests_itinerary.c
-    00_Testing/unit_tests_moon_flyby.c
-    00_Testing/test_support.c
-    ${KMAT_ITINERARY_SOURCES}
-    ${KMAT_FILE_IO_SOURCES}
-    tools/file_io_format.c
-    tools/starting_orbit.c
-    tools/thread_pool.c
-    tools/tool_funcs.c
-)
-target_link_libraries(KMATItineraryUnitTests PRIVATE orbitlib geometrylib)
-target_include_directories(KMATItineraryUnitTests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
-)
-
-add_executable(KMATOptimizerUnitTests
-    00_Testing/unit_tests_optimizer.c
-    00_Testing/test_support.c
-    orbit_calculator/powered_route_candidates.c
-    ${KMAT_ITINERARY_SOURCES}
-    tools/starting_orbit.c
-    tools/thread_pool.c
-    tools/tool_funcs.c
-)
-target_link_libraries(KMATOptimizerUnitTests PRIVATE orbitlib geometrylib)
-target_include_directories(KMATOptimizerUnitTests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
-)
-
-add_executable(KMATLambertBenchmark 00_Testing/lambert_benchmark.c)
-target_link_libraries(KMATLambertBenchmark PRIVATE orbitlib geometrylib)
-target_include_directories(KMATLambertBenchmark PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
-)
+# The unit suites are compiled into KMAT and run after every build of it.
+option(KMAT_RUN_UNIT_TESTS "Run the unit tests after building KMAT" ON)
+if(KMAT_RUN_UNIT_TESTS)
+    add_custom_command(TARGET KMAT POST_BUILD
+        COMMAND KMAT --unit-tests
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Running unit tests"
+        USES_TERMINAL
+    )
+endif()
 
 add_executable(KMATSearchIntegration
     00_Testing/itinerary_search_integration.c
@@ -308,10 +268,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         wininet
     )
 
-    target_link_libraries(KMATUnitTests PRIVATE urlmon)
     target_link_libraries(KMATSearchIntegration PRIVATE urlmon glib-2.0 gobject-2.0)
-    target_link_libraries(KMATItineraryUnitTests PRIVATE urlmon glib-2.0 gobject-2.0)
-    target_link_libraries(KMATOptimizerUnitTests PRIVATE urlmon)
 
     target_include_directories(KMAT PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
@@ -331,7 +288,6 @@ else(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_definitions(${GTK3_CFLAGS_OTHER})
     target_link_libraries(KMAT m ${GTK3_LIBRARIES} sqlite3 orbitlib)
     target_link_libraries(KMATSearchIntegration PRIVATE ${GTK3_LIBRARIES})
-    target_link_libraries(KMATItineraryUnitTests PRIVATE ${GTK3_LIBRARIES})
 
     target_link_options(KMAT PRIVATE -rdynamic)
 
@@ -344,9 +300,7 @@ endif()
 if(BUILD_TESTING)
     add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
     add_test(NAME KMATSearchIntegration COMMAND KMATSearchIntegration)
-    add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
-    add_test(NAME KMATItineraryUnitTests COMMAND KMATItineraryUnitTests)
-    add_test(NAME KMATOptimizerUnitTests COMMAND KMATOptimizerUnitTests)
+    add_test(NAME KMATUnitTests COMMAND KMAT --unit-tests)
     set_tests_properties(KMATIntegrationTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS integration
@@ -355,24 +309,9 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS unit
     )
-    set_tests_properties(KMATOptimizerUnitTests PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        LABELS unit
-    )
-    set_tests_properties(KMATItineraryUnitTests PROPERTIES
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        LABELS unit
-    )
     set_tests_properties(KMATSearchIntegration PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS integration
-    )
-
-    add_custom_target(run_tests ALL
-        COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure -L unit
-        DEPENDS KMATUnitTests KMATItineraryUnitTests KMATOptimizerUnitTests
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-        USES_TERMINAL
     )
 
     add_custom_target(run_integration_tests

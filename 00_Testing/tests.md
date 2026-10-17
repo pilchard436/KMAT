@@ -60,7 +60,7 @@ The `.itins`/`.itin` file tests load fixtures that the suite generates (`00_Test
 Build and run the focused checks from the repository root:
 
 ```powershell
-cmake --build build --target KMAT KMATSearchIntegration KMATUnitTests -j 6
+cmake --build build --target KMAT KMATSearchIntegration -j 6
 ctest --test-dir build --output-on-failure -R '^(KMATUnitTests|KMATSearchIntegration)$' --timeout 60
 ```
 

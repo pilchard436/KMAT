@@ -416,7 +416,7 @@ static void check_search_rejections(void) {
 
 void check_moon_flybys(void);
 
-int main(void) {
+int run_itinerary_unit_tests(void) {
 	check_itinerary_tree();
 	check_flyby_policy();
 	check_leg_variants();
@@ -427,5 +427,7 @@ int main(void) {
 	check_minimum_leg();
 	check_moons_are_saved();
 	check_moon_flybys();
-	return finish_tests("KMAT itinerary unit checks");
+	int failed = finish_tests("KMAT itinerary unit checks");
+	checks = failures = 0;
+	return failed;
 }

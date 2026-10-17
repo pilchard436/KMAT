@@ -34,6 +34,8 @@ int main(int argc, char **argv) {
 	install_crash_log();
 	set_low_priority();
 
+	if(argc > 1 && strcmp(argv[1], "--unit-tests") == 0) return run_unit_tests();
+
 	init_celestial_bodies();
 	init_available_systems("../Celestial_Systems/");
 

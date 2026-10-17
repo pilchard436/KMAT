@@ -114,11 +114,13 @@ static void check_candidate_lifecycle(void) {
 	check_true("undefined vectors are rejected", !is_finite_vector(vec3(NAN, 0, 0)));
 }
 
-int main(void) {
+int run_optimizer_unit_tests(void) {
 	check_random_sequence();
 	check_top_candidates();
 	check_reservoir();
 	check_repair_pool();
 	check_candidate_lifecycle();
-	return finish_tests("KMAT optimizer unit checks");
+	int failed = finish_tests("KMAT optimizer unit checks");
+	checks = failures = 0;
+	return failed;
 }
