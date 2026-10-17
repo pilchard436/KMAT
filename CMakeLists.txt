@@ -29,6 +29,16 @@ elseif(MSVC)
     )
 endif()
 
+set(KMAT_ITINERARY_SOURCES
+    orbit_calculator/itin_tool.c
+    orbit_calculator/itinerary_tree.c
+    orbit_calculator/itinerary_text.c
+    orbit_calculator/flyby_policy.c
+    orbit_calculator/flyby_search.c
+    orbit_calculator/leg_variants.c
+    orbit_calculator/resonant_flybys.c
+)
+
 add_executable(KMAT
     tools/file_io.c
     tools/file_io_format.c
@@ -61,7 +71,7 @@ add_executable(KMAT
     tools/thread_pool.h
     database/database.c
     database/database.h
-    orbit_calculator/itin_tool.c
+    ${KMAT_ITINERARY_SOURCES}
     orbit_calculator/itin_tool.h
     gui/transfer_app/transfer_planner.c
     gui/transfer_app/transfer_planner.h
@@ -149,7 +159,7 @@ add_executable(KMATSearchIntegration
     00_Testing/itinerary_search_integration.c
     orbit_calculator/transfer_calc.c
     orbit_calculator/powered_flyby_optimizer.c
-    orbit_calculator/itin_tool.c
+    ${KMAT_ITINERARY_SOURCES}
     tools/starting_orbit.c
     tools/file_io.c
     tools/file_io_format.c
