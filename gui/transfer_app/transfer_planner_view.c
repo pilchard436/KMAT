@@ -21,6 +21,9 @@ int tp_focus_spacecraft;
 
 static Vector3 tp_body_position(Body *body, double jd) {
 	if(body == NULL || body == tp_system->cb) return vec3(0, 0, 0);
+	// A moon's elements are relative to its planet.
+	if(body->orbit.cb != NULL && body->orbit.cb != tp_system->cb && body->orbit.cb != body)
+		return add_vec3(tp_body_position(body->orbit.cb, jd), osv_from_elements(body->orbit, jd).r);
 	OSV osv = tp_system->prop_method == ORB_ELEMENTS ?
 		osv_from_elements(body->orbit, jd) :
 		osv_from_ephem(body->ephem, body->num_ephems, jd, tp_system->cb);
@@ -56,7 +59,8 @@ static void tp_focus_on(Body *body) {
 	tp_focus_body = body;
 	camera_set_focus(tp_system_camera, tp_body_position(body, current_date_tp));
 	// Frame the sphere of influence, and allow zooming in close to the surface.
-	double soi = fabs(body->orbit.a) * pow(body->mu / tp_system->cb->mu, 0.4);
+	Body *parent = body->orbit.cb != NULL ? body->orbit.cb : tp_system->cb;
+	double soi = fabs(body->orbit.a) * pow(body->mu / parent->mu, 0.4);
 	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
 	update_camera_position_from_angles(tp_system_camera, pitch, yaw, soi * 7);
 	tp_system_camera->min_pos_dist = body->radius * 15;
@@ -86,9 +90,15 @@ gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpo
 		Body *body = i < 0 ? tp_system->cb : tp_system->bodies[i];
 		if(i >= 0 && !body_show_status_tp[i]) continue;
 		Vector2 p = p3d_to_p2d(tp_system_camera, tp_body_position(body, current_date_tp));
-		if(hypot(p.x - event->x, p.y - event->y) > pick_radius) continue;
-		// Overlapping markers resolve to the parent, which is the more massive body.
-		if(hit == NULL || body->mu > hit->mu) hit = body;
+		if(hypot(p.x - event->x, p.y - event->y) <= pick_radius &&
+			// Overlapping markers resolve to the parent, which is the more massive body.
+			(hit == NULL || body->mu > hit->mu)) hit = body;
+		CelestSystem *moons = i >= 0 ? body->system : NULL;
+		for(int j = 0; moons != NULL && j < moons->num_bodies; j++) {
+			Body *moon = moons->bodies[j];
+			Vector2 mp = p3d_to_p2d(tp_system_camera, tp_body_position(moon, current_date_tp));
+			if(hypot(mp.x - event->x, mp.y - event->y) <= pick_radius && (hit == NULL || moon->mu > hit->mu)) hit = moon;
+		}
 	}
 	Vector3 craft;
 	if(hit == NULL && curr_transfer_tp != NULL && itinerary_spacecraft_position(tp_system, curr_transfer_tp, current_date_tp, &craft)) {
