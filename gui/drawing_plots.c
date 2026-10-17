@@ -152,8 +152,8 @@ void draw_data_point(cairo_t *cr, double x, double y, double radius) {
 
 // The best route; a dark outline keeps the red cross visible on red and orange points.
 static void draw_best_route_marker(cairo_t *cr, double x, double y) {
-	const double arm = 6;
-	double widths[2] = {5, 2.5};
+	const double arm = 3.5;
+	double widths[2] = {3.5, 1.5};
 	for(int pass = 0; pass < 2; pass++) {
 		if(pass == 0) cairo_set_source_rgb(cr, 0.05, 0.05, 0.05);
 		else cairo_set_source_rgb(cr, 1, 0, 0);
@@ -335,8 +335,8 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 		cairo_set_source_rgb(buffer_cr, r,g,b);
 
 		Vector2 data_point = vec2(origin.x + m_depdate*(depdate - min_depdate), origin.y + (dur0arrdate1 ? (m_arrdate*(arrdate - min_arrdate)) : (m_dur*(dur - min_dur))));
-		if(i > 0) draw_data_point(buffer_cr, data_point.x, data_point.y, point_radius);
-		else draw_best_route_marker(buffer_cr, data_point.x, data_point.y);
+		draw_data_point(buffer_cr, data_point.x, data_point.y, point_radius);
+		if(i == 0) draw_best_route_marker(buffer_cr, data_point.x, data_point.y);
 
 		i--;
 	}
