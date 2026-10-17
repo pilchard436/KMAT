@@ -26,6 +26,7 @@
 - [x] Review the 10 km clearance, 95%-of-SOI periapsis ceiling, 64-point radius search, and refinement limits in external/orbitlib/src/transfer.c.
 - [x] When a search returns no routes, say which limit removed them (for example all routes exceeded the departure delta-v limit) instead of showing an empty result.
 - [x] Quantify coverage lost to each sampling/budget cutoff using the UI-free profile and objective-grid comparisons.
+- [ ] Multi-flyby routes are under-searched at the default limits (Earth-Venus-Earth-Jupiter: best route 33,654 m/s vs 10,959 m/s reference; see `00_Testing/tests.md`). Allocate the seed budget fairly across first-leg nodes and levels instead of first-come in depth-first order, and revisit the first-leg window; measure with `--coverage-multi`.
 
 ## Integration Tests
 

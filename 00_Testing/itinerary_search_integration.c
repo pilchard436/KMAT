@@ -12,10 +12,13 @@ int main(int argc, char **argv) {
 		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--coverage") == 0)
 		return run_coverage_report();
+	int coverage_reference = argc == 2 && strcmp(argv[1], "--coverage-reference") == 0;
+	int coverage_multi = argc == 2 && strcmp(argv[1], "--coverage-multi") == 0;
+	if(coverage_reference || coverage_multi) argc = 1;
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks|--coverage]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -41,6 +44,15 @@ int main(int argc, char **argv) {
 		mag_vec3(departure_state.r), mag_vec3(arrival_state.r), system->cb).dur / 86400;
 	double min_transfer_duration = 0.4 * hohmann_duration;
 	double max_arrival_jd = departure_jd + min_transfer_duration + 0.25;
+	if(coverage_reference || coverage_multi) {
+		int coverage_result = coverage_multi ? EXIT_SUCCESS : run_coverage_reference(system,
+			departure_body, flyby_body, arrival_body, departure_jd, hohmann_duration);
+		if(coverage_result == EXIT_SUCCESS)
+			coverage_result = run_multi_flyby_coverage(system, departure_body, flyby_body,
+				arrival_body, departure_jd, hohmann_duration);
+		free_celestial_system(system);
+		return coverage_result;
+	}
 	int search_nodes, search_itins;
 
 	int search_valid = run_bounded_search(system, departure_body, arrival_body, departure_jd,

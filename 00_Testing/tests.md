@@ -102,6 +102,37 @@ delta-v limit. The checks are:
 - a `.itins` save and reload keeps every maneuver node and the best total delta-v
   (without the loader fix for body id -1 this crashes).
 
+Search coverage reference (informational, not part of ctest): run
+`KMATSearchIntegration --coverage-reference` from `build`. It scores a dense grid
+(4-day step) of flyby and arrival dates for Earth-Venus-Jupiter with the exact
+objective, merges the grid into valley families (a saddle must rise 3% above the
+shallower valley floor to separate two), keeps families within 50% of the best,
+and reports which ones the search returns routes for (8-day window). Measured on
+the default fixture: 6 families, 3 covered, and the first-leg grid reaches 59 to
+229 days. Raising the seed budget or restricting refinement to local steps did not
+cover more, so coverage there is limited by first-leg reach, not seed budget.
+
+`--coverage-multi` runs only the Earth-Venus-Earth-Jupiter case (about 4 minutes).
+It has three free dates, so it scores a 15-day grid, finds valleys, and refines each
+with a local search on the exact objective before comparing with the search.
+Measured on the default fixture (reference best 10,959 m/s, one departure date);
+search best for that sequence by first-leg window and seed budget per departure:
+
+| First-leg window to a body | Seeds per departure | Best search route (m/s) | Search time |
+| --- | ---: | ---: | ---: |
+| default (about 1.5-3x Hohmann) | 512 | 33,654 | 12 s |
+| default | 2,000 | 25,072 | 46 s |
+| default | 8,000 | 22,203 | 31 s |
+| 3x Hohmann | 512 | 28,749 | not timed |
+| 3x Hohmann | 2,000 | 22,190 | 34 s |
+| 3x Hohmann | 8,000 | 15,788 | 27 s |
+
+No run covered any of the 3 reference families within the 8-day basin window, and
+an unlimited budget did not finish in 6 minutes. Relative to the production setting,
+the wider window alone lowers the best route by 15%, the 8,000-seed budget alone by
+34%, and both together by 53%. Search times are single-departure wall seconds and
+are noisy.
+
 Local Windows RelWithDebInfo measurements, profiling enabled:
 
 | Metric | Branch HEAD before edits | Budgeted implementation |

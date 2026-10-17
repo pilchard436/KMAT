@@ -80,7 +80,7 @@ int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival
 	return valid;
 }
 
-static double score_powered_arrival_route(struct ItinStep *arrival,
+double score_powered_arrival_route(struct ItinStep *arrival,
 		const Itin_Calc_Data *calc_data, Body *flyby_body) {
 	size_t num_steps = 0;
 	int contains_flyby = 0;

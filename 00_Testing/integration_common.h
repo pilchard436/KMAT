@@ -34,7 +34,12 @@ int check_empty_result_reason(CelestSystem *system, Body *departure_body, Body *
 int check_starting_orbit_search(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int run_saved_mission_benchmarks(void);
 int run_full_profile(void);
+double score_powered_arrival_route(struct ItinStep *arrival, const Itin_Calc_Data *calc_data, Body *flyby_body);
 int run_coverage_report(void);
+int run_coverage_reference(CelestSystem *system, Body *departure_body, Body *flyby_body,
+	Body *arrival_body, double departure_jd, double hohmann_duration);
+int run_multi_flyby_coverage(CelestSystem *system, Body *departure_body, Body *venus,
+	Body *arrival_body, double departure_jd, double hohmann_duration);
 extern int benchmark_coverage;
 int check_itinerary_operations(struct ItinStep **departures, int num_departures, CelestSystem *system);
 int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
