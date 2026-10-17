@@ -23,6 +23,10 @@ int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, do
 // (only while the periapsis limit is relaxed, i.e. in the planner; the search only checks for hits).
 int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
 		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result);
+// Cheapest periapsis radius and side that clears every moon at the flyby epoch (cached); 0 if none does.
+// result, radius and side may be NULL. The side is the one passed to calculate_powered_flyby_at_periapsis.
+int plan_flyby_around_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double minimum_periapsis,
+		double jd, PoweredFlybyResult *result, double *radius, int *side);
 // 1 if this flyby would hit a moon or pass inside a moon's sphere of influence (so its moon-free model is invalid)
 // and the periapsis limit is not relaxed.
 int flyby_blocked_by_moon(Body *body, const PoweredFlybyResult *flyby, double flyby_jd);

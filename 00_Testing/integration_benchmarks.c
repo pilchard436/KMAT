@@ -53,6 +53,24 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
 	printf("%s benchmark result: %d departure roots, %d nodes, %d itineraries\n",
 		label, results.num_deps, results.num_nodes, results.num_itins);
+	if(benchmark_coverage) {
+		double best_total = DBL_MAX;
+		for(int i = 0; i < results.num_deps; i++) {
+			int count = get_number_of_itineraries(results.departures[i]);
+			struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+			if(leaves == NULL) continue;
+			int stored = 0;
+			store_itineraries_in_array(results.departures[i], leaves, &stored);
+			for(int j = 0; j < stored; j++) {
+				double total = stored_total_dv(leaves[j], &calc_data, NULL);
+				if(isfinite(total) && total < best_total) best_total = total;
+			}
+			free(leaves);
+		}
+		printf("COVERAGE %s: %d itineraries, best %.3f m/s, %llu seeds added, %llu encounters skipped powered sampling, %llu bucket alternatives omitted\n",
+			label, results.num_itins, best_total, results.powered_seed_stats.seeds_added,
+			results.powered_seed_stats.searches_budget_skipped, results.powered_seed_stats.alternatives_skipped);
+	}
 	if(benchmark_resonant) {
 		int resonant_routes = 0;
 		double best_resonant = DBL_MAX, best_overall = DBL_MAX;
@@ -99,6 +117,31 @@ int run_saved_mission_benchmarks(void) {
 		7282, 7282, 7282, 190e3, 2050e3);
 	free_celestial_system(system);
 	return jupiter_valid && saturn_valid ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+// Reruns the Jupiter mission with different powered-seed budgets to show what the default budget leaves out.
+int run_coverage_report(void) {
+	char system_path[] = "../Celestial_Systems/solar_system.cfg";
+	CelestSystem *system = load_celestial_system_from_cfg_file(system_path);
+	if(system == NULL) {
+		fprintf(stderr, "Failed to load benchmark system: %s\n", system_path);
+		return EXIT_FAILURE;
+	}
+	const char *jupiter_flybys[] = {"EARTH", "MARS", "JUPITER"};
+	const int budgets[] = {64, 128, POWERED_SEEDS_PER_DEPARTURE, 2048};
+	int valid = 1;
+	benchmark_coverage = 1;
+	for(size_t i = 0; i < sizeof(budgets) / sizeof(budgets[0]); i++) {
+		set_powered_seed_budget(budgets[i]);
+		printf("\n##### seed budget per departure: %d #####\n", budgets[i]);
+		valid &= run_saved_mission_benchmark(system, "Jupiter",
+			"EARTH", "JUPITER", jupiter_flybys, 3,
+			2461327.50, 2461692.50, 2463325.50, 1998.0,
+			6939, 6939, 6939, 190e3, 1600e3);
+	}
+	set_powered_seed_budget(POWERED_SEEDS_PER_DEPARTURE);
+	free_celestial_system(system);
+	return valid ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 int run_full_profile(void) {

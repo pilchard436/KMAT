@@ -54,5 +54,10 @@ void run_porkchop_tests(void) {
     group_list[2].show_group = 0;
     expect_int("a single group toggle leaves the others shown", group_list[0].show_group, 1);
     expect_int("the first visible point skips the hidden group", find_first_visible_porkchop_point(group_points, 2), 1);
+    // Toggling must not reorder or reallocate the list, or the rebuilt rows would reset the scroll position.
+    struct PorkchopGroup *list_before = group_list;
+    set_porkchop_groups_visibility(group_list, 3, 0);
+    set_porkchop_groups_visibility(group_list, 3, 1);
+    expect_int("toggling groups keeps the list and its point links in place", list_before == group_list && group_points[0].group == &group_list[2] && group_points[1].group == &group_list[0], 1);
     expect_int("a missing group list changes nothing", set_porkchop_groups_visibility(NULL, 3, 1), 0);
 }

@@ -90,15 +90,25 @@ void check_moon_flybys(void) {
 		&fixture.planet, minimum, TEST_JD, &with_moons));
 	check_near("a free flyby keeps its burn", with_moons.burn_delta_v, plain.burn_delta_v, 1e-9);
 	place_moon(&fixture, 0.1);
-	check_true("the search does not integrate moon gravity", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v == plain.burn_delta_v);
+	check_true("the search re-plans a flyby that passes close to a moon", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
+		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v >= plain.burn_delta_v);
+	analyze_moon_flyby(&fixture.planet, &with_moons, TEST_JD, 0, &effect);
+	check_true("the re-planned flyby clears the moon", !effect.hits_moon && effect.perturbing_moon == NULL);
 	int relaxed = set_flyby_unrestricted_periapsis(1);
 	check_true("a close pass adds the correction to the burn in the planner", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v > plain.burn_delta_v);
 	set_flyby_unrestricted_periapsis(relaxed);
 	place_moon(&fixture, 0);
-	check_true("a flyby that hits a moon is rejected", !calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons));
+	double planned_radius;
+	int planned_side;
+	check_true("a flyby that hits a moon is re-planned around it", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
+		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v >= plain.burn_delta_v &&
+		fabs(with_moons.periapsis_radius - plain.periapsis_radius) > 1e6);
+	analyze_moon_flyby(&fixture.planet, &with_moons, TEST_JD, 0, &effect);
+	check_true("the re-planned flyby does not hit the moon", !effect.hits_moon && effect.perturbing_moon == NULL);
+	check_true("the planned periapsis and side are reported", plan_flyby_around_moons(fixture.incoming, fixture.outgoing,
+		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, NULL, &planned_radius, &planned_side) &&
+		planned_radius > 0 && (planned_side == 1 || planned_side == -1));
 	int previous = set_flyby_unrestricted_periapsis(1);
 	check_true("the planner keeps it to show the problem", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons));

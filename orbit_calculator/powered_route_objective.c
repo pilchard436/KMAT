@@ -142,6 +142,14 @@ static int solve_leg(const PoweredRouteCandidate *candidate, size_t index, Celes
 	return 1;
 }
 
+// A flyby whose moon-free optimum hits a moon is flown at a fixed periapsis radius and side instead.
+static int route_flyby(Vector3 incoming, Vector3 outgoing, Body *body, double minimum_periapsis,
+		double forced_radius, int forced_side, PoweredFlybyResult *result) {
+	if(forced_radius > 0)
+		return calculate_powered_flyby_at_periapsis(incoming, outgoing, vec3(0, 0, 0), body, forced_radius, forced_side, result);
+	return calculate_powered_flyby(incoming, outgoing, vec3(0, 0, 0), body, minimum_periapsis, result);
+}
+
 static double evaluate_route_variants_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
 		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out, const int *variants) {
 	if(itinerary_search_cancelled(NULL)) return DBL_MAX;
@@ -169,11 +177,16 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	Vector3 *incoming_excess = calloc(candidate->num_steps, sizeof(*incoming_excess));
 	Vector3 *outgoing_excess = calloc(candidate->num_steps, sizeof(*outgoing_excess));
 	PoweredDsmResult *dsm_local = calloc(candidate->num_steps, sizeof(*dsm_local));
-	if(flybys == NULL || incoming_excess == NULL || outgoing_excess == NULL || dsm_local == NULL) {
+	double *forced_radius = calloc(candidate->num_steps, sizeof(*forced_radius));
+	int *forced_side = calloc(candidate->num_steps, sizeof(*forced_side));
+	if(flybys == NULL || incoming_excess == NULL || outgoing_excess == NULL || dsm_local == NULL ||
+		forced_radius == NULL || forced_side == NULL) {
 		free(flybys);
 		free(incoming_excess);
 		free(outgoing_excess);
 		free(dsm_local);
+		free(forced_radius);
+		free(forced_side);
 		return DBL_MAX;
 	}
 	double total_dv = DBL_MAX;
@@ -183,14 +196,16 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 		double minimum_periapsis = flyby_minimum_periapsis(body);
 		incoming_excess[i] = candidate->seed_incoming != NULL ? candidate->seed_incoming[i] : subtract_vec3(legs[i - 1].v1, states[i].v);
 		outgoing_excess[i] = candidate->seed_outgoing != NULL ? candidate->seed_outgoing[i] : subtract_vec3(legs[i].v0, states[i].v);
-		if(!calculate_powered_flyby(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0),
-			body, minimum_periapsis, &flybys[i])) {
+		if(!route_flyby(incoming_excess[i], outgoing_excess[i], body, minimum_periapsis,
+			forced_radius[i], forced_side[i], &flybys[i])) {
 			valid_route = 0;
 			break;
 		}
 	}
 	if(itinerary_search_cancelled(NULL)) valid_route = 0;
 
+	int replanned = 0;
+iterate:;
 	int converged = 0;
 	double best_residual = DBL_MAX;
 	for(int iteration = 0; valid_route && !itinerary_search_cancelled(NULL) && iteration < 60; iteration++) {
@@ -261,8 +276,8 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 			new_outgoing_excess = scale_vec3(add_vec3(outgoing_excess[i], new_outgoing_excess), 0.5);
 			PoweredFlybyResult updated_flyby;
 			double minimum_periapsis = flyby_minimum_periapsis(body);
-			if(!calculate_powered_flyby(new_incoming_excess, new_outgoing_excess,
-				vec3(0, 0, 0), body, minimum_periapsis, &updated_flyby)) {
+			if(!route_flyby(new_incoming_excess, new_outgoing_excess, body, minimum_periapsis,
+				forced_radius[i], forced_side[i], &updated_flyby)) {
 				valid_route = 0;
 				break;
 			}
@@ -308,8 +323,21 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	}
 
 	// Checked once on the converged flybys; the iteration above changes them too often to check each time.
-	for(size_t i = 1; i + 1 < candidate->num_steps; i++)
-		if(flyby_blocked_by_moon(candidate->bodies[i], &flybys[i], times[i])) goto cleanup;
+	int blocked_flybys = 0;
+	for(size_t i = 1; i + 1 < candidate->num_steps; i++) {
+		if(!flyby_blocked_by_moon(candidate->bodies[i], &flybys[i], times[i])) continue;
+		// A second pass that is blocked again is not worth chasing.
+		if(replanned || !plan_flyby_around_moons(incoming_excess[i], outgoing_excess[i], vec3(0, 0, 0), candidate->bodies[i],
+			flyby_minimum_periapsis(candidate->bodies[i]), times[i], NULL, &forced_radius[i], &forced_side[i])) goto cleanup;
+		blocked_flybys++;
+	}
+	if(blocked_flybys > 0) {
+		for(size_t i = 1; i + 1 < candidate->num_steps; i++)
+			if(forced_radius[i] > 0 && !route_flyby(incoming_excess[i], outgoing_excess[i], candidate->bodies[i],
+				flyby_minimum_periapsis(candidate->bodies[i]), forced_radius[i], forced_side[i], &flybys[i])) goto cleanup;
+		replanned = 1;
+		goto iterate;
+	}
 
 	Body *departure_body = candidate->bodies[0];
 	Vector3 departure_vinf = subtract_vec3(legs[0].v0, states[0].v);
@@ -360,6 +388,8 @@ cleanup:
 	free(incoming_excess);
 	free(outgoing_excess);
 	free(dsm_local);
+	free(forced_radius);
+	free(forced_side);
 	return total_dv;
 }
 

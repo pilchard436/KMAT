@@ -57,7 +57,7 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Eeloo"},
 			"Kerbin",
 			"Eeloo",
-			766, 238, // expected num_nodes and num_itins
+			805, 249, // expected num_nodes and num_itins
 			60, 2992, 2 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -74,7 +74,7 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Jool"},
 			"Kerbin",
 			"Kerbin",
-			33196, 16535, // expected num_nodes and num_itins
+			35538, 17728, // expected num_nodes and num_itins
 			180, 1296, 45 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -91,7 +91,7 @@ int run_tests() {
 			(char *[]){"Mercury", "Venus", "Earth"},
 			"Earth",
 			"Earth",
-			16740, 8148, // expected num_nodes and num_itins
+			17335, 8412, // expected num_nodes and num_itins
 			270, 4379, 35 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -108,7 +108,7 @@ int run_tests() {
 			(char *[]){"Venus", "Earth", "Mars", "Jupiter"},
 			"Earth",
 			"Jupiter",
-			17386, 7613, // expected num_nodes and num_itins
+			19237, 8539, // expected num_nodes and num_itins
 			840, 7697, 300 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 

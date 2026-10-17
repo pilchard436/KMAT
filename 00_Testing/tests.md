@@ -31,13 +31,15 @@ Each calculation test has a time budget, a reference best total dv and a minimum
 | Test | Baseline time | Budget | Reference best dv | Min. sequences |
 |---|---|---|---|---|
 | Itinerary 1 (Kerbin -> Eeloo) | 21 s | 60 s | 2992 m/s | 2 |
-| Itinerary 2 (Kerbin -> Kerbin) | 68 s | 180 s | 1296 m/s | 45 |
-| Itinerary 3 (Earth -> Earth) | 96 s | 270 s | 4379 m/s | 35 |
-| Itinerary 4 (Earth -> Jupiter) | 285 s | 840 s | 7697 m/s | 300 |
+| Itinerary 2 (Kerbin -> Kerbin) | 77 s | 180 s | 1296 m/s | 45 |
+| Itinerary 3 (Earth -> Earth) | 105 s | 270 s | 4379 m/s | 35 |
+| Itinerary 4 (Earth -> Jupiter) | 308 s | 840 s | 7697 m/s | 300 |
 | Sequence 2 (Kerbin -> Eve -> Duna -> Kerbin) | 13 s | 40 s | 1246 m/s | 1 |
 | Sequence 4 (Earth -> ... -> Neptune) | 2 s | 12 s | 6704 m/s | 1 |
 
-Routes that hit a moon or pass inside a moon's sphere of influence are removed after the search ("Moon check removed ..." in the output), so the expected counts are lower than without moons.
+A flyby that hits a moon or passes inside a moon's sphere of influence is re-planned at the cheapest periapsis radius and side that clears every moon; the route is removed ("Moon check removed ..." in the output) only when none does, so the expected counts are lower than without moons.
+
+`KMATSearchIntegration --coverage` reruns the Earth-Mars-Jupiter mission (Jupiter benchmark) with 64, 128, 512 (default) and 2048 powered seeds per departure. The best total delta-v is 4612.411 m/s in all four runs. Itineraries found: 4403, 4430, 4598 and 5050, so the default budget leaves out about 9% of the routes found at 2048. At 2048 the cutoff challenge refines 32 of 390 excluded routes and 28 of them beat the ranked worst, so routes beyond the 500-route cutoff also matter for route count, not for the best route.
 
 The `.itins`/`.itin` file tests load fixtures that the suite generates (`00_Testing/Itineraries/fixture.itins` and `fixture.itin`, Kerbin -> Duna).
 

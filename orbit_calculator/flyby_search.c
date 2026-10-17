@@ -12,11 +12,17 @@
 
 static _Thread_local int extra_seed_budget;
 static _Thread_local int powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
+static int seeds_per_departure = POWERED_SEEDS_PER_DEPARTURE;
 static _Thread_local PoweredSeedSearchStats *seed_search_stats;
+
+// Only for coverage measurements; call before a search starts.
+void set_powered_seed_budget(int seeds) {
+	seeds_per_departure = seeds;
+}
 
 void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
 	extra_seed_budget = POWERED_EXTRA_SEEDS_PER_DEPARTURE;
-	powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
+	powered_seed_budget = seeds_per_departure;
 	seed_search_stats = stats;
 }
 

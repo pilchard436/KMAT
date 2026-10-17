@@ -18,6 +18,7 @@ typedef struct PoweredSeedSearchStats {
 #define POWERED_SEEDS_PER_DEPARTURE 512
 #define POWERED_EXTRA_SEEDS_PER_DEPARTURE 8
 void begin_powered_seed_search(PoweredSeedSearchStats *stats);
+void set_powered_seed_budget(int seeds);
 
 // find viable flybys to next body with a given arrival trajectory; the same body gives resonant (multi-revolution) returns
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);

@@ -1,6 +1,7 @@
 #include "integration_common.h"
 
 int benchmark_resonant;
+int benchmark_coverage;
 
 int main(int argc, char **argv) {
 	if(argc > 1 && strcmp(argv[argc - 1], "--resonant") == 0) {
@@ -9,10 +10,12 @@ int main(int argc, char **argv) {
 	}
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
 		return run_saved_mission_benchmarks();
+	if(argc == 2 && strcmp(argv[1], "--coverage") == 0)
+		return run_coverage_report();
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks|--coverage]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 

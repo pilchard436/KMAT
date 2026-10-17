@@ -1,6 +1,7 @@
 #include "flyby_policy.h"
 #include "moon_flyby.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MIN_ASSISTED_BURN 1.0
@@ -45,13 +46,85 @@ double arrival_dv_with_assist(Body *body, Vector3 incoming_excess, double arriva
 	return found.total_dv;
 }
 
+#define REPLAN_RADII 96
+#define REPLAN_MAX_ANALYSES 16
+
+typedef struct {
+	double radius, burn;
+	int side;
+} FlybyOption;
+
+static int compare_options(const void *a, const void *b) {
+	double first = ((const FlybyOption *)a)->burn, second = ((const FlybyOption *)b)->burn;
+	return (first > second) - (first < second);
+}
+
+typedef struct {
+	Body *body;
+	Vector3 v_arr, v_dep, v_body;
+	double jd, minimum_periapsis;
+	int used, found;
+	PoweredFlybyResult result;
+	double radius;
+	int side;
+} ReplanEntry;
+static _Thread_local ReplanEntry replan_cache[256];
+
+static int same_excess(Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+
+int plan_flyby_around_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double minimum_periapsis,
+		double jd, PoweredFlybyResult *result, double *radius, int *side) {
+	unsigned long long key;
+	memcpy(&key, &jd, sizeof(key));
+	ReplanEntry *entry = &replan_cache[(key ^ (key >> 29) ^ ((size_t)body >> 4)) % 256];
+	if(!(entry->used && entry->body == body && entry->jd == jd && entry->minimum_periapsis == minimum_periapsis &&
+		same_excess(entry->v_arr, v_arr) && same_excess(entry->v_dep, v_dep) && same_excess(entry->v_body, v_body))) {
+		*entry = (ReplanEntry){.body = body, .v_arr = v_arr, .v_dep = v_dep, .v_body = v_body, .jd = jd,
+			.minimum_periapsis = minimum_periapsis, .used = 1};
+		if(body != NULL && body->orbit.cb != NULL && body->orbit.cb->mu > 0 && body->orbit.a != 0) {
+			double maximum = 0.95 * fabs(body->orbit.a) * pow(body->mu / body->orbit.cb->mu, 0.4);
+			FlybyOption options[2 * REPLAN_RADII];
+			int count = 0;
+			for(int i = 0; maximum > minimum_periapsis && i < REPLAN_RADII; i++) {
+				double periapsis = minimum_periapsis * pow(maximum / minimum_periapsis, (double)i / (REPLAN_RADII - 1));
+				for(int s = -1; s <= 1; s += 2) {
+					PoweredFlybyResult candidate;
+					if(calculate_powered_flyby_at_periapsis(v_arr, v_dep, v_body, body, periapsis, s, &candidate))
+						options[count++] = (FlybyOption){periapsis, candidate.burn_delta_v, s};
+				}
+			}
+			qsort(options, count, sizeof(options[0]), compare_options);
+			// The cheapest option that clears every moon; only the cheapest few are worth the moon scan.
+			for(int i = 0; i < count && i < REPLAN_MAX_ANALYSES && !entry->found; i++) {
+				PoweredFlybyResult candidate;
+				MoonFlybyEffect effect;
+				if(!calculate_powered_flyby_at_periapsis(v_arr, v_dep, v_body, body, options[i].radius, options[i].side, &candidate) ||
+					!analyze_moon_flyby(body, &candidate, jd, 0, &effect)) break;
+				if(effect.hits_moon || effect.perturbing_moon != NULL) continue;
+				entry->found = 1;
+				entry->result = candidate;
+				entry->radius = options[i].radius;
+				entry->side = options[i].side;
+			}
+		}
+	}
+	if(!entry->found) return 0;
+	if(result != NULL) *result = entry->result;
+	if(radius != NULL) *radius = entry->radius;
+	if(side != NULL) *side = entry->side;
+	return 1;
+}
+
 int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
 		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result) {
 	if(!calculate_powered_flyby(v_arr, v_dep, v_body, body, minimum_periapsis, result)) return 0;
 	MoonFlybyEffect effect;
 	if(!analyze_moon_flyby(body, result, flyby_jd, unrestricted_flyby_periapsis, &effect)) return 1;
 	// The planner relaxes the limits to show what is wrong, so it keeps flybys that hit a moon.
-	if(effect.hits_moon && !unrestricted_flyby_periapsis) return 0;
+	if(!unrestricted_flyby_periapsis && (effect.hits_moon || effect.perturbing_moon != NULL)) {
+		if(plan_flyby_around_moons(v_arr, v_dep, v_body, body, minimum_periapsis, flyby_jd, result, NULL, NULL)) return 1;
+		if(effect.hits_moon) return 0;
+	}
 	if(effect.integrated) result->burn_delta_v += mag_vec3(effect.velocity_error);
 	return 1;
 }
@@ -68,7 +141,9 @@ Body * flyby_moon_hit(struct ItinStep *step) {
 	if(!calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
 		flyby_minimum_periapsis(step->body), &flyby)) return NULL;
 	MoonFlybyEffect effect;
-	return analyze_moon_flyby(step->body, &flyby, step->date, 0, &effect) && effect.hits_moon ? effect.moon_hit : NULL;
+	if(!analyze_moon_flyby(step->body, &flyby, step->date, 0, &effect) || !effect.hits_moon) return NULL;
+	return plan_flyby_around_moons(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
+		flyby_minimum_periapsis(step->body), step->date, NULL, NULL, NULL) ? NULL : effect.moon_hit;
 }
 
 // Drawing asks about the same flybys every animation frame, and each solve scans many periapsis radii.
@@ -142,7 +217,9 @@ static int flyby_step_blocked_by_moon(struct ItinStep *flyby, struct ItinStep *n
 		same_vector(entry->v_arr, flyby->v_arr) && same_vector(entry->v_dep, next->v_dep)) return entry->blocked;
 	PoweredFlybyResult result;
 	int blocked = calculate_powered_flyby(flyby->v_arr, next->v_dep, flyby->v_body, flyby->body,
-		flyby_minimum_periapsis(flyby->body), &result) && flyby_blocked_by_moon(flyby->body, &result, flyby->date);
+		flyby_minimum_periapsis(flyby->body), &result) && flyby_blocked_by_moon(flyby->body, &result, flyby->date) &&
+		!plan_flyby_around_moons(flyby->v_arr, next->v_dep, flyby->v_body, flyby->body,
+			flyby_minimum_periapsis(flyby->body), flyby->date, NULL, NULL, NULL);
 	*entry = (MoonVerdict){flyby->body, flyby->v_arr, next->v_dep, flyby->date, blocked, 1};
 	return blocked;
 }
