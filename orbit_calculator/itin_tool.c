@@ -1,6 +1,7 @@
 #include "itin_tool.h"
 #include "powered_seed_selection.h"
 #include "search_cancel.h"
+#include "search_rejections.h"
 #include "tools/starting_orbit.h"
 #include <math.h>
 #include <stdlib.h>
@@ -89,6 +90,7 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
 						if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
+			count_search_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
 						return 0;
@@ -225,6 +227,7 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 		if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
 			if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 				porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
+			count_search_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
 				curr_step->num_next_nodes = 0;

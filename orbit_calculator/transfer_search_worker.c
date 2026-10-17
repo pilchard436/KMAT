@@ -1,5 +1,6 @@
 #include "transfer_search_internal.h"
 #include "search_cancel.h"
+#include "search_rejections.h"
 #include "tools/tool_funcs.h"
 #include <math.h>
 #include <stdio.h>
@@ -159,8 +160,10 @@ void *calc_itins_from_departure(void *args) {
 					dv_arr = mag_vec3(osv_body1.v);
 				}
 				
-				if(dv_dep > dv_filter.max_totdv || dv_dep > dv_filter.max_depdv) continue;
-				if(num_steps == 2 && (dv_dep + dv_arr > dv_filter.max_totdv || dv_arr > dv_filter.max_satdv)) continue;
+				if(dv_dep > dv_filter.max_depdv) { count_search_rejection(REJECT_DEPARTURE_DV); continue; }
+				if(dv_dep > dv_filter.max_totdv) { count_search_rejection(REJECT_TOTAL_DV); continue; }
+				if(num_steps == 2 && dv_arr > dv_filter.max_satdv) { count_search_rejection(REJECT_SATELLITE_DV); continue; }
+				if(num_steps == 2 && dv_dep + dv_arr > dv_filter.max_totdv) { count_search_rejection(REJECT_TOTAL_DV); continue; }
 
 				curr_step = get_first(curr_step);
 				curr_step->next[next_step_id] = (struct ItinStep *) malloc(sizeof(struct ItinStep));

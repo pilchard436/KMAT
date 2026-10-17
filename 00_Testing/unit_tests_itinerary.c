@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "orbit_calculator/itin_tool.h"
+#include "orbit_calculator/search_rejections.h"
 #include "tools/file_io.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
@@ -328,6 +329,31 @@ static void check_itinerary_files(void) {
 	free_celestial_system(system);
 }
 
+static void check_search_rejections(void) {
+	char text[200];
+	reset_search_rejections();
+	Itin_Rejection_Counts counts = get_search_rejections();
+	describe_search_rejections(&counts, text, sizeof(text));
+	check_true("nothing is rejected at the start", counts.by_cause[REJECT_TOTAL_DV] == 0 && text[0] == '\0');
+
+	for(int i = 0; i < 3; i++) count_search_rejection(REJECT_TOTAL_DV);
+	count_search_rejection(REJECT_DEPARTURE_DV);
+	count_search_rejection(SEARCH_REJECTION_COUNT);
+	counts = get_search_rejections();
+	check_true("rejections are counted per cause", counts.by_cause[REJECT_TOTAL_DV] == 3 &&
+		counts.by_cause[REJECT_DEPARTURE_DV] == 1 && counts.by_cause[REJECT_SATELLITE_DV] == 0);
+	describe_search_rejections(&counts, text, sizeof(text));
+	check_true("the limit behind most rejections is named", strstr(text, "total delta-v") != NULL && strstr(text, "3 of 4") != NULL);
+
+	char tiny[1];
+	describe_search_rejections(&counts, tiny, sizeof(tiny));
+	check_true("a short buffer stays terminated", tiny[0] == '\0');
+
+	reset_search_rejections();
+	counts = get_search_rejections();
+	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
+}
+
 int main(void) {
 	check_itinerary_tree();
 	check_flyby_policy();
@@ -335,5 +361,6 @@ int main(void) {
 	check_resonant_samples();
 	check_conjunction_times();
 	check_itinerary_files();
+	check_search_rejections();
 	return finish_tests("KMAT itinerary unit checks");
 }

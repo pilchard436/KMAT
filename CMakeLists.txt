@@ -39,6 +39,7 @@ set(KMAT_FILE_IO_SOURCES
 
 set(KMAT_ITINERARY_SOURCES
     orbit_calculator/itin_tool.c
+    orbit_calculator/search_rejections.c
     orbit_calculator/itinerary_tree.c
     orbit_calculator/itinerary_text.c
     orbit_calculator/flyby_policy.c

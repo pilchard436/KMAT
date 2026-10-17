@@ -617,3 +617,43 @@ int check_departure_sweep_fixture(void) {
 	if(valid) printf("Departure sweep fixture passed: %d edits re-solved, largest single-click dv ratio %.2f\n", resolved, worst);
 	return valid;
 }
+
+int check_empty_result_reason(CelestSystem *system, Body *departure_body, Body *arrival_body,
+        double departure_jd, double max_arrival_jd) {
+	Body *flyby_bodies[] = {departure_body, arrival_body};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd;
+	calc_data.jd_max_arr = max_arrival_jd;
+	calc_data.max_duration = max_arrival_jd - departure_jd;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9,
+		.max_depdv = 1,	// no departure burn is this small
+		.max_satdv = 1e9,
+		.dep_periapsis = departure_body->atmo_alt + 50000,
+		.arr_periapsis = arrival_body->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET,
+		.system = system,
+		.dep_body = departure_body,
+		.arr_body = arrival_body,
+		.flyby_bodies = flyby_bodies,
+		.num_flyby_bodies = 2
+	};
+
+	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	char reason[200];
+	describe_search_rejections(&results.rejections, reason, sizeof(reason));
+	int valid = results.num_itins == 0 && strstr(reason, "departure delta-v") != NULL;
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	if(!valid) {
+		fprintf(stderr, "An impossible departure limit must give no routes and name the departure delta-v limit, got %d routes and '%s'\n",
+			results.num_itins, reason);
+		return 0;
+	}
+	printf("Empty search result names its limit: %s\n", reason);
+	return 1;
+}

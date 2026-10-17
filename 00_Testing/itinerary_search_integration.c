@@ -56,10 +56,12 @@ int main(int argc, char **argv) {
 	int resonant_valid = check_resonant_flybys(system, departure_body, flyby_body, arrival_body,
 		departure_jd, hohmann_duration);
 	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
+	int empty_reason_valid = check_empty_result_reason(system, departure_body, arrival_body, departure_jd,
+		max_arrival_jd);
 
 	free_celestial_system(system);
 	if(!search_valid || !powered_valid || !seeds_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
-		!sweep_valid || !resonant_valid || !near_equal_valid) {
+		!sweep_valid || !resonant_valid || !near_equal_valid || !empty_reason_valid) {
 		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
 			search_nodes, search_itins);
 		return EXIT_FAILURE;

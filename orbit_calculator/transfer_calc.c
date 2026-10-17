@@ -1,5 +1,6 @@
 #include "transfer_search_internal.h"
 #include "search_cancel.h"
+#include "search_rejections.h"
 #include "tools/tool_funcs.h"
 #include <math.h>
 #include <stdio.h>
@@ -12,15 +13,28 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 	struct PorkchopPoint point = create_porkchop_point(arrival,
 		calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis);
 	struct ItinStep *departure = get_first(arrival);
-	if(!isfinite(point.dv_dep) || !isfinite(point.dv_dsm) || !isfinite(point.dv_flyby) ||
-		arrival->date > calc_data->jd_max_arr || departure->date < calc_data->jd_min_dep ||
-		departure->date > calc_data->jd_max_dep) return 0;
+	if(!isfinite(point.dv_dep) || !isfinite(point.dv_dsm) || !isfinite(point.dv_flyby)) return 0;
+	if(arrival->date > calc_data->jd_max_arr || departure->date < calc_data->jd_min_dep ||
+		departure->date > calc_data->jd_max_dep) {
+		count_search_rejection(REJECT_TIME_LIMIT);
+		return 0;
+	}
 	double satellite_dv = point.dv_dsm;
 	if(calc_data->dv_filter.last_transfer_type == TF_CAPTURE) satellite_dv += point.dv_arr_cap;
 	if(calc_data->dv_filter.last_transfer_type == TF_CIRC) satellite_dv += point.dv_arr_circ;
-	return point.dv_dep <= calc_data->dv_filter.max_depdv &&
-		satellite_dv + point.dv_flyby <= calc_data->dv_filter.max_satdv &&
-		point.dv_dep + satellite_dv + point.dv_flyby <= calc_data->dv_filter.max_totdv;
+	if(point.dv_dep > calc_data->dv_filter.max_depdv) {
+		count_search_rejection(REJECT_DEPARTURE_DV);
+		return 0;
+	}
+	if(satellite_dv + point.dv_flyby > calc_data->dv_filter.max_satdv) {
+		count_search_rejection(REJECT_SATELLITE_DV);
+		return 0;
+	}
+	if(point.dv_dep + satellite_dv + point.dv_flyby > calc_data->dv_filter.max_totdv) {
+		count_search_rejection(REJECT_TOTAL_DV);
+		return 0;
+	}
+	return 1;
 }
 
 static void detach_itinerary_child(struct ItinStep *parent, int child_index) {
@@ -49,6 +63,7 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		.best_powered_refined_total_dv = HUGE_VAL
 	};
 
+	reset_search_rejections();
 	struct timeval start, end;
 	double elapsed_time;
 	gettimeofday(&start, NULL);  // Record the ending time
@@ -258,6 +273,10 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	results.num_deps = num_deps;
 	results.num_nodes = num_nodes;
 	results.num_itins = num_itins;
+	results.rejections = get_search_rejections();
+	char rejection_reason[200];
+	describe_search_rejections(&results.rejections, rejection_reason, sizeof(rejection_reason));
+	if(num_itins == 0 && rejection_reason[0] != '\0') printf("%s\n", rejection_reason);
 
 	return results;
 }

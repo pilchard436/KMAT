@@ -3,6 +3,7 @@
 
 #include "itin_tool.h"
 #include "tools/celestial_systems.h"
+#include "search_rejections.h"
 
 
 typedef struct Itin_Calc_Data {
@@ -33,6 +34,7 @@ typedef struct Itin_Calc_Results {
 	double best_powered_initial_total_dv;
 	double best_powered_refined_total_dv;
 	PoweredSeedSearchStats powered_seed_stats;
+	Itin_Rejection_Counts rejections;
 } Itin_Calc_Results;
 
 typedef struct Transfer_Calc_Status {

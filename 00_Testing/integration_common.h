@@ -30,6 +30,7 @@ double stored_total_dv(struct ItinStep *leaf, const Itin_Calc_Data *calc_data, d
 double plain_cost_without_maneuvers(struct ItinStep *leaf, const Itin_Calc_Data *calc_data);
 void summarize_itineraries(struct ItinStep **departures, int num_departures, const Itin_Calc_Data *calc_data, int *routes, int *maneuvers, double *best_total);
 int check_departure_sweep_fixture(void);
+int check_empty_result_reason(CelestSystem *system, Body *departure_body, Body *arrival_body, double departure_jd, double max_arrival_jd);
 int check_starting_orbit_search(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int run_saved_mission_benchmarks(void);
 int run_full_profile(void);

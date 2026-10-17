@@ -25,7 +25,12 @@ static gboolean end_ic_calc_thread(gpointer user_data) {
 	for(int i = 0; i < ic_results.num_deps; i++) free_itinerary(ic_results.departures[i]);
 	free(ic_results.departures);
 	free(ic_calc_data.seq_info.to_target.flyby_bodies);
-	if(ic_results.num_deps == 0) show_msg_window("No itineraries found!");
+	if(ic_results.num_deps == 0) {
+		char reason[200], message[256];
+		describe_search_rejections(&ic_results.rejections, reason, sizeof(reason));
+		g_snprintf(message, sizeof(message), "No itineraries found!%s%s", reason[0] ? "\n" : "", reason);
+		show_msg_window(message);
+	}
 	return G_SOURCE_REMOVE;
 }
 
