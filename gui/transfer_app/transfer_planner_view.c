@@ -154,7 +154,8 @@ void update_tp_system_view() {
 		draw_body_moons(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp, tp_moon_visible);
 	}
 
-	if(frame_body != NULL) draw_itinerary_around_body(tp_system_camera, tp_system, curr_transfer_tp, frame_body, current_date_tp);
+	if(frame_body != NULL) draw_itinerary_around_body(tp_system_camera, tp_system, curr_transfer_tp, frame_body, current_date_tp,
+		tp_dep_periapsis, tp_arr_periapsis);
 	else draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 

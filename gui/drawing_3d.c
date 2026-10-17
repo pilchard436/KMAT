@@ -395,11 +395,11 @@ static void draw_periapsis_marker(Camera *camera, Vector3 r, Body *body, struct 
 	cairo_set_line_width(cr, 1);
 }
 
-void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time) {
+void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time,
+		double dep_periapsis, double arr_periapsis) {
 	if(itin == NULL || planet == NULL) return;
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector3 offset = body_position(system, planet, current_time);
-	double clearance = planet->radius + planet->atmo_alt + 50e3;
 	int leg = 0;
 	for(struct ItinStep *step = get_first(itin); step != NULL; step = step->next != NULL ? step->next[0] : NULL, leg++) {
 		if(step->body != planet) continue;
@@ -437,7 +437,7 @@ void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct Iti
 		Orbit orbit;
 		if(step->next != NULL) {
 			Vector3 excess = subtract_vec3(step->next[0]->v_dep, step->v_body);
-			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 0, &orbit)) {
+			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, dep_periapsis), 0, &orbit)) {
 				set_leg_color(cr, leg, past, 1);
 				draw_conic_arc(camera, orbit, 0, wrapped_true_anomaly(orbit.ta), offset);
 				// The departure date is the periapsis passage; the craft leaves along the hyperbola from there.
@@ -450,7 +450,7 @@ void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct Iti
 			}
 		} else if(step->prev != NULL) {
 			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
-			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 1, &orbit)) {
+			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, arr_periapsis), 1, &orbit)) {
 				set_leg_color(cr, leg - 1, past, 1);
 				draw_conic_arc(camera, orbit, wrapped_true_anomaly(orbit.ta), 0, offset);
 				// The arrival date is the periapsis passage; the craft comes in along the hyperbola before it.

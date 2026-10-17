@@ -23,7 +23,9 @@ void register_body_occluders(CelestSystem *system, double jd_date);
 void draw_orbit(Camera *camera, Orbit orbit);
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
 // The itinerary as conics relative to one body (its flyby, departure or arrival hyperbola), drawn around the body's position.
-void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time);
+// The departure and arrival periapsis are altitudes above the body's surface.
+void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time,
+		double dep_periapsis, double arr_periapsis);
 // Where the spacecraft is on the itinerary at a date; 0 if there is no itinerary.
 int itinerary_spacecraft_position(CelestSystem *system, struct ItinStep *itin, double date, Vector3 *r);
 void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
