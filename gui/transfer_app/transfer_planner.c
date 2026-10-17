@@ -134,7 +134,10 @@ G_MODULE_EXPORT void on_tp_central_body_change() {
 		return;
 	}
 	gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 1);
-	tp_system = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
+	CelestSystem *selected = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
+	// Refilling the dropdown (e.g. when an itinerary with moons is loaded) must not discard the itinerary.
+	if(selected == tp_system) return;
+	tp_system = selected;
 
 	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();

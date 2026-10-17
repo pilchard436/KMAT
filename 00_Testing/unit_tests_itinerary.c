@@ -2,6 +2,7 @@
 #include "orbit_calculator/itin_tool.h"
 #include "orbit_calculator/search_rejections.h"
 #include "tools/file_io.h"
+#include "tools/file_io_internal.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
 
@@ -282,7 +283,7 @@ static void check_itinerary_files(void) {
 	free(maneuver);
 
 	check_true("the field counter counts separators", amt_of_fields("a,b,c") == 3 && amt_of_fields("a") == 1);
-	check_true("the newest binary file type is the default", get_current_bin_file_type() == 5);
+	check_true("the newest binary file type is the default", get_current_bin_file_type() == 6);
 
 	char single_path[] = "unit_test_route.itin";
 	store_single_itinerary_in_bfile(route, system, single_path);
@@ -326,6 +327,40 @@ static void check_itinerary_files(void) {
 	}
 	remove(multi_path);
 	free_itinerary(route);
+	free_celestial_system(system);
+}
+
+static void check_moons_are_saved(void) {
+	char path[] = "../Celestial_Systems/stock_system.cfg";
+	CelestSystem *system = load_celestial_system_from_cfg_file(path);
+	check_true("the moon test system loads", system != NULL);
+	if(system == NULL) return;
+	char file_path[] = "unit_test_system.bin";
+	FILE *file = fopen(file_path, "w+b");
+	check_true("the system file opens", file != NULL);
+	if(file == NULL) { free_celestial_system(system); return; }
+	store_celestial_system_in_bfile(system, file, *current_itin_file_types);
+	rewind(file);
+	CelestSystem *loaded = load_celestial_system_from_bfile(file, *current_itin_file_types);
+	fclose(file);
+	remove(file_path);
+	check_true("the system is loaded again", loaded != NULL && loaded->num_bodies == system->num_bodies);
+	int planets_with_moons = 0, moons_match = 1;
+	for(int i = 0; loaded != NULL && i < system->num_bodies; i++) {
+		Body *planet = system->bodies[i], *copy = loaded->bodies[i];
+		if(strcmp(planet->name, copy->name) != 0) moons_match = 0;
+		int expected = planet->system != NULL ? planet->system->num_bodies : 0;
+		if(expected > 0) planets_with_moons++;
+		if((copy->system != NULL ? copy->system->num_bodies : 0) != expected) { moons_match = 0; continue; }
+		for(int j = 0; j < expected; j++) {
+			Body *moon = planet->system->bodies[j], *moon_copy = copy->system->bodies[j];
+			if(strcmp(moon->name, moon_copy->name) != 0 || moon_copy->orbit.cb != copy || fabs(moon->orbit.a - moon_copy->orbit.a) > 1e-6 ||
+				fabs(moon->mu - moon_copy->mu) > 1e-6 || fabs(moon->radius - moon_copy->radius) > 1e-6) moons_match = 0;
+		}
+	}
+	check_true("the test system has planets with moons", planets_with_moons > 0);
+	check_true("the moons are saved with their planets", moons_match);
+	if(loaded != NULL) free_celestial_system(loaded);
 	free_celestial_system(system);
 }
 
@@ -390,6 +425,7 @@ int main(void) {
 	check_itinerary_files();
 	check_search_rejections();
 	check_minimum_leg();
+	check_moons_are_saved();
 	check_moon_flybys();
 	return finish_tests("KMAT itinerary unit checks");
 }

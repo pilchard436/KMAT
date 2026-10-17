@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
+static int routes_blocked_by_moons;
+
 static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *calc_data) {
 	if(calc_data->seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET &&
 		arrival->body != calc_data->seq_info.to_target.arr_body) return 0;
@@ -32,6 +34,10 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 	}
 	if(point.dv_dep + satellite_dv + point.dv_flyby > calc_data->dv_filter.max_totdv) {
 		count_search_rejection(REJECT_TOTAL_DV);
+		return 0;
+	}
+	if(route_blocked_by_moons(arrival)) {
+		routes_blocked_by_moons++;
 		return 0;
 	}
 	return 1;
@@ -245,6 +251,7 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		for(int i = 0; i < num_deps; i++)
 			itineraries_before_prune += get_number_of_itineraries(departures[i]);
 		valid_departures = 0;
+		routes_blocked_by_moons = 0;
 		for(int i = 0; i < num_deps; i++) {
 			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
 				free_itinerary(departures[i]);
@@ -257,6 +264,9 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		for(int i = 0; i < num_deps; i++)
 			itineraries_after_prune += get_number_of_itineraries(departures[i]);
 		results.powered_itineraries_pruned = itineraries_before_prune - itineraries_after_prune;
+		if(routes_blocked_by_moons > 0)
+			printf("Moon check removed %d of %d routes (hit a moon or passed inside a moon's sphere of influence)\n",
+				routes_blocked_by_moons, itineraries_before_prune);
 	}
 
 	gettimeofday(&end, NULL);  // Record the ending time

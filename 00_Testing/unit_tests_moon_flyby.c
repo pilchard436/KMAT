@@ -63,10 +63,12 @@ void check_moon_flybys(void) {
 	place_moon(&fixture, M_PI);
 	analyze_moon_flyby(&fixture.planet, &fixture.flyby, TEST_JD, 1, &effect);
 	check_true("a moon on the other side is not hit and not integrated", !effect.hits_moon && !effect.integrated);
+	check_true("a moon on the other side does not perturb", effect.perturbing_moon == NULL);
 
 	place_moon(&fixture, 0.1);
 	analyze_moon_flyby(&fixture.planet, &fixture.flyby, TEST_JD, 1, &effect);
 	check_true("a close pass is not a hit", !effect.hits_moon);
+	check_true("a close pass is inside the moon's sphere of influence", effect.perturbing_moon == &fixture.moon);
 	check_true("a close pass is closer than the moon's influence", effect.closest_moon_distance < 1.26e8);
 	check_true("a close pass integrates the moon gravity", effect.integrated);
 	double error = mag_vec3(effect.velocity_error);
@@ -101,4 +103,33 @@ void check_moon_flybys(void) {
 	check_true("the planner keeps it to show the problem", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons));
 	set_flyby_unrestricted_periapsis(previous);
+
+	place_moon(&fixture, 0.1);
+	check_true("a pass inside a moon's sphere of influence blocks the flyby", flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
+	place_moon(&fixture, M_PI);
+	check_true("a distant moon does not block the flyby", !flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
+	place_moon(&fixture, 0.1);
+	int relaxed_blocking = set_flyby_unrestricted_periapsis(1);
+	check_true("the planner is not blocked", !flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
+	set_flyby_unrestricted_periapsis(relaxed_blocking);
+
+	double capture_radius = fixture.planet.radius + 2e5;
+	double plain_capture = dv_capture(&fixture.planet, capture_radius, 3000);
+	MoonAssist assist;
+	int capture_assists = 0, phases = 24;
+	for(int phase = 0; phase < phases; phase++) {
+		place_moon(&fixture, 2 * M_PI * phase / phases);
+		capture_assists += moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius, dv_capture,
+			plain_capture, TEST_JD, &assist) && assist.total_dv < plain_capture && assist.moon == &fixture.moon;
+	}
+	check_true("a moon lowers the capture burn at some moon phases", capture_assists > 0 && capture_assists < phases);
+
+	place_moon(&fixture, 0);
+	fixture.moon.mu = 1e3;
+	check_true("a tiny moon cannot help", !moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius,
+		dv_capture, plain_capture, TEST_JD, &assist));
+	fixture.moon.mu = 4.9028e12;
+	fixture.planet.system = NULL;
+	check_true("no moons means no assist", !moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius,
+		dv_capture, plain_capture, TEST_JD, &assist));
 }

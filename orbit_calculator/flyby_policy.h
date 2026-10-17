@@ -2,6 +2,7 @@
 #define KMAT_FLYBY_POLICY_H
 
 #include "itin_tool.h"
+#include "moon_flyby.h"
 
 // Smallest periapsis radius a powered flyby may use: surface, atmosphere and 10 km, or 10% of the body radius
 // (inside the body) while unrestricted. Unrestricted mode is per thread; it returns the previous setting.
@@ -22,13 +23,23 @@ int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, do
 // (only while the periapsis limit is relaxed, i.e. in the planner; the search only checks for hits).
 int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
 		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result);
-// 1 if this flyby would hit a moon and the periapsis limit is not relaxed.
+// 1 if this flyby would hit a moon or pass inside a moon's sphere of influence (so its moon-free model is invalid)
+// and the periapsis limit is not relaxed.
 int flyby_blocked_by_moon(Body *body, const PoweredFlybyResult *flyby, double flyby_jd);
 // Moon the flown flyby of this step would hit, or NULL.
 Body * flyby_moon_hit(struct ItinStep *step);
+// Moon assists lower the capture or circularisation cost on arrival (see moon_flyby.h). The search nodes keep
+// plain costs; the final route scoring always applies assists, other callers only while this is enabled or the
+// periapsis limit is relaxed (planner). Returns the previous setting.
+int set_moon_assist_enabled(int enable);
+int moon_assist_is_active(void);
+double arrival_dv_with_assist(Body *body, Vector3 incoming_excess, double arrival_radius, int circularize, double plain_dv,
+		double jd, MoonAssist *assist);
 // Shortest leg the search and optimizer accept: 10 days, or an eighth of the shortest body period of
 // a system with faster orbits (moons), so short transfers are not rejected. NULL gives the 10 days.
 double minimum_leg_days(const CelestSystem *system);
+// 1 if any flyby of the route is blocked by a moon (see flyby_blocked_by_moon).
+int route_blocked_by_moons(struct ItinStep *step_in_route);
 int count_flybys_below_min_safe(struct ItinStep *step_in_route);
 // Number of flybys in the route with a shortfall, and the largest shortfall in metres (largest may be NULL).
 int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall);

@@ -30,12 +30,14 @@ Each calculation test has a time budget, a reference best total dv and a minimum
 
 | Test | Baseline time | Budget | Reference best dv | Min. sequences |
 |---|---|---|---|---|
-| Itinerary 1 (Kerbin -> Eeloo) | 22 s | 60 s | 2992 m/s | 2 |
-| Itinerary 2 (Kerbin -> Kerbin) | 56 s | 180 s | 1296 m/s | 50 |
-| Itinerary 3 (Earth -> Earth) | 88 s | 270 s | 4379 m/s | 35 |
-| Itinerary 4 (Earth -> Jupiter) | 278 s | 840 s | 7694 m/s | 300 |
-| Sequence 2 (Kerbin -> Eve -> Duna -> Kerbin) | 2 s | 12 s | 1246 m/s | 1 |
+| Itinerary 1 (Kerbin -> Eeloo) | 21 s | 60 s | 2992 m/s | 2 |
+| Itinerary 2 (Kerbin -> Kerbin) | 68 s | 180 s | 1296 m/s | 45 |
+| Itinerary 3 (Earth -> Earth) | 96 s | 270 s | 4379 m/s | 35 |
+| Itinerary 4 (Earth -> Jupiter) | 285 s | 840 s | 7697 m/s | 300 |
+| Sequence 2 (Kerbin -> Eve -> Duna -> Kerbin) | 13 s | 40 s | 1246 m/s | 1 |
 | Sequence 4 (Earth -> ... -> Neptune) | 2 s | 12 s | 6704 m/s | 1 |
+
+Routes that hit a moon or pass inside a moon's sphere of influence are removed after the search ("Moon check removed ..." in the output), so the expected counts are lower than without moons.
 
 The `.itins`/`.itin` file tests load fixtures that the suite generates (`00_Testing/Itineraries/fixture.itins` and `fixture.itin`, Kerbin -> Duna).
 

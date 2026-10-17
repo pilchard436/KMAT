@@ -183,6 +183,12 @@ int run_full_profile(void) {
 		}
 		free(leaves);
 	}
+	// The porkchop analyzer builds its points from the finished search, with moon assists enabled.
+	struct PorkchopPoint *array = create_porkchop_array_from_departures(results.departures, results.num_deps,
+		calc_data.dv_filter.dep_periapsis, calc_data.dv_filter.arr_periapsis);
+	for(int i = 0; array != NULL && i < results.num_itins; i++)
+		if(isnan(array[i].dv_arr_cap) || isnan(array[i].dv_arr_circ)) valid = 0;
+	free(array);
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
 	free_celestial_system(system);

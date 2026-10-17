@@ -54,11 +54,16 @@ union CelestialBodyBin {
 		double north_pole_ra, north_pole_decl, rot_ut0;
 		double a, e, incl, raan, arg_peri, theta;
 	} t4;
+
+	struct CelestialBodyBinT5 {
+		struct CelestialBodyBinT4 body;
+		int parent;  // index in the stored body list, -1 for the system's central body
+	} t5;
 };
 
 union CelestialSystemBin convert_celestial_system_bin(CelestSystem *system, int system_bin_type) {
 	union CelestialSystemBin bin_system = {0};
-	if(system_bin_type == 2) {
+	if(system_bin_type == 2 || system_bin_type == 3) {
 		sprintf(bin_system.t2.name, "%s", system->name);
 		bin_system.t2.num_bodies = system->num_bodies;
 		bin_system.t2.calc_method = system->prop_method;
@@ -69,7 +74,7 @@ union CelestialSystemBin convert_celestial_system_bin(CelestSystem *system, int 
 
 CelestSystem * convert_bin_celestial_system(union CelestialSystemBin bin_system, int system_bin_type) {
 	CelestSystem *system = new_system();
-	if(system_bin_type == 2) {
+	if(system_bin_type == 2 || system_bin_type == 3) {
 		sprintf(system->name, "%s", bin_system.t2.name);
 		system->num_bodies = bin_system.t2.num_bodies;
 		if(system->num_bodies > 1e3) { free(system); return NULL; }    // avoid overflows
@@ -136,11 +141,25 @@ union CelestialBodyBin convert_celestial_body_bin(Body *body, CelestSystem *syst
 		bin_body.t4.arg_peri = body->orbit.arg_peri;
 		bin_body.t4.theta = body->orbit.ta;
 		bin_body.t4.is_home_body = system->home_body == body;
+	} else if(body_bin_type == 5) {
+		bin_body.t5.body = convert_celestial_body_bin(body, system, 4).t4;
+		bin_body.t5.parent = -1;
 	}
 	return bin_body;
 }
 
+static struct Body * convert_bin_body(union CelestialBodyBin bin_body, CelestSystem *system, int body_bin_type, struct Body *parent);
+
 struct Body * convert_bin_celestial_body(union CelestialBodyBin bin_body, CelestSystem *system, int body_bin_type) {
+	return convert_bin_body(bin_body, system, body_bin_type, NULL);
+}
+
+// parent is the body a moon orbits; NULL means the system's central body.
+static struct Body * convert_bin_body(union CelestialBodyBin bin_body, CelestSystem *system, int body_bin_type, struct Body *parent) {
+	if(body_bin_type == 5) {
+		union CelestialBodyBin as_t4 = {.t4 = bin_body.t5.body};
+		return convert_bin_body(as_t4, system, 4, parent);
+	}
 	struct Body *body = new_body();
 	if(body_bin_type == 2) {
 		sprintf(body->name, "%s", bin_body.t2.name);
@@ -204,31 +223,66 @@ struct Body * convert_bin_celestial_body(union CelestialBodyBin bin_body, Celest
 					bin_body.t4.raan,
 					bin_body.t4.arg_peri,
 					bin_body.t4.theta,
-					system->cb);
+					parent != NULL ? parent : system->cb);
 	}
 	return body;
 }
 
+#define MAX_STORED_BODIES 1000
+
+// Planets first, then their moons, so itinerary body ids (indices into the planet list) stay valid.
+static int flatten_system_bodies(CelestSystem *system, Body **flat, int capacity) {
+	int count = 0;
+	for(int i = 0; i < system->num_bodies && count < capacity; i++) flat[count++] = system->bodies[i];
+	for(int i = 0; i < count; i++) {
+		CelestSystem *subsystem = flat[i]->system;
+		for(int j = 0; subsystem != NULL && j < subsystem->num_bodies && count < capacity; j++)
+			flat[count++] = subsystem->bodies[j];
+	}
+	return count;
+}
+
+static void write_body_bin(union CelestialBodyBin *body_bin, FILE *file, int body_type) {
+	switch(body_type) {
+		case 2: fwrite(&body_bin->t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
+		case 3: fwrite(&body_bin->t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
+		case 4: fwrite(&body_bin->t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
+		case 5: fwrite(&body_bin->t5, sizeof(struct CelestialBodyBinT5), 1, file); break;
+	}
+}
+
+static void read_body_bin(union CelestialBodyBin *body_bin, FILE *file, int body_type) {
+	switch(body_type) {
+		case 2: fread(&body_bin->t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
+		case 3: fread(&body_bin->t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
+		case 4: fread(&body_bin->t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
+		case 5: fread(&body_bin->t5, sizeof(struct CelestialBodyBinT5), 1, file); break;
+	}
+}
+
 void store_celestial_system_in_bfile(CelestSystem *system, FILE *file, BinTypes types) {
+	Body *flat[MAX_STORED_BODIES];
+	int count = system->num_bodies;
+	if(types.body_type == 5) count = flatten_system_bodies(system, flat, MAX_STORED_BODIES);
+
 	union CelestialSystemBin system_bin = convert_celestial_system_bin(system, types.system_type);
+	if(types.system_type == 3) system_bin.t2.num_bodies = count;
 	switch(types.system_type) {
-		case 2: fwrite(&system_bin.t2, sizeof(struct CelestialSystemBinT2), 1, file); break;
+		case 2:
+		case 3: fwrite(&system_bin.t2, sizeof(struct CelestialSystemBinT2), 1, file); break;
 	}
 
 	union CelestialBodyBin body_bin = convert_celestial_body_bin(system->cb, system, types.body_type);
-	switch(types.body_type) {
-		case 2: fwrite(&body_bin.t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
-		case 3: fwrite(&body_bin.t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
-		case 4: fwrite(&body_bin.t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
-	}
+	write_body_bin(&body_bin, file, types.body_type);
 
-	for(int i = 0; i < system->num_bodies; i++) {
-		body_bin = convert_celestial_body_bin(system->bodies[i], system, types.body_type);
-		switch(types.body_type) {
-			case 2: fwrite(&body_bin.t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
-			case 3: fwrite(&body_bin.t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
-			case 4: fwrite(&body_bin.t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
+	for(int i = 0; i < count; i++) {
+		Body *body = types.body_type == 5 ? flat[i] : system->bodies[i];
+		body_bin = convert_celestial_body_bin(body, system, types.body_type);
+		if(types.body_type == 5) {
+			body_bin.t5.parent = -1;
+			for(int j = 0; j < i; j++) if(flat[j] == body->orbit.cb) body_bin.t5.parent = j;
 		}
+		write_body_bin(&body_bin, file, types.body_type);
 	}
 }
 
@@ -236,26 +290,21 @@ CelestSystem * load_celestial_system_from_bfile(FILE *file, BinTypes types) {
 	CelestSystem *system = 0;
 	union CelestialSystemBin system_bin;
 	switch(types.system_type) {
-		case 2: fread(&system_bin.t2, sizeof(struct CelestialSystemBinT2), 1, file); break;
+		case 2:
+		case 3: fread(&system_bin.t2, sizeof(struct CelestialSystemBinT2), 1, file); break;
 	}
 	system = convert_bin_celestial_system(system_bin, types.system_type);
 	if(system == NULL) return NULL;
 
 	union CelestialBodyBin body_bin;
-	switch(types.body_type) {
-		case 2: fread(&body_bin.t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
-		case 3: fread(&body_bin.t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
-		case 4: fread(&body_bin.t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
-	}
+	read_body_bin(&body_bin, file, types.body_type);
 	system->cb = convert_bin_celestial_body(body_bin, system, types.body_type);
 
 	for(int i = 0; i < system->num_bodies; i++) {
-		switch(types.body_type) {
-			case 2: fread(&body_bin.t2, sizeof(struct CelestialBodyBinT2), 1, file); break;
-			case 3: fread(&body_bin.t3, sizeof(struct CelestialBodyBinT3), 1, file); break;
-			case 4: fread(&body_bin.t4, sizeof(struct CelestialBodyBinT4), 1, file); break;
-		}
-		system->bodies[i] = convert_bin_celestial_body(body_bin, system, types.body_type);
+		read_body_bin(&body_bin, file, types.body_type);
+		Body *parent = NULL;
+		if(types.body_type == 5 && body_bin.t5.parent >= 0 && body_bin.t5.parent < i) parent = system->bodies[body_bin.t5.parent];
+		system->bodies[i] = convert_bin_body(body_bin, system, types.body_type, parent);
 	}
 
 	if(system->prop_method == EPHEMS) {

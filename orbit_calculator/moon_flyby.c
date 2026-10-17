@@ -52,6 +52,14 @@ static Vector3 leg_position(const HyperbolaLeg *leg, double h) {
 	return add_vec3(scale_vec3(leg->periapsis_direction, x), scale_vec3(leg->tangent, y));
 }
 
+static Vector3 leg_velocity(const HyperbolaLeg *leg, double h) {
+	double e = leg->eccentricity, a = leg->semi_major_axis;
+	double rate = leg->mean_motion / (e * cosh(h) - 1);
+	Vector3 along_periapsis = scale_vec3(leg->periapsis_direction, -a * sinh(h));
+	Vector3 along_tangent = scale_vec3(leg->tangent, a * sqrt(e * e - 1) * cosh(h));
+	return scale_vec3(add_vec3(along_periapsis, along_tangent), rate);
+}
+
 static double leg_anomaly_at_radius(const HyperbolaLeg *leg, double radius) {
 	double c = (radius / leg->semi_major_axis + 1) / leg->eccentricity;
 	return c <= 1 ? 0 : acosh(c);
@@ -100,9 +108,15 @@ static int moon_frame(Body *planet, Body *moon, double jd, MoonFrame *out) {
         return 1;
 }
 
+typedef struct {
+	double distance, time; // time is signed seconds from periapsis
+	Vector3 position, velocity, moon_velocity;
+} ScanHit;
+
 // Closest distance from the planned leg to a moon, scanning only while the leg is inside the moon's orbital shell widened by margin.
 static double scan_leg(Body *planet, Body *moon, const HyperbolaLeg *leg, double flyby_jd,
-		double margin, double step_distance, double moon_radius, double moon_speed, Vector3 plane_normal, double plane_clearance) {
+		double margin, double step_distance, double moon_radius, double moon_speed, Vector3 plane_normal, double plane_clearance, ScanHit *hit) {
+	if(hit != NULL) hit->distance = HUGE_VAL;
 	double lo = moon_radius - margin, hi = moon_radius + margin;
 	double rp = leg->periapsis;
 	if(hi < rp) return HUGE_VAL;
@@ -136,9 +150,13 @@ static double scan_leg(Body *planet, Body *moon, const HyperbolaLeg *leg, double
 		double signed_t = leg->outgoing ? t : -t;
 		OSV state;
 		if(!moon_state_at(planet, moon, flyby_jd + signed_t / 86400, &state)) return HUGE_VAL;
-		Vector3 relative = subtract_vec3(leg_position(leg, leg->outgoing ? h : -h), state.r);
+		double signed_h = leg->outgoing ? h : -h;
+		Vector3 position = leg_position(leg, signed_h);
+		Vector3 relative = subtract_vec3(position, state.r);
 		double distance = mag_vec3(relative);
 		if(distance < best) best = distance;
+		if(hit != NULL && distance < hit->distance)
+			*hit = (ScanHit){distance, signed_t, position, leg_velocity(leg, signed_h), state.v};
 		if(i > 0) {
 			// Relative motion is near-linear over a step, so the segment's closest point is a better estimate than its ends.
 			Vector3 step = subtract_vec3(relative, previous);
@@ -236,19 +254,25 @@ int analyze_moon_flyby(Body *planet, const PoweredFlybyResult *flyby, double fly
 		double moon_radius = elliptical ? moon->orbit.a : frame.radius;
 		double ecc_margin = elliptical ? moon->orbit.a * moon->orbit.e : 0;
 		double clear = moon_clear_radius(moon);
-		double soi = integrate_gravity ? moon_radius * pow(fmax(moon->mu, 0) / planet->mu, 0.4) : 0;
+		double soi = moon_radius * pow(fmax(moon->mu, 0) / planet->mu, 0.4);
 		double influence_distance = 2 * soi + clear;
+		// Inside the moon's sphere of influence the planet-centred flyby model no longer describes the trajectory.
+		double perturb_distance = soi + clear;
 		for(int leg = 0; leg < 2; leg++) {
 			Vector3 normal = frame.normal;
-			double hit = scan_leg(planet, moon, &legs[leg], flyby_jd, clear + ecc_margin, clear / 2, moon_radius, moon_speed,
-				normal, clear + 0.05 * moon_radius);
+			// A coarse scan rules out most legs before the fine one that is needed to catch surface hits.
+			double coarse = scan_leg(planet, moon, &legs[leg], flyby_jd, perturb_distance + ecc_margin, perturb_distance / 3, moon_radius, moon_speed,
+				normal, perturb_distance + 0.05 * moon_radius, NULL);
+			double hit = coarse > 1.2 * perturb_distance ? HUGE_VAL : scan_leg(planet, moon, &legs[leg], flyby_jd, perturb_distance + ecc_margin, clear / 2, moon_radius, moon_speed,
+				normal, perturb_distance + 0.05 * moon_radius, NULL);
 			if(hit < clear) {
 				effect->hits_moon = 1;
 				effect->moon_hit = moon;
 			}
+			if(hit < perturb_distance && moon->mu > 0) effect->perturbing_moon = moon;
 			double near = integrate_gravity && moon->mu > 0 && influence_distance > clear ?
 				scan_leg(planet, moon, &legs[leg], flyby_jd, influence_distance + ecc_margin, influence_distance / 4,
-					moon_radius, moon_speed, normal, influence_distance + 0.05 * moon_radius) : HUGE_VAL;
+					moon_radius, moon_speed, normal, influence_distance + 0.05 * moon_radius, NULL) : HUGE_VAL;
 			double closest = fmin(hit, near);
 			if(closest < effect->closest_moon_distance) effect->closest_moon_distance = closest;
 			if(near < influence_distance && influence.count < MAX_TRACKED_MOONS) {
@@ -261,4 +285,113 @@ int analyze_moon_flyby(Body *planet, const PoweredFlybyResult *flyby, double fly
 	if(!effect->hits_moon && influence.count > 0)
 		effect->integrated = integrate_moon_gravity(&influence, flyby, flyby_jd, &effect->velocity_error);
 	return effect->has_moons;
+}
+
+// Moon assists ---------------------------------------------------------------------------------------------
+
+#define ASSIST_AIM_DIRECTIONS 8
+#define ASSIST_ROTATION_DIRECTIONS 16
+#define ASSIST_MIN_TIME 600.0
+#define ASSIST_MIN_SAVING 5.0
+#define ASSIST_MIN_SAVING_FRACTION 0.05
+
+typedef struct {
+	Body *planet;
+	double arrival_radius;
+	ArrivalCost arrival_cost;
+} AssistGoal;
+
+// Cost left after the moon encounter has left the spacecraft in this planet-centred state.
+static double assist_residual_cost(const AssistGoal *goal, Vector3 r, Vector3 v) {
+	double mu = goal->planet->mu;
+	double energy = 0.5 * dot_vec3(v, v) - mu / mag_vec3(r);
+	if(energy > 0 && dot_vec3(r, v) >= 0) return HUGE_VAL;
+	// A bound orbit after the moon is costed as a capture from rest.
+	return goal->arrival_cost(goal->planet, goal->arrival_radius, energy > 0 ? sqrt(2 * energy) : 0);
+}
+
+static void perpendicular_basis(Vector3 direction, Vector3 *first, Vector3 *second) {
+	Vector3 axis = fabs(direction.z) < 0.9 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+	*first = norm_vec3(cross_vec3(direction, axis));
+	*second = cross_vec3(direction, *first);
+}
+
+// An arriving spacecraft aims at a moon with a small manoeuvre (distance / time left), and the moon turns its velocity
+// by up to the angle allowed by the moon's surface; the cheapest outcome that beats plain_cost is returned.
+static int search_moon_assist(const AssistGoal *goal, Vector3 incoming_excess, const double *periapses, int num_periapses,
+		double jd, double plain_cost, MoonAssist *assist) {
+	Body *planet = goal->planet;
+	double mu = planet->mu, speed = mag_vec3(incoming_excess);
+	if(planet->system == NULL || planet->system->num_bodies <= 0 || planet->orbit.cb == NULL ||
+		!(mu > 0) || !(speed > 0) || !(plain_cost > 0)) return 0;
+	double soi = fabs(planet->orbit.a) * pow(mu / planet->orbit.cb->mu, 0.4);
+	Vector3 direction = scale_vec3(incoming_excess, 1 / speed), aim_first, aim_second;
+	perpendicular_basis(direction, &aim_first, &aim_second);
+	// An assist must save a clear margin, since it also needs a different trajectory.
+	double best_total = plain_cost - fmax(ASSIST_MIN_SAVING, ASSIST_MIN_SAVING_FRACTION * plain_cost);
+	if(!(best_total > 0)) return 0;
+	int found = 0;
+	for(int p = 0; p < num_periapses; p++) {
+		double eccentricity = 1 + periapses[p] * speed * speed / mu;
+		double sine = 1 / eccentricity, cosine = sqrt(1 - sine * sine);
+		HyperbolaLeg leg = {.mu = mu, .excess_speed = speed, .periapsis = periapses[p], .eccentricity = eccentricity,
+			.semi_major_axis = mu / (speed * speed)};
+		leg.mean_motion = sqrt(mu / pow(leg.semi_major_axis, 3));
+		double soi_cosine = (soi / leg.semi_major_axis + 1) / eccentricity;
+		if(soi_cosine <= 1) continue;
+		leg.soi_time = leg_time(&leg, acosh(soi_cosine));
+		for(int k = 0; k < ASSIST_AIM_DIRECTIONS; k++) {
+			double aim_angle = 2 * M_PI * k / ASSIST_AIM_DIRECTIONS;
+			Vector3 side = add_vec3(scale_vec3(aim_first, cos(aim_angle)), scale_vec3(aim_second, sin(aim_angle)));
+			leg.periapsis_direction = add_vec3(scale_vec3(direction, sine), scale_vec3(side, cosine));
+			leg.tangent = subtract_vec3(scale_vec3(direction, cosine), scale_vec3(side, sine));
+			for(int i = 0; i < planet->system->num_bodies; i++) {
+				Body *moon = planet->system->bodies[i];
+				MoonFrame frame;
+				if(moon == NULL || !(moon->radius > 0) || !(moon->mu > 0) || !moon_frame(planet, moon, jd, &frame)) continue;
+				int elliptical = moon->orbit.a > 0 && moon->orbit.e < 1;
+				double moon_radius = elliptical ? moon->orbit.a : frame.radius;
+				double ecc_margin = elliptical ? moon->orbit.a * moon->orbit.e : 0;
+				double clear = moon_clear_radius(moon);
+				double moon_soi = moon_radius * pow(moon->mu / mu, 0.4);
+				double reach = fmin(best_total * leg.soi_time, 3 * moon_soi + clear);
+				if(reach <= clear) continue;
+				ScanHit hit;
+				scan_leg(planet, moon, &leg, jd, reach + ecc_margin, reach / 4, moon_radius, frame.speed, frame.normal,
+					reach + 0.05 * moon_radius, &hit);
+				if(!(hit.distance < reach)) continue;
+				double aim_cost = hit.distance / fmax(leg.soi_time + hit.time, ASSIST_MIN_TIME);
+				if(aim_cost >= best_total) continue;
+				Vector3 relative_velocity = subtract_vec3(hit.velocity, hit.moon_velocity);
+				double relative_speed = mag_vec3(relative_velocity);
+				if(!(relative_speed > 0)) continue;
+				double moon_eccentricity = 1 + clear * relative_speed * relative_speed / moon->mu;
+				double maximum_turn = 2 * asin(1 / moon_eccentricity);
+				Vector3 along = scale_vec3(relative_velocity, 1 / relative_speed), turn_first, turn_second;
+				perpendicular_basis(along, &turn_first, &turn_second);
+				for(int fraction = 0; fraction < 2; fraction++) {
+					double turn = maximum_turn * (fraction == 0 ? 1 : 0.5);
+					for(int j = 0; j < ASSIST_ROTATION_DIRECTIONS; j++) {
+						double turn_angle = 2 * M_PI * j / ASSIST_ROTATION_DIRECTIONS;
+						Vector3 turn_side = add_vec3(scale_vec3(turn_first, cos(turn_angle)), scale_vec3(turn_second, sin(turn_angle)));
+						Vector3 turned = scale_vec3(add_vec3(scale_vec3(along, cos(turn)), scale_vec3(turn_side, sin(turn))), relative_speed);
+						double residual = assist_residual_cost(goal, hit.position, add_vec3(hit.moon_velocity, turned));
+						if(residual + aim_cost < best_total) {
+							best_total = residual + aim_cost;
+							*assist = (MoonAssist){moon, best_total, aim_cost};
+							found = 1;
+						}
+					}
+				}
+			}
+		}
+	}
+	return found;
+}
+
+int moon_assist_arrival(Body *planet, Vector3 incoming_excess, double arrival_radius, ArrivalCost cost, double plain_dv,
+		double arrival_jd, MoonAssist *assist) {
+	AssistGoal goal = {.planet = planet, .arrival_radius = arrival_radius, .arrival_cost = cost};
+	double periapses[] = {arrival_radius, 2 * arrival_radius, 4 * arrival_radius};
+	return search_moon_assist(&goal, incoming_excess, periapses, 3, arrival_jd, plain_dv, assist);
 }

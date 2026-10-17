@@ -8,12 +8,12 @@
 #include "file_io_internal.h"
 
 
-BinTypes all_itins_file_types[] = {{5, 4, 4, 2, 2}, {4, 3, 3, 2, 2}, {3, 3, 2, 2, 2}, {2, 2, 2, 2, 2}};
-const int num_all_itins_file_types = 4;
+BinTypes all_itins_file_types[] = {{6, 4, 5, 3, 2}, {5, 4, 4, 2, 2}, {4, 3, 3, 2, 2}, {3, 3, 2, 2, 2}, {2, 2, 2, 2, 2}};
+const int num_all_itins_file_types = 5;
 const BinTypes *current_itins_file_types = &(all_itins_file_types[0]);
 
-BinTypes all_itin_file_types[] = {{1, 0, 3, 2, 0}, {0, 0, 2, 2, 0}};
-const int num_all_itin_file_types = 2;
+BinTypes all_itin_file_types[] = {{2, 0, 5, 3, 0}, {1, 0, 3, 2, 0}, {0, 0, 2, 2, 0}};
+const int num_all_itin_file_types = 3;
 const BinTypes *current_itin_file_types = &(all_itin_file_types[0]);
 
 int get_current_bin_file_type() {

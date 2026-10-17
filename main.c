@@ -1,5 +1,6 @@
 #include "launch_calculator/launch_calculator.h"
 #include "tools/tool_funcs.h"
+#include "tools/crash_log.h"
 #include "database/database.h"
 #include "gui/gui_manager.h"
 #include "00_Testing/testing.h"
@@ -30,6 +31,7 @@ void set_low_priority() {
 }
 
 int main(int argc, char **argv) {
+	install_crash_log();
 	set_low_priority();
 
 	init_celestial_bodies();

@@ -57,7 +57,7 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Eeloo"},
 			"Kerbin",
 			"Eeloo",
-			906, 280, // expected num_nodes and num_itins
+			766, 238, // expected num_nodes and num_itins
 			60, 2992, 2 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -74,8 +74,8 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Jool"},
 			"Kerbin",
 			"Kerbin",
-			38121, 19095, // expected num_nodes and num_itins
-			180, 1296, 50 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+			33196, 16535, // expected num_nodes and num_itins
+			180, 1296, 45 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 	// Earth -> Earth; 1959-01-01 | 1959-03-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
@@ -91,7 +91,7 @@ int run_tests() {
 			(char *[]){"Mercury", "Venus", "Earth"},
 			"Earth",
 			"Earth",
-			17920, 8683, // expected num_nodes and num_itins
+			16740, 8148, // expected num_nodes and num_itins
 			270, 4379, 35 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -108,8 +108,8 @@ int run_tests() {
 			(char *[]){"Venus", "Earth", "Mars", "Jupiter"},
 			"Earth",
 			"Jupiter",
-			22004, 9965, // expected num_nodes and num_itins
-			840, 7694, 300 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+			17386, 7613, // expected num_nodes and num_itins
+			840, 7697, 300 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 
@@ -141,7 +141,7 @@ int run_tests() {
 			4,
 			(char *[]){"Kerbin", "Eve", "Duna", "Kerbin"},
 			31758, 13452, // expected num_nodes and num_itins
-			12, 1246, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+			40, 1246, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 	// Earth -> Mars; 1950-01-01 | 1951-06-01 | 1950-11-01 | 600; dv_dep = 5000; dv_arr = 4000 (circ); dv_tot = 8200

@@ -336,6 +336,10 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	double arrival_dv = arrival_delta_v(&calc_data->dv_filter, arrival_body,
 		legs[last_leg].v1, states[candidate->num_steps - 1].v,
 		calc_data->dv_filter.arr_periapsis);
+	if(calc_data->dv_filter.last_transfer_type == TF_CAPTURE || calc_data->dv_filter.last_transfer_type == TF_CIRC)
+		arrival_dv = arrival_dv_with_assist(arrival_body, subtract_vec3(legs[last_leg].v1, states[candidate->num_steps - 1].v),
+			alt2radius(arrival_body, calc_data->dv_filter.arr_periapsis), calc_data->dv_filter.last_transfer_type == TF_CIRC,
+			arrival_dv, times[candidate->num_steps - 1], NULL);
 	if(arrival_dv + dsm_total_dv + powered_flyby_dv > calc_data->dv_filter.max_satdv) {
 		goto cleanup;
 	}

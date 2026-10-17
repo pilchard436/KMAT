@@ -71,3 +71,5 @@ dkms.conf
 
 # CMake build output
 /build/
+/00_Testing/Itineraries/
+kmat_crash.txt

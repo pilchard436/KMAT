@@ -63,6 +63,18 @@ static Vector3 dsm_burn_rtn(const struct ItinStep *step) {
 	return vec3(dot_vec3(burn, radial), dot_vec3(burn, tangential), dot_vec3(burn, normal));
 }
 
+// Names the moon that lowers the arrival burn, if one does.
+static void append_arrival_assist(char *string, struct ItinStep *arrival, double arr_periapsis, int circularize) {
+	if(arrival->body == NULL) return;
+	Vector3 excess = subtract_vec3(arrival->v_arr, arrival->v_body);
+	double radius = alt2radius(arrival->body, arr_periapsis);
+	double plain = circularize ? dv_circ(arrival->body, radius, mag_vec3(excess)) : dv_capture(arrival->body, radius, mag_vec3(excess));
+	MoonAssist assist;
+	double assisted = arrival_dv_with_assist(arrival->body, excess, radius, circularize, plain, arrival->date, &assist);
+	if(assist.moon != NULL)
+		sprintf(string, "%s  %s assist: aim %.2f m/s, saves %.2f m/s\n", string, assist.moon->name, assist.aim_dv, plain - assisted);
+}
+
 void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string) {
 	sprintf(string, "");
 	if(step == NULL) return;
@@ -83,11 +95,15 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	if(date_type == DATE_KERBAL) dt *= 4;
 	sprintf(string, "%sArrival: %s\nDuration: %.2f days\n", string, date_string, dt);
 	
+	int previous_assist = set_moon_assist_enabled(1);
 	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
+	set_moon_assist_enabled(previous_assist);
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
+	append_arrival_assist(string, get_last(step), arr_periapsis, 0);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
+	append_arrival_assist(string, get_last(step), arr_periapsis, 1);
 	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
 	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
@@ -154,7 +170,9 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	if(date_type == DATE_KERBAL) dt *= 4;
 	sprintf(string, "%sArrival: %s\nDuration: %.2f days\n", string, date_string, dt);
 	
+	int previous_assist = set_moon_assist_enabled(1);
 	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
+	set_moon_assist_enabled(previous_assist);
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s\n", string, pp.dv_dep);
 	struct ItinStep *departure = get_first(step);
@@ -173,7 +191,9 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			burn_radial, burn_tangential, burn_normal);
 	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);
+	append_arrival_assist(string, get_last(step), arr_periapsis, 0);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n", string, pp.dv_arr_circ);
+	append_arrival_assist(string, get_last(step), arr_periapsis, 1);
 	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
 	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);

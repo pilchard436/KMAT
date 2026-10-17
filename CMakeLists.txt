@@ -63,6 +63,7 @@ add_executable(KMAT
     launch_calculator/lv_profile.c
     launch_calculator/lv_profile.h
     main.c
+    tools/crash_log.c
     tools/tool_funcs.c
     tools/tool_funcs.h
     launch_calculator/launch_circularization.c

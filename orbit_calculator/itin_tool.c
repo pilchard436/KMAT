@@ -20,9 +20,11 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 	int index = 0;
 	for(int i = 0; i < num_deps; i++) store_itineraries_in_array(departures[i], arrivals, &index);
 	struct PorkchopPoint *porkchop_points = malloc(num_itins * sizeof(struct PorkchopPoint));
+	int previous_assist = set_moon_assist_enabled(1);
 	for(int i = 0; i < num_itins; i++) {
 		porkchop_points[i] = create_porkchop_point(arrivals[i], dep_periapsis, arr_periapsis);
 	}
+	set_moon_assist_enabled(previous_assist);
 	free(arrivals);
 
 	return porkchop_points;
@@ -33,9 +35,16 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	pp.arrival = itin;
 	pp.dur = get_itinerary_duration(itin);
 
-	double vinf = mag_vec3(subtract_vec3(itin->v_arr, itin->v_body));
-	pp.dv_arr_cap = dv_capture(itin->body, alt2radius(itin->body, arr_periapsis), vinf);
-	pp.dv_arr_circ = dv_circ(itin->body, alt2radius(itin->body, arr_periapsis), vinf);
+	Vector3 arrival_excess = subtract_vec3(itin->v_arr, itin->v_body);
+	double vinf = mag_vec3(arrival_excess);
+	double arrival_radius = alt2radius(itin->body, arr_periapsis);
+	pp.dv_arr_cap = dv_capture(itin->body, arrival_radius, vinf);
+	pp.dv_arr_circ = dv_circ(itin->body, arrival_radius, vinf);
+	// Search nodes call this for every candidate, so assists are only applied when asked for.
+	if(moon_assist_is_active() && itin->body != NULL) {
+		pp.dv_arr_cap = arrival_dv_with_assist(itin->body, arrival_excess, arrival_radius, 0, pp.dv_arr_cap, itin->date, NULL);
+		pp.dv_arr_circ = arrival_dv_with_assist(itin->body, arrival_excess, arrival_radius, 1, pp.dv_arr_circ, itin->date, NULL);
+	}
 
 	pp.dv_dsm = 0;
 	pp.dv_flyby = 0;
@@ -256,10 +265,12 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
 	}
 	if(step->next == NULL) {
-		double vinf = mag_vec3(subtract_vec3(step->v_arr, step->v_body));
-		if(last_transfer_type == TF_CAPTURE) return dv_capture(step->body, alt2radius(step->body, arr_periapsis), vinf);
-		if(last_transfer_type == TF_CIRC) return dv_circ(step->body, alt2radius(step->body, arr_periapsis), vinf);
-		return 0;
+		Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
+		double vinf = mag_vec3(excess), radius = alt2radius(step->body, arr_periapsis);
+		if(last_transfer_type != TF_CAPTURE && last_transfer_type != TF_CIRC) return 0;
+		int circularize = last_transfer_type == TF_CIRC;
+		double plain = circularize ? dv_circ(step->body, radius, vinf) : dv_capture(step->body, radius, vinf);
+		return moon_assist_is_active() ? arrival_dv_with_assist(step->body, excess, radius, circularize, plain, step->date, NULL) : plain;
 	}
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = flyby_minimum_periapsis(step->body);
