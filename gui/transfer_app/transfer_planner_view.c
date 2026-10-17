@@ -51,19 +51,20 @@ static void tp_focus_on(Body *body) {
 	if(!isfinite(pitch) || pitch > 1.5) pitch = 1.5;
 	if(pitch < -1.5) pitch = -1.5;
 	if(!isfinite(yaw)) yaw = 0;
+	double distance = get_camera_distance_to_center(tp_system_camera);
 	if(body == NULL || body == tp_system->cb) {
 		tp_focus_body = NULL;
 		update_camera_to_celestial_system(tp_system_camera, tp_system, pitch, yaw);
+		distance = fmax(tp_system_camera->min_pos_dist, fmin(tp_system_camera->max_pos_dist, distance));
+		update_camera_position_from_angles(tp_system_camera, pitch, yaw, distance);
+		camera_look_to_center(tp_system_camera);
 		return;
 	}
 	tp_focus_body = body;
 	camera_set_focus(tp_system_camera, tp_body_position(body, current_date_tp));
-	// Frame the sphere of influence, and allow zooming in close to the surface.
-	Body *parent = body->orbit.cb != NULL ? body->orbit.cb : tp_system->cb;
-	double soi = fabs(body->orbit.a) * pow(body->mu / parent->mu, 0.4);
-	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
-	update_camera_position_from_angles(tp_system_camera, pitch, yaw, soi * 7);
+	// Keeps the current zoom, but allows zooming in close to the surface.
 	tp_system_camera->min_pos_dist = body->radius * 15;
+	update_camera_position_from_angles(tp_system_camera, pitch, yaw, fmax(distance, tp_system_camera->min_pos_dist));
 	camera_look_to_center(tp_system_camera);
 }
 
