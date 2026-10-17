@@ -1,8 +1,8 @@
-#include "parking_orbit_editor.h"
+#include "starting_orbit_editor.h"
 #include "gui/gui_manager.h"
 #include "gui/info_win_manager.h"
 #include "gui/gui_tools/camera.h"
-#include "tools/parking_orbit.h"
+#include "tools/starting_orbit.h"
 #include "tools/celestial_systems.h"
 #include <math.h>
 #include <stdlib.h>
@@ -15,15 +15,15 @@ Body *ic_get_departure_body(void);
 static GtkWidget *po_window, *po_entries[PO_NUM], *po_toggle, *po_status, *po_area;
 static Camera *po_camera;
 static Body *po_body;
-static ParkingOrbit po_orbit;
+static StartingOrbit po_orbit;
 static int po_orbit_ok;
 static int po_loading;
 
 static const double DEG = M_PI / 180.0;
 
 static void po_write_entries(void) {
-	double values[PO_NUM] = {(parking_orbit_periapsis_radius(&po_orbit) - po_body->radius) / 1e3,
-		(parking_orbit_apoapsis_radius(&po_orbit) - po_body->radius) / 1e3, po_orbit.inclination / DEG,
+	double values[PO_NUM] = {(starting_orbit_periapsis_radius(&po_orbit) - po_body->radius) / 1e3,
+		(starting_orbit_apoapsis_radius(&po_orbit) - po_body->radius) / 1e3, po_orbit.inclination / DEG,
 		po_orbit.raan / DEG, po_orbit.arg_periapsis / DEG, po_orbit.true_anomaly / DEG};
 	po_loading = 1;
 	for(int i = 0; i < PO_NUM; i++) {
@@ -34,7 +34,7 @@ static void po_write_entries(void) {
 	po_loading = 0;
 }
 
-static int po_read_entries(ParkingOrbit *out) {
+static int po_read_entries(StartingOrbit *out) {
 	double v[PO_NUM];
 	for(int i = 0; i < PO_NUM; i++) {
 		const char *text = gtk_entry_get_text(GTK_ENTRY(po_entries[i]));
@@ -44,7 +44,7 @@ static int po_read_entries(ParkingOrbit *out) {
 	}
 	double periapsis_radius = po_body->radius + v[PO_PERI] * 1e3, apoapsis_radius = po_body->radius + v[PO_APO] * 1e3;
 	// An apoapsis below the periapsis gives a negative eccentricity, which the validity check rejects.
-	*out = (ParkingOrbit){.semi_major_axis = (periapsis_radius + apoapsis_radius) / 2,
+	*out = (StartingOrbit){.semi_major_axis = (periapsis_radius + apoapsis_radius) / 2,
 		.eccentricity = (apoapsis_radius - periapsis_radius) / (apoapsis_radius + periapsis_radius),
 		.inclination = v[PO_INC] * DEG,
 		.raan = v[PO_RAAN] * DEG, .arg_periapsis = v[PO_ARGP] * DEG, .true_anomaly = v[PO_TA] * DEG};
@@ -52,7 +52,7 @@ static int po_read_entries(ParkingOrbit *out) {
 }
 
 static void po_set_default(Body *body) {
-	po_orbit = parking_orbit_circular(body->radius + body->atmo_alt + ic_dep_periapsis);
+	po_orbit = starting_orbit_circular(body->radius + body->atmo_alt + ic_dep_periapsis);
 	po_write_entries();
 }
 
@@ -135,7 +135,7 @@ static void po_redraw(void) {
 
 	// Reference frame axes: x red, y green, z blue (the celestial system's inertial frame)
 	double axis_len = po_body->radius * 1.6;
-	if(po_orbit_ok) axis_len = fmax(axis_len, parking_orbit_apoapsis_radius(&po_orbit) * 1.1);
+	if(po_orbit_ok) axis_len = fmax(axis_len, starting_orbit_apoapsis_radius(&po_orbit) * 1.1);
 	cairo_set_source_rgb(cr, 0.8, 0.3, 0.3); po_line_3d(cr, vec3(0, 0, 0), vec3(axis_len, 0, 0), 64);
 	cairo_set_source_rgb(cr, 0.3, 0.8, 0.3); po_line_3d(cr, vec3(0, 0, 0), vec3(0, axis_len, 0), 64);
 	cairo_set_source_rgb(cr, 0.3, 0.5, 0.9); po_line_3d(cr, vec3(0, 0, 0), vec3(0, 0, axis_len), 64);
@@ -145,18 +145,18 @@ static void po_redraw(void) {
 		Vector3 last_r = vec3(0, 0, 0);
 		for(int i = 0; i <= 360; i++) {
 			OSV state;
-			if(!parking_orbit_state_at(&po_orbit, po_body, 2 * M_PI * i / 360, &state)) continue;
+			if(!starting_orbit_state_at(&po_orbit, po_body, 2 * M_PI * i / 360, &state)) continue;
 			if(i > 0 && !po_hidden_by_body(scale_vec3(add_vec3(last_r, state.r), 0.5))) po_line(cr, last_r, state.r);
 			last_r = state.r;
 		}
 		OSV periapsis, start;
-		if(parking_orbit_state_at(&po_orbit, po_body, 0, &periapsis) && !po_hidden_by_body(periapsis.r)) {
+		if(starting_orbit_state_at(&po_orbit, po_body, 0, &periapsis) && !po_hidden_by_body(periapsis.r)) {
 			Vector2 p = p3d_to_p2d(po_camera, periapsis.r);
 			cairo_set_source_rgb(cr, 0.3, 1.0, 0.5);
 			cairo_arc(cr, p.x, p.y, 4, 0, 2 * M_PI);
 			cairo_fill(cr);
 		}
-		if(parking_orbit_state_at(&po_orbit, po_body, po_orbit.true_anomaly, &start) && !po_hidden_by_body(start.r)) {
+		if(starting_orbit_state_at(&po_orbit, po_body, po_orbit.true_anomaly, &start) && !po_hidden_by_body(start.r)) {
 			Vector2 p = p3d_to_p2d(po_camera, start.r);
 			cairo_set_source_rgb(cr, 1, 1, 1);
 			cairo_arc(cr, p.x, p.y, 4, 0, 2 * M_PI);
@@ -168,7 +168,7 @@ static void po_redraw(void) {
 
 static void po_fit_camera(void) {
 	if(po_camera == NULL || po_body == NULL) return;
-	double extent = po_orbit_ok ? parking_orbit_apoapsis_radius(&po_orbit) : po_body->radius * 2;
+	double extent = po_orbit_ok ? starting_orbit_apoapsis_radius(&po_orbit) : po_body->radius * 2;
 	update_camera_position_from_angles(po_camera, 0.5, 0.6, extent * 7);
 	camera_look_to_center(po_camera);
 	po_camera->min_pos_dist = po_body->radius * 1.5;
@@ -176,23 +176,23 @@ static void po_fit_camera(void) {
 }
 
 static void po_update(void) {
-	ParkingOrbit parsed;
+	StartingOrbit parsed;
 	char text[256];
 	po_orbit_ok = 0;
 	if(po_body == NULL) {
 		gtk_label_set_text(GTK_LABEL(po_status), "No departure body selected.");
 	} else if(!po_read_entries(&parsed)) {
 		gtk_label_set_text(GTK_LABEL(po_status), "Invalid number in one of the fields.");
-	} else if(!parking_orbit_is_valid(&parsed, po_body)) {
+	} else if(!starting_orbit_is_valid(&parsed, po_body)) {
 		g_snprintf(text, sizeof(text), "Invalid orbit: the apoapsis must not be below the periapsis, and the periapsis must be above the surface and atmosphere of %s.", po_body->name);
 		gtk_label_set_text(GTK_LABEL(po_status), text);
 	} else {
 		po_orbit = parsed;
 		po_orbit_ok = 1;
-		double period = parking_orbit_period(&po_orbit, po_body);
+		double period = starting_orbit_period(&po_orbit, po_body);
 		g_snprintf(text, sizeof(text), "%s: periapsis altitude %.1f km, apoapsis altitude %.1f km, period %.2f h",
-			po_body->name, (parking_orbit_periapsis_radius(&po_orbit) - po_body->radius) / 1e3,
-			(parking_orbit_apoapsis_radius(&po_orbit) - po_body->radius) / 1e3, period / 3600.0);
+			po_body->name, (starting_orbit_periapsis_radius(&po_orbit) - po_body->radius) / 1e3,
+			(starting_orbit_apoapsis_radius(&po_orbit) - po_body->radius) / 1e3, period / 3600.0);
 		gtk_label_set_text(GTK_LABEL(po_status), text);
 	}
 	po_redraw();
@@ -218,9 +218,9 @@ static void on_po_motion(GtkWidget *widget, GdkEventButton *event, gpointer ptr)
 	po_redraw();
 }
 
-void init_parking_orbit_editor(GtkBuilder *builder) {
+void init_starting_orbit_editor(GtkBuilder *builder) {
 	static const char *ids[PO_NUM] = {"tf_po_peri", "tf_po_apo", "tf_po_inc", "tf_po_raan", "tf_po_argp", "tf_po_ta"};
-	po_window = GTK_WIDGET(gtk_builder_get_object(builder, "parking_orbit_window"));
+	po_window = GTK_WIDGET(gtk_builder_get_object(builder, "starting_orbit_window"));
 	for(int i = 0; i < PO_NUM; i++) po_entries[i] = GTK_WIDGET(gtk_builder_get_object(builder, ids[i]));
 	po_toggle = GTK_WIDGET(gtk_builder_get_object(builder, "cb_po_enable"));
 	po_status = GTK_WIDGET(gtk_builder_get_object(builder, "lb_po_status"));
@@ -230,35 +230,35 @@ void init_parking_orbit_editor(GtkBuilder *builder) {
 	po_orbit_ok = 0;
 }
 
-void end_parking_orbit_editor(void) {
-	parking_orbit_set_active(NULL, NULL);
+void end_starting_orbit_editor(void) {
+	starting_orbit_set_active(NULL, NULL);
 	if(po_camera != NULL) destroy_camera(po_camera);
 	po_camera = NULL;
 	po_body = NULL;
 }
 
-int parking_orbit_editor_prepare_search(Body *dep_body, char *error, size_t error_size) {
-	parking_orbit_set_active(NULL, NULL);
+int starting_orbit_editor_prepare_search(Body *dep_body, char *error, size_t error_size) {
+	starting_orbit_set_active(NULL, NULL);
 	if(po_toggle == NULL || !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(po_toggle))) return 1;
 	if(dep_body == NULL || po_body != dep_body) {
 		g_snprintf(error, error_size, "The custom starting orbit was defined for %s. Reopen the starting orbit editor for the current departure body or disable it.",
 			po_body != NULL ? po_body->name : "another body");
 		return 0;
 	}
-	ParkingOrbit parsed;
-	if(!po_read_entries(&parsed) || !parking_orbit_is_valid(&parsed, dep_body)) {
+	StartingOrbit parsed;
+	if(!po_read_entries(&parsed) || !starting_orbit_is_valid(&parsed, dep_body)) {
 		g_snprintf(error, error_size, "The custom starting orbit is invalid. Fix it in the starting orbit editor or disable it.");
 		return 0;
 	}
-	parking_orbit_set_active(&parsed, dep_body);
+	starting_orbit_set_active(&parsed, dep_body);
 	return 1;
 }
 
-void parking_orbit_editor_finish_search(void) {
-	parking_orbit_set_active(NULL, NULL);
+void starting_orbit_editor_finish_search(void) {
+	starting_orbit_set_active(NULL, NULL);
 }
 
-G_MODULE_EXPORT void on_open_parking_orbit_editor(void) {
+G_MODULE_EXPORT void on_open_starting_orbit_editor(void) {
 	Body *dep_body = ic_get_departure_body();
 	if(dep_body == NULL) {
 		show_msg_window("Select a departure body first.");
@@ -278,7 +278,7 @@ G_MODULE_EXPORT void on_open_parking_orbit_editor(void) {
 	po_redraw();
 }
 
-G_MODULE_EXPORT void on_parking_orbit_reset(void) {
+G_MODULE_EXPORT void on_starting_orbit_reset(void) {
 	if(po_body == NULL) return;
 	po_set_default(po_body);
 	po_update();
@@ -286,12 +286,12 @@ G_MODULE_EXPORT void on_parking_orbit_reset(void) {
 	po_redraw();
 }
 
-G_MODULE_EXPORT void on_parking_orbit_changed(void) {
+G_MODULE_EXPORT void on_starting_orbit_changed(void) {
 	if(po_loading || po_body == NULL) return;
 	po_update();
 }
 
-G_MODULE_EXPORT gboolean on_parking_orbit_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
+G_MODULE_EXPORT gboolean on_starting_orbit_window_delete(GtkWidget *widget, GdkEvent *event, gpointer data) {
 	(void)event; (void)data;
 	gtk_widget_hide(widget);
 	return TRUE;

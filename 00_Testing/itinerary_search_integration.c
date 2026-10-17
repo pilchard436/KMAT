@@ -3,7 +3,7 @@
 #include "tools/file_io.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
-#include "tools/parking_orbit.h"
+#include "tools/starting_orbit.h"
 
 #include <float.h>
 #include <math.h>
@@ -314,8 +314,8 @@ static void measure_stored_objective_mismatch(const Itin_Calc_Results *results,
 	}
 }
 
-// A configured parking orbit must govern the departure delta-v that the search stores and filters on.
-static int check_parking_orbit_search(CelestSystem *system, Body *departure_body, Body *flyby_body,
+// A configured starting orbit must govern the departure delta-v that the search stores and filters on.
+static int check_starting_orbit_search(CelestSystem *system, Body *departure_body, Body *flyby_body,
 		Body *arrival_body, double departure_jd, double hohmann_duration) {
 	Body *flyby_bodies[] = {flyby_body, arrival_body};
 	Itin_Calc_Data calc_data = {0};
@@ -337,9 +337,9 @@ static int check_parking_orbit_search(CelestSystem *system, Body *departure_body
 	// A tilted circular orbit can never beat the free-plane burn at the same radius, and must lose on
 	// routes whose asymptote is off its line of nodes.
 	double radius = alt2radius(departure_body, calc_data.dv_filter.dep_periapsis);
-	ParkingOrbit tilted = {.semi_major_axis = radius, .inclination = 1.4, .raan = 0.5};
-	int valid = parking_orbit_is_valid(&tilted, departure_body);
-	parking_orbit_set_active(&tilted, departure_body);
+	StartingOrbit tilted = {.semi_major_axis = radius, .inclination = 1.4, .raan = 0.5};
+	int valid = starting_orbit_is_valid(&tilted, departure_body);
+	starting_orbit_set_active(&tilted, departure_body);
 	Itin_Calc_Results run = search_for_itineraries(calc_data);
 
 	double worst_mismatch = 0, lowest_margin = DBL_MAX, largest_penalty = 0;
@@ -359,7 +359,7 @@ static int check_parking_orbit_search(CelestSystem *system, Body *departure_body
 			while(first->prev != NULL && first->prev->prev != NULL) first = first->prev;
 			Vector3 v_inf = subtract_vec3(first->v_dep, first->prev->v_body);
 			double direct;
-			if(!parking_orbit_best_departure_burn(&tilted, departure_body, v_inf, &direct, NULL)) continue;
+			if(!starting_orbit_best_departure_burn(&tilted, departure_body, v_inf, &direct, NULL)) continue;
 			double free_plane = dv_circ(departure_body, radius, mag_vec3(v_inf));
 			worst_mismatch = fmax(worst_mismatch, fabs(direct - point.dv_dep));
 			lowest_margin = fmin(lowest_margin, point.dv_dep - free_plane);
@@ -369,15 +369,15 @@ static int check_parking_orbit_search(CelestSystem *system, Body *departure_body
 		}
 		free(leaves);
 	}
-	parking_orbit_set_active(NULL, NULL);
+	starting_orbit_set_active(NULL, NULL);
 	for(int i = 0; i < run.num_deps; i++) free_itinerary(run.departures[i]);
 	free(run.departures);
 	if(!valid || checked == 0 || worst_mismatch > 1e-6 || lowest_margin < -1e-3 || penalized == 0) {
-		fprintf(stderr, "Parking orbit search check failed: %d routes checked, mismatch %.9f m/s, lowest margin over free plane %.6f m/s, %d routes penalized\n",
+		fprintf(stderr, "Starting orbit search check failed: %d routes checked, mismatch %.9f m/s, lowest margin over free plane %.6f m/s, %d routes penalized\n",
 			checked, worst_mismatch, lowest_margin, penalized);
 		return 0;
 	}
-	printf("Parking orbit search check passed: stored departure dV matches the orbit on %d routes (worst mismatch %.9f m/s); never below the free-plane burn, and above it by up to %.1f m/s on %d routes\n",
+	printf("Starting orbit search check passed: stored departure dV matches the orbit on %d routes (worst mismatch %.9f m/s); never below the free-plane burn, and above it by up to %.1f m/s on %d routes\n",
 		checked, worst_mismatch, largest_penalty, penalized);
 	return 1;
 }
@@ -1462,7 +1462,7 @@ int main(int argc, char **argv) {
 		flyby_body, arrival_body, departure_jd, hohmann_duration);
 	int seeds_valid = check_speed_changing_seed_generation(system, departure_body,
 		flyby_body, arrival_body, departure_jd);
-	int parking_valid = check_parking_orbit_search(system, departure_body, flyby_body,
+	int starting_valid = check_starting_orbit_search(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
 	int dsm_model_valid = check_dsm_model(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
@@ -1474,7 +1474,7 @@ int main(int argc, char **argv) {
 	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
 
 	free_celestial_system(system);
-	if(!search_valid || !powered_valid || !seeds_valid || !parking_valid || !dsm_model_valid || !dsm_valid ||
+	if(!search_valid || !powered_valid || !seeds_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
 		!sweep_valid || !resonant_valid || !near_equal_valid) {
 		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
 			search_nodes, search_itins);

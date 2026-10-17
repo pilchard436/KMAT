@@ -9,7 +9,7 @@
 #include "transfer_app/porkchop_analyzer.h"
 #include "transfer_app/sequence_calculator.h"
 #include "transfer_app/itinerary_calculator.h"
-#include "transfer_app/parking_orbit_editor.h"
+#include "transfer_app/starting_orbit_editor.h"
 #include "launch_app/launch_analyzer.h"
 #include "launch_app/capability_analyzer.h"
 #include "launch_app/launch_parameter_analyzer.h"
@@ -57,7 +57,7 @@ void start_gui(const char* gui_filepath) {
 	// gui runs...
 
 	// reset transfer gui
-	end_parking_orbit_editor();
+	end_starting_orbit_editor();
 	reset_ic();
 	reset_sc();
 	end_porkchop_analyzer();
@@ -110,7 +110,7 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	init_global_settings(builder);
 	// init transfer planner page
 	init_itinerary_calculator(builder);
-	init_parking_orbit_editor(builder);
+	init_starting_orbit_editor(builder);
 	init_sequence_calculator(builder);
 	init_porkchop_analyzer(builder);
 	init_transfer_planner(builder);

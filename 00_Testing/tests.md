@@ -130,6 +130,6 @@ both passed in 46.53 seconds combined: Jupiter returned 4191 itineraries in 13.1
 seconds, with best corrected objective 4623.567 m/s; Saturn returned 3090
 itineraries in 33.29 seconds, with best corrected objective 4718.541 m/s.
 
-# Parking orbit
+# Starting orbit
 
 The departure ?v of a search can use a custom starting orbit (six classical elements in the system's inertial frame; the departure burn is minimized over the orbit). It is a calculation setting and is not stored in .itins files. Unit tests check circular and polar limits, asymptote recomputation, validity and the active-orbit scope; the search integration checks that every route's stored departure ?v equals the independent burn for the orbit, never falls below the free-plane burn, and is penalized on routes off the orbit's line of nodes. Manual check: Itinerary Calculator > Starting Orbit..., edit the elements and confirm the figure and status line update.

@@ -1,4 +1,4 @@
-﻿# TODO
+# TODO
 
 ## Current Context
 
@@ -35,10 +35,10 @@
 - Logs report seed feasibility evaluations, added seeds, extra branches, skipped feasible bucket alternatives, encounters that skip powered sampling after budget exhaustion, objective evaluations, exhausted refinement budgets, and scoring/refinement wall time. Existing optional profiling reports Lambert calls.
 - These budgets bound additional branching and per-route refinement, not total recursive search runtime. Full feasibility scoring still visits all generated complete candidates.
 
-## Parking Orbit
+## Starting Orbit
 
 - [x] Add all six classical elements: semi-major axis, eccentricity, inclination, RAAN, argument of periapsis, and true anomaly.
-- [x] Add a separate parking-orbit editor accessible from the main page.
+- [x] Add a separate starting-orbit editor accessible from the main page.
 - [x] Add a figure that updates as the elements change.
 
 ## Remaining Powered-Flyby Search Coverage

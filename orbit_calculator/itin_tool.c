@@ -1,7 +1,7 @@
 #include "itin_tool.h"
 #include "powered_seed_selection.h"
 #include "tools/thread_pool.h"
-#include "tools/parking_orbit.h"
+#include "tools/starting_orbit.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -610,7 +610,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 
 	pp.dep_date = itin->prev->date;
 	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
-	if(!parking_orbit_departure_dv(itin->prev->body, departure_vinf,
+	if(!starting_orbit_departure_dv(itin->prev->body, departure_vinf,
 		alt2radius(itin->prev->body, dep_periapsis), &pp.dv_dep))
 		pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis),
 			mag_vec3(departure_vinf));
