@@ -179,6 +179,11 @@ target_include_directories(KMATLambertBenchmark PRIVATE
 
 add_executable(KMATSearchIntegration
     00_Testing/itinerary_search_integration.c
+    00_Testing/integration_search.c
+    00_Testing/integration_starting_orbit.c
+    00_Testing/integration_benchmarks.c
+    00_Testing/integration_operations.c
+    00_Testing/integration_flybys.c
     orbit_calculator/transfer_calc.c
     orbit_calculator/powered_flyby_optimizer.c
     orbit_calculator/powered_route_objective.c
