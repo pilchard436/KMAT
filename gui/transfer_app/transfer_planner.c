@@ -613,7 +613,7 @@ G_MODULE_EXPORT void on_tp_animate_toggled(GtkToggleButton *button, gpointer dat
 	}
 	gtk_button_set_label(GTK_BUTTON(button), "Stop");
 	tp_animation_last_time = g_get_monotonic_time();
-	if(tp_animation_source == 0) tp_animation_source = g_timeout_add(33, tp_animation_tick, NULL);
+	if(tp_animation_source == 0) tp_animation_source = g_timeout_add_full(G_PRIORITY_DEFAULT_IDLE, 33, tp_animation_tick, NULL, NULL);
 }
 
 G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {

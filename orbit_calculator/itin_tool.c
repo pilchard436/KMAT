@@ -1259,6 +1259,36 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 }
 
 
+// Drawing asks about the same flybys every animation frame, and each solve scans many periapsis radii.
+typedef struct {
+	Vector3 v_arr, v_dep, v_body;
+	Body *body;
+	int unrestricted, feasible;
+	double periapsis;
+} FlybyCacheEntry;
+static _Thread_local FlybyCacheEntry flyby_cache[32];
+static _Thread_local int flyby_cache_next;
+
+static int same_vec(Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+
+static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double *periapsis) {
+	for(int i = 0; i < 32; i++) {
+		FlybyCacheEntry *entry = &flyby_cache[i];
+		if(entry->body == body && entry->unrestricted == unrestricted_flyby_periapsis &&
+				same_vec(entry->v_arr, v_arr) && same_vec(entry->v_dep, v_dep) && same_vec(entry->v_body, v_body)) {
+			if(periapsis != NULL) *periapsis = entry->periapsis;
+			return entry->feasible;
+		}
+	}
+	PoweredFlybyResult flyby;
+	int feasible = calculate_powered_flyby(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), &flyby);
+	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, unrestricted_flyby_periapsis,
+		feasible, feasible ? flyby.periapsis_radius : 0};
+	flyby_cache_next = (flyby_cache_next + 1) % 32;
+	if(periapsis != NULL) *periapsis = feasible ? flyby.periapsis_radius : 0;
+	return feasible;
+}
+
 double flyby_periapsis_shortfall(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
 	double minimum_radius = step->body->radius + step->body->atmo_alt;
@@ -1270,11 +1300,14 @@ double flyby_periapsis_shortfall(struct ItinStep *step) {
 int flyby_below_min_safe(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
 	double safe_radius = step->body->radius + step->body->atmo_alt + 1e4;
-	PoweredFlybyResult flyby;
-	double flown = calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
-			flyby_minimum_periapsis(step->body), &flyby) ?
-		flyby.periapsis_radius : get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
+	double flown;
+	if(!cached_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, &flown))
+		flown = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
 	return isfinite(flown) && flown < safe_radius - 1;
+}
+
+int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
+	return cached_powered_flyby(v_arr, v_dep, v_body, body, NULL);
 }
 
 int count_flybys_below_min_safe(struct ItinStep *step_in_route) {

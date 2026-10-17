@@ -66,8 +66,13 @@ static void stroke_segment_3d(Camera *camera, Vector3 a, Vector3 b) {
 	if(za <= near_depth) a = add_vec3(a, scale_vec3(subtract_vec3(b, a), (near_depth - za) / (zb - za)));
 	else if(zb <= near_depth) b = add_vec3(b, scale_vec3(subtract_vec3(a, b), (near_depth - zb) / (za - zb)));
 	Vector2 pa = p3d_to_p2d(camera, a), pb = p3d_to_p2d(camera, b);
+	double width = camera->screen->width, height = camera->screen->height;
+	if((pa.x < 0 && pb.x < 0) || (pa.y < 0 && pb.y < 0) || (pa.x > width && pb.x > width) || (pa.y > height && pb.y > height)) return;
+	// Only a segment that touches a body is worth splitting; most never do.
 	int pieces = 1;
-	if(num_occluders > 0) pieces = fmax(1, fmin(64, ceil(hypot(pb.x - pa.x, pb.y - pa.y) / 4)));
+	if(num_occluders > 0 && (point_is_hidden_by_body(camera, a) || point_is_hidden_by_body(camera, b) ||
+			point_is_hidden_by_body(camera, scale_vec3(add_vec3(a, b), 0.5))))
+		pieces = fmax(1, fmin(16, ceil(hypot(pb.x - pa.x, pb.y - pa.y) / 4)));
 	for(int i = 0; i < pieces; i++) {
 		Vector3 from = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)i / pieces));
 		Vector3 to = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)(i + 1) / pieces));
@@ -115,8 +120,9 @@ void draw_trajectory(Camera *camera, struct OSV osv0, double dt, struct Body *at
 	OSV osv = osv0;
 	Vector3 last_r = osv.r;
 	double ta_step = (ta1 - ta0)/1000;
+	if(!(ta_step > 0) || !isfinite(ta_step)) return;
 
-	for(double dta = 0; dta <= (ta1 - ta0); dta += ta_step) {
+	for(int n = 0; n <= 1000; n++) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
 		stroke_segment_3d(camera, last_r, osv.r);
@@ -212,8 +218,7 @@ static void draw_itinerary_step_marker(Camera *camera, struct ItinStep *step) {
 
 // Powered flybys change excess speed, so only the periapsis clearance decides viability.
 static int is_flyby_leg_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
-	PoweredFlybyResult result;
-	return calculate_powered_flyby(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), &result);
+	return flyby_is_viable(v_arr, v_dep, v_body, body);
 }
 
 // Stored leg velocities start at the SOI boundary, so propagating them from the node would miss the next node.
