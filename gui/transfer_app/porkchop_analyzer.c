@@ -175,7 +175,8 @@ void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer 
 			if(x < min_x || y > pa_porkchop_screen->height-min_y) return;
 			if(x+width < min_x) width = min_x-x;
 			if(y+height < 0) height = -y;
-			if(x+width > pa_porkchop_screen->width) width = pa_porkchop_screen->width-x;
+			double plot_right = pa_porkchop_screen->width - get_porkchop_colorbar_width();
+			if(x+width > plot_right) width = plot_right-x;
 			if(y+height > pa_porkchop_screen->height-min_y) height = (pa_porkchop_screen->height-min_y)-y;
 			clear_dynamic_screen_layer(pa_porkchop_screen);
 			cairo_rectangle(pa_porkchop_screen->dynamic_layer.cr, x, y, width, height);

@@ -157,10 +157,58 @@ void draw_data_point(cairo_t *cr, double x, double y, double radius) {
 const int porkchop_dur_yaxis_x = 40;
 const int porkchop_arrdate_yaxis_x = 60;
 const int porkchop_xaxis_y = 40;
+// Space right of the plot for the delta-v color scale.
+const int porkchop_colorbar_width = 90;
+
+// Point color from the relative delta-v (0 lowest, 1 highest); the same colors fill the scale.
+static void porkchop_color(double bias, double *r, double *g, double *b) {
+	*r = bias;
+	*g = 1 - bias;
+	*b = 4 * pow(bias - 0.5, 2);
+}
+
+static void draw_porkchop_color_scale(cairo_t *cr, double plot_width, double height, double min_dv, double max_dv) {
+	double x = plot_width + 22, bar_width = 16, top = 30, bottom = height - porkchop_xaxis_y;
+	if(!(bottom - top > 20) || !(max_dv > min_dv)) return;
+	cairo_pattern_t *gradient = cairo_pattern_create_linear(0, bottom, 0, top);
+	for(int i = 0; i <= 16; i++) {
+		double r, g, b;
+		porkchop_color(i / 16.0, &r, &g, &b);
+		cairo_pattern_add_color_stop_rgb(gradient, i / 16.0, r, g, b);
+	}
+	cairo_rectangle(cr, x, top, bar_width, bottom - top);
+	cairo_set_source(cr, gradient);
+	cairo_fill(cr);
+	cairo_pattern_destroy(gradient);
+
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_set_font_size(cr, 12.0);
+	cairo_rectangle(cr, x, top, bar_width, bottom - top);
+	cairo_set_line_width(cr, 1);
+	cairo_stroke(cr);
+	double tick, first_label;
+	get_axis_ticks(COORD_LABEL_NUMBER, 6, min_dv, max_dv, &tick, NULL, &first_label);
+	for(double label = first_label; label <= max_dv; label += tick) {
+		double y = bottom - (label - min_dv) / (max_dv - min_dv) * (bottom - top);
+		char text[32];
+		snprintf(text, sizeof(text), "%.0f", label);
+		cairo_move_to(cr, x + bar_width, y);
+		cairo_line_to(cr, x + bar_width + 4, y);
+		cairo_stroke(cr);
+		cairo_move_to(cr, x + bar_width + 7, y + 4);
+		cairo_show_text(cr, text);
+		cairo_new_path(cr);
+	}
+	cairo_move_to(cr, x, top - 10);
+	cairo_show_text(cr, "dv [m/s]");
+	cairo_new_path(cr);
+}
 
 void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnalyzerPoint *porkchop, int num_itins, enum LastTransferType last_transfer_type, int dur0arrdate1) {
 	double dv, depdate, dur, arrdate;
 
+	double plot_width = width - porkchop_colorbar_width;
 	Vector2 origin = {dur0arrdate1 ? porkchop_arrdate_yaxis_x : porkchop_dur_yaxis_x, height-porkchop_xaxis_y};
 
 	int first_show_ind = 0;
@@ -218,12 +266,12 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 
 	// gradients
 	double m_dur, m_depdate, m_arrdate;
-	m_depdate = (width - origin.x)/(max_depdate - min_depdate);
+	m_depdate = (plot_width - origin.x)/(max_depdate - min_depdate);
 	m_arrdate = -origin.y/(max_arrdate - min_arrdate); // negative, because positive is down
 	m_dur = -origin.y/(max_dur - min_dur); // negative, because positive is down
 
-	if(dur0arrdate1) draw_coordinate_system(cr, width, height, COORD_LABEL_DATE, COORD_LABEL_DATE, min_depdate, max_depdate, min_arrdate, max_arrdate, origin, 8, 10);
-	else draw_coordinate_system(cr, width, height, COORD_LABEL_DATE, COORD_LABEL_DURATION, min_depdate, max_depdate, min_dur, max_dur, origin, 8, 10);
+	if(dur0arrdate1) draw_coordinate_system(cr, plot_width, height, COORD_LABEL_DATE, COORD_LABEL_DATE, min_depdate, max_depdate, min_arrdate, max_arrdate, origin, 8, 10);
+	else draw_coordinate_system(cr, plot_width, height, COORD_LABEL_DATE, COORD_LABEL_DURATION, min_depdate, max_depdate, min_dur, max_dur, origin, 8, 10);
 
 	// find points to draw
 	int *draw_idx = calloc(sizeof(int), num_itins);
@@ -256,9 +304,8 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 
 		// color coding
 		color_bias = (dv - min_dv) / (max_dv - min_dv);
-		double r = i == 0 ? 1 : color_bias;
-		double g = i == 0 ? 0 : 1-color_bias;
-		double b = i == 0 ? 0 : 4*pow(color_bias-0.5,2);
+		double r = 1, g = 0, b = 0;
+		if(i != 0) porkchop_color(color_bias, &r, &g, &b);
 		cairo_set_source_rgb(buffer_cr, r,g,b);
 
 		Vector2 data_point = vec2(origin.x + m_depdate*(depdate - min_depdate), origin.y + (dur0arrdate1 ? (m_arrdate*(arrdate - min_arrdate)) : (m_dur*(dur - min_dur))));
@@ -274,6 +321,8 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	cairo_paint(cr);
 	cairo_destroy(buffer_cr);
 	cairo_surface_destroy(buffer_surface);
+
+	draw_porkchop_color_scale(cr, plot_width, height, min_dv, max_dv);
 
 	free(draw_idx);
 }
@@ -381,3 +430,4 @@ void draw_multi_plot(cairo_t *cr, double width, double height, double *x, double
 int get_porkchop_dur_yaxis_x() {return porkchop_dur_yaxis_x;}
 int get_porkchop_arrdate_yaxis_x() {return porkchop_arrdate_yaxis_x;}
 int get_porkchop_xaxis_y() {return porkchop_xaxis_y;}
+int get_porkchop_colorbar_width() {return porkchop_colorbar_width;}

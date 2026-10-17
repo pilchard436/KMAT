@@ -29,6 +29,8 @@ void get_min_max_dep_arr_dur_range_from_mouse_rect(double *p_x0, double *p_x1, d
 
 	int min_x = dur0arrdate1 ? get_porkchop_arrdate_yaxis_x() : get_porkchop_dur_yaxis_x();
 	int min_y = get_porkchop_xaxis_y();
+	// The color scale takes the right edge.
+	screen_width -= get_porkchop_colorbar_width();
 	
 	if(x0 < min_x) x0 = min_x;
 	if(x1 < min_x) x1 = min_x;
