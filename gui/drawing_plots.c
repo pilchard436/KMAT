@@ -169,6 +169,15 @@ static void porkchop_color(double bias, double *r, double *g, double *b) {
 
 static void draw_porkchop_color_scale(cairo_t *cr, double plot_width, double height, double min_dv, double max_dv) {
 	double x = plot_width + 22, bar_width = 16, top = 30, bottom = height - porkchop_xaxis_y;
+	// A darker panel with a border line keeps the scale visibly outside the plot.
+	cairo_set_source_rgb(cr, 0.1, 0.1, 0.1);
+	cairo_rectangle(cr, plot_width, 0, porkchop_colorbar_width + 1, height);
+	cairo_fill(cr);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1);
+	cairo_move_to(cr, plot_width + 0.5, 0);
+	cairo_line_to(cr, plot_width + 0.5, height - porkchop_xaxis_y);
+	cairo_stroke(cr);
 	if(!(bottom - top > 20) || !(max_dv > min_dv)) return;
 	cairo_pattern_t *gradient = cairo_pattern_create_linear(0, bottom, 0, top);
 	for(int i = 0; i <= 16; i++) {
