@@ -110,6 +110,9 @@ gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpo
 			return FALSE;
 		}
 	}
+	// Zoomed in on a moon the planet is usually off screen, so a miss (or the distant sun) steps out to the planet.
+	if(tp_focus_body != NULL && tp_focus_body->orbit.cb != tp_system->cb && (hit == NULL || hit == tp_system->cb))
+		hit = tp_focus_body->orbit.cb;
 	tp_focus_on(hit);
 	update_tp_system_view();
 	return FALSE;
