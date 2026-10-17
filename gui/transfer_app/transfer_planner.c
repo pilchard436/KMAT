@@ -184,6 +184,7 @@ void update_tp_system_view() {
 	clear_camera_screen(tp_system_camera);
 	if(tp_system == NULL) return;
 	tp_follow_focus_body();
+	register_body_occluders(tp_system, current_date_tp);
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
 

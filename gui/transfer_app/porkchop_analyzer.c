@@ -136,6 +136,7 @@ void update_pa_itinerary_preview() {
 		}
 	}
 
+	register_body_occluders(pa_system, current_date_pa);
 	// Sun
 	draw_body(pa_itin_preview_camera, pa_system, pa_system->cb, current_date_pa);
 	// Planets
