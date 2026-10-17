@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "orbit_calculator/itin_tool.h"
 #include "tools/file_io.h"
+#include "tools/gmat_interface.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
 
@@ -324,6 +325,22 @@ static void check_itinerary_files(void) {
 		free(results.departures);
 	}
 	remove(multi_path);
+	char script_path[] = "unit_test_route.script";
+	write_gmat_script(route, script_path);
+	FILE *script = fopen(script_path, "rb");
+	check_true("the GMAT script is written", script != NULL);
+	if(script != NULL) {
+		static char text[200000];
+		size_t length = fread(text, 1, sizeof(text) - 1, script);
+		text[length] = '\0';
+		fclose(script);
+		check_true("the script declares the spacecraft", strstr(text, "Create Spacecraft") != NULL);
+		check_true("the script declares the optimizer", strstr(text, "Create VF13ad") != NULL || strstr(text, "Create DifferentialCorrector") != NULL ||
+			strstr(text, "Optimize") != NULL);
+		check_true("the script has a mission sequence", strstr(text, "BeginMissionSequence") != NULL);
+		check_true("the script names the flyby body", strstr(text, "Venus") != NULL);
+	}
+	remove(script_path);
 	free_itinerary(route);
 	free_celestial_system(system);
 }

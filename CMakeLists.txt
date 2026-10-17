@@ -132,6 +132,7 @@ add_executable(KMAT
     gui/database_app/database_app_tools/mission_manager_events.c
     gui/database_app/database_app_tools/mission_manager_tools.h
     tools/gmat_interface.c
+    tools/gmat_mission_sequence.c
     tools/gmat_interface.h
     gui/transfer_app/itinerary_calculator.c
     gui/transfer_app/itinerary_calculator_dates.c
@@ -178,6 +179,8 @@ add_executable(KMATItineraryUnitTests
     00_Testing/unit_tests_itinerary.c
     ${KMAT_ITINERARY_SOURCES}
     ${KMAT_FILE_IO_SOURCES}
+    tools/gmat_interface.c
+    tools/gmat_mission_sequence.c
     tools/file_io_format.c
     tools/starting_orbit.c
     tools/thread_pool.c
