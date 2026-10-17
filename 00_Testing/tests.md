@@ -112,26 +112,21 @@ the default fixture: 6 families, 3 covered, and the first-leg grid reaches 59 to
 229 days. Raising the seed budget or restricting refinement to local steps did not
 cover more, so coverage there is limited by first-leg reach, not seed budget.
 
-`--coverage-multi` runs only the Earth-Venus-Earth-Jupiter case (about 4 minutes).
+`--coverage-multi` runs only the Earth-Venus-Earth-Jupiter case (about 5 minutes).
 It has three free dates, so it scores a 15-day grid, finds valleys, and refines each
-with a local search on the exact objective before comparing with the search.
-Measured on the default fixture (reference best 10,959 m/s, one departure date);
-search best for that sequence by first-leg window and seed budget per departure:
+with a local search on the exact objective before comparing with the search. It
+departs at JD 2461369.5, the best departure of the saved Jupiter mission window.
+Measured with the production setting (reference best 17,116 m/s, search 17,466 m/s
+in 17 s): the best family is found within 2.1%, and the 15 other families, all at
+least 10% worse, are not returned. This sequence is not competitive in that window
+(the saved mission's best is 4,612 m/s via Mars), so these families do not affect
+the best result. Earlier numbers from an arbitrary departure date (`ut0 + 100`)
+were not representative and were removed.
 
-| First-leg window to a body | Seeds per departure | Best search route (m/s) | Search time |
-| --- | ---: | ---: | ---: |
-| default (about 1.5-3x Hohmann) | 512 | 33,654 | 12 s |
-| default | 2,000 | 25,072 | 46 s |
-| default | 8,000 | 22,203 | 31 s |
-| 3x Hohmann | 512 | 28,749 | not timed |
-| 3x Hohmann | 2,000 | 22,190 | 34 s |
-| 3x Hohmann | 8,000 | 15,788 | 27 s |
-
-No run covered any of the 3 reference families within the 8-day basin window, and
-an unlimited budget did not finish in 6 minutes. Relative to the production setting,
-the wider window alone lowers the best route by 15%, the 8,000-seed budget alone by
-34%, and both together by 53%. Search times are single-departure wall seconds and
-are noisy.
+In the saved Jupiter window (`--coverage`), seed budgets of 64 to 2,048 per departure
+all return the same best route (4,612.4 m/s); 2,048 seeds take about twice as long as
+the default. Widening the first-leg window (scale 1.5 and 2) changes the best by under
+0.1% for Jupiter and by 0.5% (4,711 to 4,688 m/s) for Saturn, so the default stays.
 
 Local Windows RelWithDebInfo measurements, profiling enabled:
 

@@ -45,6 +45,12 @@ int main(int argc, char **argv) {
 	double min_transfer_duration = 0.4 * hohmann_duration;
 	double max_arrival_jd = departure_jd + min_transfer_duration + 0.25;
 	if(coverage_reference || coverage_multi) {
+		// Best Earth-Jupiter departure of the saved mission window, so the reference is a realistic launch.
+		departure_jd = 2461369.5;
+		departure_state = osv_from_elements(departure_body->orbit, departure_jd);
+		arrival_state = osv_from_elements(arrival_body->orbit, departure_jd);
+		hohmann_duration = calc_hohmann_transfer(
+			mag_vec3(departure_state.r), mag_vec3(arrival_state.r), system->cb).dur / 86400;
 		int coverage_result = coverage_multi ? EXIT_SUCCESS : run_coverage_reference(system,
 			departure_body, flyby_body, arrival_body, departure_jd, hohmann_duration);
 		if(coverage_result == EXIT_SUCCESS)

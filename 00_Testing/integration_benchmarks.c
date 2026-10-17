@@ -56,7 +56,7 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 	printf("%s benchmark result: %d departure roots, %d nodes, %d itineraries\n",
 		label, results.num_deps, results.num_nodes, results.num_itins);
 	if(benchmark_coverage) {
-		double best_total = DBL_MAX;
+		double best_total = DBL_MAX, best_departure_jd = 0;
 		for(int i = 0; i < results.num_deps; i++) {
 			int count = get_number_of_itineraries(results.departures[i]);
 			struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
@@ -65,10 +65,14 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 			store_itineraries_in_array(results.departures[i], leaves, &stored);
 			for(int j = 0; j < stored; j++) {
 				double total = stored_total_dv(leaves[j], &calc_data, NULL);
-				if(isfinite(total) && total < best_total) best_total = total;
+				if(isfinite(total) && total < best_total) {
+					best_total = total;
+					best_departure_jd = get_first(leaves[j])->date;
+				}
 			}
 			free(leaves);
 		}
+		printf("COVERAGE %s: best departs JD %.1f\n", label, best_departure_jd);
 		printf("COVERAGE %s: %d itineraries, best %.3f m/s, %llu seeds added, %llu encounters skipped powered sampling, %llu bucket alternatives omitted\n",
 			label, results.num_itins, best_total, results.powered_seed_stats.seeds_added,
 			results.powered_seed_stats.searches_budget_skipped, results.powered_seed_stats.alternatives_skipped);
