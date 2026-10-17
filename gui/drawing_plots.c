@@ -154,7 +154,7 @@ void draw_data_point(cairo_t *cr, double x, double y, double radius) {
 static void draw_best_route_marker(cairo_t *cr, double x, double y) {
 	const double arm = 3.5;
 	cairo_set_source_rgba(cr, 1, 0, 0, 0.6);
-	cairo_set_line_width(cr, 1.5);
+	cairo_set_line_width(cr, 3);
 	cairo_move_to(cr, x - arm, y - arm);
 	cairo_line_to(cr, x + arm, y + arm);
 	cairo_move_to(cr, x - arm, y + arm);
