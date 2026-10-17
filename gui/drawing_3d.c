@@ -561,15 +561,90 @@ static void draw_marker_ring(Camera *camera, Vector3 position, double radius, co
 	cairo_set_line_width(cr, 1);
 }
 
+// The moon that lowers the arrival burn, when the route ends at this planet with a capture or circularisation.
+static int arrival_moon_assist(struct ItinStep *itin, Body *planet, double arr_periapsis, enum LastTransferType type, MoonAssist *assist) {
+	struct ItinStep *arrival = get_last(itin);
+	if((type != TF_CAPTURE && type != TF_CIRC) || arrival->body != planet || arrival->prev == NULL) return 0;
+	Vector3 excess = subtract_vec3(arrival->v_arr, arrival->v_body);
+	double radius = alt2radius(planet, arr_periapsis), speed = mag_vec3(excess);
+	int circularize = type == TF_CIRC;
+	double plain = circularize ? dv_circ(planet, radius, speed) : dv_capture(planet, radius, speed);
+	arrival_dv_with_assist(planet, excess, radius, circularize, plain, arrival->date, assist);
+	return assist->moon != NULL;
+}
+
+// Conic around the planet that meets the moon, and the conic the moon leaves the craft on.
+static void draw_assist_around_planet(Camera *camera, Body *planet, const MoonAssist *assist, double arrival_jd, Vector3 offset, double current_time, int leg) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Orbit approach = constr_orbit_from_osv(assist->hit_position, assist->hit_velocity, planet);
+	double soi = sphere_of_influence_radius(planet);
+	if(!(approach.e > 1) || !(soi > 0)) return;
+	double semi_latus = approach.a * (1 - approach.e * approach.e);
+	double cosine = (semi_latus / soi - 1) / approach.e;
+	if(!(fabs(cosine) < 1)) return;
+	double soi_ta = acos(cosine), hit_ta = wrapped_true_anomaly(approach.ta);
+	double hit_jd = arrival_jd + assist->hit_seconds / 86400;
+	set_leg_color(cr, leg, current_time > hit_jd, 1);
+	set_stroke_width(2);
+	draw_conic_arc(camera, approach, -soi_ta, hit_ta, offset);
+	OSV after = {assist->hit_position, add_vec3(assist->moon_velocity, assist->turned_velocity)};
+	Orbit leaving = constr_orbit_from_osv(after.r, after.v, planet);
+	double leaving_periapsis_jd = hit_jd;
+	if(leaving.e < 1) draw_orbit_around(camera, leaving, offset);
+	else {
+		double leaving_ta = wrapped_true_anomaly(leaving.ta);
+		double leaving_cosine = (leaving.a * (1 - leaving.e * leaving.e) / soi - 1) / leaving.e;
+		if(fabs(leaving_cosine) < 1) draw_conic_arc(camera, leaving, leaving_ta, acos(leaving_cosine), offset);
+		leaving_periapsis_jd = hit_jd - hyperbola_time_at(leaving, leaving_ta) / 86400;
+	}
+	set_stroke_width(1);
+	char label[100];
+	snprintf(label, sizeof(label), "%s encounter (aim %.1f m/s)", assist->moon->name, assist->aim_dv);
+	draw_marker_ring(camera, add_vec3(assist->hit_position, offset), 5, label, 0);
+	if(current_time >= arrival_jd + hyperbola_time_at(approach, -soi_ta) / 86400) {
+		Vector3 position;
+		if(current_time <= hit_jd) position = hyperbola_state_at(approach, arrival_jd, current_time).r;
+		else if(leaving.e < 1) position = propagate_osv_time(after, planet, (current_time - hit_jd) * 86400).r;
+		else position = hyperbola_state_at(leaving, leaving_periapsis_jd, current_time).r;
+		draw_itinerary_spacecraft(camera, add_vec3(position, offset));
+	}
+}
+
+// Conic around the moon during the assist, from the relative velocity it arrives with to the velocity it is turned onto.
+static int moon_assist_orbit(const MoonAssist *assist, Orbit *orbit) {
+	Body *moon = assist->moon;
+	Vector3 relative = subtract_vec3(assist->hit_velocity, assist->moon_velocity);
+	double speed = mag_vec3(relative), soi = sphere_of_influence_radius(moon);
+	if(!(speed > 0) || !(soi > 0) || !(assist->moon_periapsis > 0)) return 0;
+	Vector3 along = scale_vec3(relative, 1 / speed), turned = norm_vec3(assist->turned_velocity);
+	Vector3 bend = subtract_vec3(turned, scale_vec3(along, dot_vec3(turned, along)));
+	if(!(mag_vec3(bend) > 1e-9)) return 0;
+	Vector3 toward_moon = norm_vec3(bend);
+	double rp = assist->moon_periapsis;
+	double impact = rp * sqrt(1 + 2 * moon->mu / (rp * speed * speed));
+	if(!(soi > impact)) return 0;
+	// The craft passes on the side the path bends away from, since the moon pulls it toward itself.
+	Vector3 r = subtract_vec3(scale_vec3(along, -sqrt(soi * soi - impact * impact)), scale_vec3(toward_moon, impact));
+	Vector3 v = scale_vec3(along, sqrt(speed * speed + 2 * moon->mu / soi));
+	*orbit = constr_orbit_from_osv(r, v, moon);
+	return orbit->e > 1 && isfinite(orbit->a);
+}
+
 void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time,
-		double dep_periapsis, double arr_periapsis) {
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
 	if(itin == NULL || planet == NULL) return;
+	MoonAssist assist;
+	int assisted = arrival_moon_assist(itin, planet, arr_periapsis, last_transfer_type, &assist);
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector3 offset = body_position(system, planet, current_time);
 	EncounterPiece pieces[8];
 	int count = encounter_pieces(planet, itin, dep_periapsis, arr_periapsis, pieces, 8);
 	for(int p = 0; p < count; p++) {
 		EncounterPiece *piece = &pieces[p];
+		if(assisted && piece->step->next == NULL) {
+			draw_assist_around_planet(camera, planet, &assist, piece->step->date, offset, current_time, piece->leg);
+			continue;
+		}
 		MoonPatch patch;
 		int patched = find_moon_patch(planet, piece, NULL, &patch);
 		double start = piece_start(piece), end = piece_end(piece);
@@ -623,7 +698,7 @@ void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct Iti
 
 // The route inside a moon's sphere of influence, drawn as a conic around the moon with entry, exit and periapsis marked.
 void draw_itinerary_around_moon(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *moon, double current_time,
-		double dep_periapsis, double arr_periapsis) {
+		double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
 	Body *planet = moon != NULL ? moon->orbit.cb : NULL;
 	if(itin == NULL || planet == NULL || planet == system->cb) return;
 	cairo_t *cr = get_camera_screen_cairo(camera);
@@ -631,6 +706,33 @@ void draw_itinerary_around_moon(Camera *camera, CelestSystem *system, struct Iti
 	int count = encounter_pieces(planet, itin, dep_periapsis, arr_periapsis, pieces, 8);
 	Vector3 offset = body_position(system, moon, current_time);
 	int encounters = 0;
+	MoonAssist assist;
+	Orbit assist_orbit;
+	if(arrival_moon_assist(itin, planet, arr_periapsis, last_transfer_type, &assist) && assist.moon == moon && moon_assist_orbit(&assist, &assist_orbit)) {
+		encounters++;
+		struct ItinStep *arrival = get_last(itin);
+		double entry_ta = -fabs(wrapped_true_anomaly(assist_orbit.ta));
+		double seconds = fabs(hyperbola_time_at(assist_orbit, entry_ta));
+		double periapsis_jd = arrival->date + assist.hit_seconds / 86400;
+		set_leg_color(cr, get_num_of_itin_layers(itin) - 2, current_time > periapsis_jd + seconds / 86400, 1);
+		set_stroke_width(2);
+		draw_conic_arc(camera, assist_orbit, entry_ta, -entry_ta, offset);
+		set_stroke_width(1);
+		Orbit at_entry = assist_orbit, at_exit = assist_orbit, at_periapsis = assist_orbit;
+		at_entry.ta = entry_ta;
+		at_exit.ta = -entry_ta;
+		at_periapsis.ta = 0;
+		draw_marker_ring(camera, add_vec3(osv_from_orbit(at_entry).r, offset), 4, "SOI entry", 0);
+		draw_marker_ring(camera, add_vec3(osv_from_orbit(at_exit).r, offset), 4, "SOI exit", 0);
+		int impact = assist.moon_periapsis < moon->radius;
+		char label[120], date_text[20];
+		date_to_string(convert_JD_date(periapsis_jd, get_settings_datetime_type()), date_text, 0);
+		snprintf(label, sizeof(label), "%s Pe %.0f km  %s  assist: aim %.1f m/s%s", moon->name,
+			(assist.moon_periapsis - moon->radius) / 1e3, date_text, assist.aim_dv, impact ? "  IMPACT" : "");
+		draw_marker_ring(camera, add_vec3(osv_from_orbit(at_periapsis).r, offset), 6, label, impact);
+		if(current_time >= periapsis_jd - seconds / 86400 && current_time <= periapsis_jd + seconds / 86400)
+			draw_itinerary_spacecraft(camera, add_vec3(hyperbola_state_at(assist_orbit, periapsis_jd, current_time).r, offset));
+	}
 	for(int p = 0; p < count; p++) {
 		MoonPatch patch;
 		if(!find_moon_patch(planet, &pieces[p], moon, &patch)) continue;

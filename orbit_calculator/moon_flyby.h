@@ -25,6 +25,12 @@ typedef struct MoonAssist {
 	Body *moon;
 	double total_dv; // burn or capture cost left after the moon, including the aiming manoeuvre
 	double aim_dv;
+	// Planet-centred geometry of the encounter, for drawing: where and when the aimed arrival leg meets the moon and how the
+	// moon turns the craft (velocities are relative to the planet unless stated).
+	Vector3 hit_position, hit_velocity, moon_velocity;
+	Vector3 turned_velocity;    // relative to the moon, after the turn
+	double hit_seconds;         // from the arrival date (the periapsis of the aimed leg)
+	double moon_periapsis;      // radius of the hyperbola around the moon
 } MoonAssist;
 
 typedef double (*ArrivalCost)(Body *body, double periapsis_radius, double excess_speed);

@@ -378,7 +378,9 @@ static int search_moon_assist(const AssistGoal *goal, Vector3 incoming_excess, c
 						double residual = assist_residual_cost(goal, hit.position, add_vec3(hit.moon_velocity, turned));
 						if(residual + aim_cost < best_total) {
 							best_total = residual + aim_cost;
-							*assist = (MoonAssist){moon, best_total, aim_cost};
+							double used_eccentricity = fraction == 0 ? moon_eccentricity : 1 / sin(turn / 2);
+							*assist = (MoonAssist){moon, best_total, aim_cost, hit.position, hit.velocity, hit.moon_velocity,
+								turned, hit.time, (used_eccentricity - 1) * moon->mu / (relative_speed * relative_speed)};
 							found = 1;
 						}
 					}

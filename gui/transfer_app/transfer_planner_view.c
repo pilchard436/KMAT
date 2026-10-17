@@ -158,10 +158,10 @@ void update_tp_system_view() {
 		draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 	} else {
 		draw_itinerary_around_body(tp_system_camera, tp_system, curr_transfer_tp, frame_body, current_date_tp,
-			tp_dep_periapsis, tp_arr_periapsis);
+			tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
 		if(frame_body != tp_focus_body)
 			draw_itinerary_around_moon(tp_system_camera, tp_system, curr_transfer_tp, tp_focus_body, current_date_tp,
-				tp_dep_periapsis, tp_arr_periapsis);
+				tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
 	}
 	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
