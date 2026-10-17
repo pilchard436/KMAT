@@ -110,7 +110,8 @@ void draw_coordinate_system(cairo_t *cr, double width, double height, enum Coord
 		double label = x_axis_label_type != COORD_LABEL_DATE ?
 				min_x_label + i * x_label_tick :
 				jd_change_date(min_x_label, i*x_date_label_tick.y, i*x_date_label_tick.m, i*x_date_label_tick.d, get_settings_datetime_type());
-		if(label < min_x) continue;
+		// Labels past the axis end would run into the area beside the plot.
+		if(label < min_x || label > max_x + 1e-9 * (max_x - min_x)) continue;
 		double x = (label-min_x)*m_x + origin.x;
 		cairo_set_source_rgb(cr, 1, 1, 1);
 		if(x_axis_label_type == COORD_LABEL_NUMBER)
@@ -129,7 +130,7 @@ void draw_coordinate_system(cairo_t *cr, double width, double height, enum Coord
 		double label = y_axis_label_type != COORD_LABEL_DATE ?
 					   min_y_label + i * y_label_tick :
 					   jd_change_date(min_y_label, i*y_date_label_tick.y, i*y_date_label_tick.m, i*y_date_label_tick.d, get_settings_datetime_type());
-		if(label < min_y) continue;
+		if(label < min_y || label > max_y + 1e-9 * (max_y - min_y)) continue;
 		double y = (label-min_y)*m_y + origin.y;
 		cairo_set_source_rgb(cr, 1, 1, 1);
 		if(y_axis_label_type == COORD_LABEL_NUMBER)
