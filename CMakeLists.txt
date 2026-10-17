@@ -170,6 +170,35 @@ target_include_directories(KMATUnitTests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
 )
 
+add_executable(KMATItineraryUnitTests
+    00_Testing/unit_tests_itinerary.c
+    ${KMAT_ITINERARY_SOURCES}
+    ${KMAT_FILE_IO_SOURCES}
+    tools/file_io_format.c
+    tools/starting_orbit.c
+    tools/thread_pool.c
+    tools/tool_funcs.c
+)
+target_link_libraries(KMATItineraryUnitTests PRIVATE orbitlib geometrylib)
+target_include_directories(KMATItineraryUnitTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
+)
+
+add_executable(KMATOptimizerUnitTests
+    00_Testing/unit_tests_optimizer.c
+    orbit_calculator/powered_route_candidates.c
+    ${KMAT_ITINERARY_SOURCES}
+    tools/starting_orbit.c
+    tools/thread_pool.c
+    tools/tool_funcs.c
+)
+target_link_libraries(KMATOptimizerUnitTests PRIVATE orbitlib geometrylib)
+target_include_directories(KMATOptimizerUnitTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/external/geometrylib/include
+)
+
 add_executable(KMATLambertBenchmark 00_Testing/lambert_benchmark.c)
 target_link_libraries(KMATLambertBenchmark PRIVATE orbitlib geometrylib)
 target_include_directories(KMATLambertBenchmark PRIVATE
@@ -262,6 +291,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 
     target_link_libraries(KMATUnitTests PRIVATE urlmon)
     target_link_libraries(KMATSearchIntegration PRIVATE urlmon glib-2.0 gobject-2.0)
+    target_link_libraries(KMATItineraryUnitTests PRIVATE urlmon glib-2.0 gobject-2.0)
+    target_link_libraries(KMATOptimizerUnitTests PRIVATE urlmon)
 
     target_include_directories(KMAT PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/external/orbitlib/include
@@ -281,6 +312,7 @@ else(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_definitions(${GTK3_CFLAGS_OTHER})
     target_link_libraries(KMAT m ${GTK3_LIBRARIES} sqlite3 orbitlib)
     target_link_libraries(KMATSearchIntegration PRIVATE ${GTK3_LIBRARIES})
+    target_link_libraries(KMATItineraryUnitTests PRIVATE ${GTK3_LIBRARIES})
 
     target_link_options(KMAT PRIVATE -rdynamic)
 
@@ -294,11 +326,21 @@ if(BUILD_TESTING)
     add_test(NAME KMATIntegrationTests COMMAND KMAT --test)
     add_test(NAME KMATSearchIntegration COMMAND KMATSearchIntegration)
     add_test(NAME KMATUnitTests COMMAND KMATUnitTests)
+    add_test(NAME KMATItineraryUnitTests COMMAND KMATItineraryUnitTests)
+    add_test(NAME KMATOptimizerUnitTests COMMAND KMATOptimizerUnitTests)
     set_tests_properties(KMATIntegrationTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS integration
     )
     set_tests_properties(KMATUnitTests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS unit
+    )
+    set_tests_properties(KMATOptimizerUnitTests PROPERTIES
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        LABELS unit
+    )
+    set_tests_properties(KMATItineraryUnitTests PROPERTIES
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         LABELS unit
     )
@@ -309,7 +351,7 @@ if(BUILD_TESTING)
 
     add_custom_target(run_tests ALL
         COMMAND ${CMAKE_CTEST_COMMAND} --verbose --output-on-failure -L unit
-        DEPENDS KMATUnitTests
+        DEPENDS KMATUnitTests KMATItineraryUnitTests KMATOptimizerUnitTests
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         USES_TERMINAL
     )
