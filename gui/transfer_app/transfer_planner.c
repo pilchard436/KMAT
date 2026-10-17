@@ -64,6 +64,7 @@ void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr
 void on_tp_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_tp_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
 static gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+static void on_tp_view_destroyed(GtkWidget *widget, gpointer data);
 
 
 void init_transfer_planner(GtkBuilder *builder) {
@@ -98,6 +99,7 @@ void init_transfer_planner(GtkBuilder *builder) {
 
 	tp_system_camera = new_camera(GTK_WIDGET(da_tp), &on_tp_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_tp_screen_mouse_move, &on_tp_screen_scroll);
 	g_signal_connect(da_tp, "button-press-event", G_CALLBACK(on_tp_screen_button_press), NULL);
+	g_signal_connect(da_tp, "destroy", G_CALLBACK(on_tp_view_destroyed), NULL);
 
 
 	tp_system = NULL;
@@ -602,8 +604,20 @@ static void tp_stop_animation(void) {
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_animate), FALSE);
 }
 
+static void on_tp_view_destroyed(GtkWidget *widget, gpointer data) {
+	(void)widget; (void)data;
+	if(tp_animation_source != 0) {
+		g_source_remove(tp_animation_source);
+		tp_animation_source = 0;
+	}
+	// The window is closing, so the tick must not touch these any more.
+	tb_tp_animate = NULL;
+	cb_tp_anim_speed = NULL;
+}
+
 static gboolean tp_animation_tick(gpointer data) {
 	(void)data;
+	if(cb_tp_anim_speed == NULL) return G_SOURCE_REMOVE;
 	gint64 now = g_get_monotonic_time();
 	double elapsed = (now - tp_animation_last_time) / 1e6;
 	tp_animation_last_time = now;
