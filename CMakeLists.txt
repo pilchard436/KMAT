@@ -29,6 +29,14 @@ elseif(MSVC)
     )
 endif()
 
+set(KMAT_FILE_IO_SOURCES
+    tools/file_io.c
+    tools/file_io_system.c
+    tools/file_io_steps.c
+    tools/file_io_itins.c
+    tools/file_io_itin.c
+)
+
 set(KMAT_ITINERARY_SOURCES
     orbit_calculator/itin_tool.c
     orbit_calculator/itinerary_tree.c
@@ -40,7 +48,7 @@ set(KMAT_ITINERARY_SOURCES
 )
 
 add_executable(KMAT
-    tools/file_io.c
+    ${KMAT_FILE_IO_SOURCES}
     tools/file_io_format.c
     tools/itinerary_date_limits.c
     tools/itinerary_reference_defaults.c
@@ -178,7 +186,7 @@ add_executable(KMATSearchIntegration
     orbit_calculator/powered_route_candidates.c
     ${KMAT_ITINERARY_SOURCES}
     tools/starting_orbit.c
-    tools/file_io.c
+    ${KMAT_FILE_IO_SOURCES}
     tools/file_io_format.c
     tools/thread_pool.c
     tools/tool_funcs.c
