@@ -6,6 +6,42 @@
 
 static double stroke_width = 1;
 
+typedef struct { Vector3 center; double radius; } BodyOccluder;
+static BodyOccluder occluders[256];
+static int num_occluders;
+
+static Vector3 body_position(CelestSystem *system, Body *body, double jd_date) {
+	if(body == system->cb) return vec3(0, 0, 0);
+	return system->prop_method == ORB_ELEMENTS ?
+		osv_from_elements(body->orbit, jd_date).r :
+		osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb).r;
+}
+
+// Call before drawing lines so bodies drawn later in the frame still hide them.
+void register_body_occluders(CelestSystem *system, double jd_date) {
+	num_occluders = 0;
+	for(int i = -1; i < system->num_bodies && num_occluders < 256; i++) {
+		Body *body = i < 0 ? system->cb : system->bodies[i];
+		occluders[num_occluders++] = (BodyOccluder){body_position(system, body, jd_date), body->radius};
+	}
+}
+
+static int point_is_hidden_by_body(Camera *camera, Vector3 point) {
+	Vector3 ray = subtract_vec3(point, camera->pos);
+	double distance = mag_vec3(ray);
+	if(!(distance > 0)) return 0;
+	Vector3 direction = scale_vec3(ray, 1 / distance);
+	for(int i = 0; i < num_occluders; i++) {
+		Vector3 to_camera = subtract_vec3(camera->pos, occluders[i].center);
+		double b = dot_vec3(to_camera, direction);
+		double discriminant = b * b - (dot_vec3(to_camera, to_camera) - occluders[i].radius * occluders[i].radius);
+		if(discriminant <= 0) continue;
+		double entry = -b - sqrt(discriminant);
+		if(entry > 0 && entry < distance) return 1;
+	}
+	return 0;
+}
+
 
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	set_cairo_body_color(get_camera_screen_cairo(camera), body);
@@ -14,27 +50,47 @@ void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date)
 										osv_from_elements(body->orbit, jd_date) :
 									  	osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb);
 	Vector2 p2d_body = p3d_to_p2d(camera, osv_body.r);
-	cairo_arc(get_camera_screen_cairo(camera), p2d_body.x, p2d_body.y, 5, 0, 2 * M_PI);
+	// Never smaller than the marker dot, but the real size once zoomed in close.
+	double depth = camera_depth(camera, osv_body.r);
+	double marker_radius = 5;
+	if(depth > 0) marker_radius = fmax(marker_radius, body->radius * camera_pixels_per_meter(camera, depth));
+	cairo_arc(get_camera_screen_cairo(camera), p2d_body.x, p2d_body.y, marker_radius, 0, 2 * M_PI);
 	cairo_fill(get_camera_screen_cairo(camera));
+}
+
+// Cut where the segment passes behind the camera so it cannot streak across the screen.
+static void stroke_segment_3d(Camera *camera, Vector3 a, Vector3 b) {
+	const double near_depth = 1;
+	double za = camera_depth(camera, a), zb = camera_depth(camera, b);
+	if(za <= near_depth && zb <= near_depth) return;
+	if(za <= near_depth) a = add_vec3(a, scale_vec3(subtract_vec3(b, a), (near_depth - za) / (zb - za)));
+	else if(zb <= near_depth) b = add_vec3(b, scale_vec3(subtract_vec3(a, b), (near_depth - zb) / (za - zb)));
+	Vector2 pa = p3d_to_p2d(camera, a), pb = p3d_to_p2d(camera, b);
+	int pieces = 1;
+	if(num_occluders > 0) pieces = fmax(1, fmin(64, ceil(hypot(pb.x - pa.x, pb.y - pa.y) / 4)));
+	for(int i = 0; i < pieces; i++) {
+		Vector3 from = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)i / pieces));
+		Vector3 to = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)(i + 1) / pieces));
+		if(num_occluders > 0 && point_is_hidden_by_body(camera, scale_vec3(add_vec3(from, to), 0.5))) continue;
+		draw_stroke(get_camera_screen_cairo(camera), p3d_to_p2d(camera, from), p3d_to_p2d(camera, to));
+	}
 }
 
 void draw_orbit(Camera *camera, Orbit orbit) {
 	OSV osv = osv_from_orbit(orbit);
-	Vector2 p2d = p3d_to_p2d(camera, osv.r);
-
-	Vector2 last_p2d = p2d;
+	Vector3 last_r = osv.r;
 	double ta_step = deg2rad(0.5);
 
 	for(double dta = 0; dta < M_PI*2 + ta_step; dta += ta_step) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
-		p2d = p3d_to_p2d(camera, osv.r);
-		draw_stroke(get_camera_screen_cairo(camera), last_p2d, p2d);
-		last_p2d = p2d;
+		stroke_segment_3d(camera, last_r, osv.r);
+		last_r = osv.r;
 	}
 }
 
 void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date) {
+	register_body_occluders(system, jd_date);
 	draw_body(camera, system, system->cb, jd_date);
 
 	for(int i = 0; i < system->num_bodies; i++) {
@@ -57,16 +113,14 @@ void draw_trajectory(Camera *camera, struct OSV osv0, double dt, struct Body *at
 	if(ta1 < ta0) ta1 += 2*M_PI;
 
 	OSV osv = osv0;
-	Vector2 p2d = p3d_to_p2d(camera, osv.r);
-	Vector2 last_p2d = p2d;
+	Vector3 last_r = osv.r;
 	double ta_step = (ta1 - ta0)/1000;
 
 	for(double dta = 0; dta <= (ta1 - ta0); dta += ta_step) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
-		p2d = p3d_to_p2d(camera, osv.r);
-		draw_stroke(get_camera_screen_cairo(camera), last_p2d, p2d);
-		last_p2d = p2d;
+		stroke_segment_3d(camera, last_r, osv.r);
+		last_r = osv.r;
 	}
 }
 

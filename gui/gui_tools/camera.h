@@ -21,6 +21,8 @@ Vector2 p3d_to_p2d(Camera *camera, Vector3 p3d);
 void update_camera_to_celestial_system(Camera *camera, CelestSystem *system, double initial_pos_pitch, double initial_pos_yaw);
 void update_camera_position_from_angles(Camera *camera, double pos_pitch, double pos_yaw, double dist);
 void camera_look_to_center(Camera *camera);
+double camera_depth(Camera *camera, Vector3 p3d);
+double camera_pixels_per_meter(Camera *camera, double depth);
 void camera_set_focus(Camera *camera, Vector3 focus);
 void update_camera_distance_to_center(Camera *camera, double new_distance);
 void update_camera_distance_wrt_width_at_center(Camera *camera, double visible_width);

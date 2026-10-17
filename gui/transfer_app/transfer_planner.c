@@ -158,7 +158,7 @@ static void tp_focus_on(Body *body) {
 	double soi = fabs(body->orbit.a) * pow(body->mu / tp_system->cb->mu, 0.4);
 	if(!isfinite(soi) || !(soi > body->radius)) soi = body->radius * 50;
 	update_camera_position_from_angles(tp_system_camera, pitch, yaw, soi * 7);
-	tp_system_camera->min_pos_dist = body->radius * 3;
+	tp_system_camera->min_pos_dist = body->radius * 15;
 	camera_look_to_center(tp_system_camera);
 }
 
@@ -185,6 +185,7 @@ void update_tp_system_view() {
 	clear_camera_screen(tp_system_camera);
 	if(tp_system == NULL) { set_flyby_unrestricted_periapsis(previous_restriction); return; }
 	tp_follow_focus_body();
+	register_body_occluders(tp_system, current_date_tp);
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
 

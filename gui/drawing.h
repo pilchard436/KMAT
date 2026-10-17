@@ -13,6 +13,7 @@ enum CoordAxisLabelType {COORD_LABEL_NUMBER, COORD_LABEL_DATE, COORD_LABEL_DURAT
 void draw_stroke(cairo_t *cr, Vector2 p1, Vector2 p2);
 void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date);
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date);
+void register_body_occluders(CelestSystem *system, double jd_date);
 void draw_orbit(Camera *camera, Orbit orbit);
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
 void draw_itinerary_legend(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
