@@ -10,7 +10,6 @@
 
 
 
-const int MIN_TRANSFER_DURATION = 10;	// days
 
 
 struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **departures, int num_deps, double dep_periapsis, double arr_periapsis) {
@@ -72,7 +71,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, Body **bodies, double jd_max_arr, struct Dv_Filter *dv_filter, int num_steps, int step) {
 	if(itinerary_search_cancelled(NULL)) return curr_step->num_next_nodes > 0;
 	double max_duration = jd_max_arr-curr_step->date;
-	double min_duration = MIN_TRANSFER_DURATION;
+	double min_duration = minimum_leg_days(system);
 	if(max_duration > min_duration && get_thread_counter(3) == 0) {
 		if(bodies[step] != bodies[step - 1]) find_viable_flybys(curr_step, system, bodies[step], min_duration * 86400, max_duration * 86400);
 		else {
@@ -141,7 +140,7 @@ int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenc
 		else
 			jd_max = jd_max_arr;
 		double max_duration = jd_max-curr_step->date;
-		double min_duration = MIN_TRANSFER_DURATION;
+		double min_duration = minimum_leg_days(seq_info->system);
 		if(max_duration > min_duration)
 			find_viable_flybys(curr_step, seq_info->system, seq_info->flyby_bodies[i], min_duration*86400, max_duration*86400);
 	}

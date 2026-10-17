@@ -8,7 +8,6 @@
 #include <math.h>
 #include <stdint.h>
 
-#define POWERED_MIN_LEG_DAYS 10.0
 #define POWERED_IMPROVEMENT_THRESHOLD 0.1
 
 typedef struct PoweredDsmResult {
@@ -63,6 +62,10 @@ static inline int is_finite_vector(Vector3 value) {
 	return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
 
+
+static inline double powered_min_leg_days(const Itin_Calc_Data *calc_data) {
+	return minimum_leg_days(calc_data->seq_info.to_target.system);
+}
 
 /* Objective evaluation budget of the current thread; -1 means unlimited. */
 extern _Thread_local int objective_budget;

@@ -15,6 +15,9 @@ double flyby_periapsis_shortfall(struct ItinStep *step);
 int flyby_below_min_safe(struct ItinStep *step);
 // 1 if a powered flyby with these velocities can be flown at or above the minimum periapsis (cached).
 int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body);
+// Shortest leg the search and optimizer accept: 10 days, or an eighth of the shortest body period of
+// a system with faster orbits (moons), so short transfers are not rejected. NULL gives the 10 days.
+double minimum_leg_days(const CelestSystem *system);
 int count_flybys_below_min_safe(struct ItinStep *step_in_route);
 // Number of flybys in the route with a shortfall, and the largest shortfall in metres (largest may be NULL).
 int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_shortfall);

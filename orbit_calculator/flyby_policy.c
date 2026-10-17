@@ -1,6 +1,10 @@
 #include "flyby_policy.h"
 #include <math.h>
 
+#define DEFAULT_MINIMUM_LEG_DAYS 10.0
+#define MINIMUM_LEG_PERIOD_FRACTION 0.125
+#define MINIMUM_LEG_FLOOR_DAYS 0.05
+
 // Per thread, so the planner can relax the limit without touching search workers.
 static _Thread_local int unrestricted_flyby_periapsis;
 
@@ -84,4 +88,25 @@ int count_flybys_needing_burn(struct ItinStep *step_in_route, double *largest_sh
 	}
 	if(largest_shortfall != NULL) *largest_shortfall = largest;
 	return count;
+}
+
+double minimum_leg_days(const CelestSystem *system) {
+	static _Thread_local const CelestSystem *cached_system;
+	static _Thread_local int cached_body_count;
+	static _Thread_local double cached_days;
+	if(system == NULL || system->cb == NULL || !(system->cb->mu > 0)) return DEFAULT_MINIMUM_LEG_DAYS;
+	if(system == cached_system && system->num_bodies == cached_body_count) return cached_days;
+	double shortest_period = HUGE_VAL;
+	for(int i = 0; i < system->num_bodies; i++) {
+		const Body *body = system->bodies[i];
+		if(body == NULL || !(body->orbit.a > 0) || !(body->orbit.e < 1)) continue;
+		double period = 2 * M_PI * sqrt(body->orbit.a * body->orbit.a * body->orbit.a / system->cb->mu);
+		if(period < shortest_period) shortest_period = period;
+	}
+	double days = DEFAULT_MINIMUM_LEG_DAYS;
+	if(isfinite(shortest_period)) days = fmin(days, fmax(MINIMUM_LEG_FLOOR_DAYS, shortest_period / 86400 * MINIMUM_LEG_PERIOD_FRACTION));
+	cached_system = system;
+	cached_body_count = system->num_bodies;
+	cached_days = days;
+	return days;
 }

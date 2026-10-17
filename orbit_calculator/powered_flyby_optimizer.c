@@ -46,10 +46,10 @@ static int refine_candidate_from_start(PoweredRouteCandidate *candidate,
 			int improved_in_sweep = 0;
 			for(size_t i = candidate->mutable_start; i < candidate->num_steps &&
 				!itinerary_search_cancelled(NULL); i++) {
-				double lower = candidate->times[i - 1] + POWERED_MIN_LEG_DAYS;
+				double lower = candidate->times[i - 1] + powered_min_leg_days(calc_data);
 				double upper = latest_arrival;
 				if(i + 1 < candidate->num_steps)
-					upper = fmin(upper, candidate->times[i + 1] - POWERED_MIN_LEG_DAYS);
+					upper = fmin(upper, candidate->times[i + 1] - powered_min_leg_days(calc_data));
 				for(int direction = -1; direction <= 1; direction += 2) {
 					double old_time = candidate->times[i];
 					double trial_time = old_time + direction * time_steps_days[step_index];
@@ -116,10 +116,10 @@ static int optimize_candidate(PoweredRouteCandidate *candidate, const Itin_Calc_
 			double fraction = (double)start_index / (timing_start_count - 1);
 			int valid_start = 1;
 			for(size_t i = candidate->mutable_start; i < num_steps; i++) {
-				double lower = trial.times[i - 1] + POWERED_MIN_LEG_DAYS;
+				double lower = trial.times[i - 1] + powered_min_leg_days(calc_data);
 				double upper = latest_arrival;
 				if(i + 1 < num_steps)
-					upper = fmin(upper, trial.times[i + 1] - POWERED_MIN_LEG_DAYS);
+					upper = fmin(upper, trial.times[i + 1] - powered_min_leg_days(calc_data));
 				if(upper < lower) {
 					valid_start = 0;
 					break;
@@ -186,8 +186,8 @@ static void repair_candidate_timing(PoweredRouteCandidate *candidate, const Itin
 			candidate->times[coordinate] += offsets[(attempt - 1) % 12];
 		} else if(attempt > offset_attempts) {
 			for(size_t i = first; i < n; i++) {
-				double lower = candidate->times[i - 1] + POWERED_MIN_LEG_DAYS;
-				double upper = latest - (n - 1 - i) * POWERED_MIN_LEG_DAYS;
+				double lower = candidate->times[i - 1] + powered_min_leg_days(calc_data);
+				double upper = latest - (n - 1 - i) * powered_min_leg_days(calc_data);
 				if(upper < lower) break;
 				double fraction = (sample_random(random) >> 11) * (1.0 / 9007199254740992.0);
 				candidate->times[i] = attempt % 2 ? lower + fraction * (upper - lower) :

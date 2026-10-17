@@ -160,7 +160,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 
 	for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
 		double duration_days = times[i + 1] - times[i];
-		if(duration_days < POWERED_MIN_LEG_DAYS) return DBL_MAX;
+		if(duration_days < powered_min_leg_days(calc_data)) return DBL_MAX;
 		if(!solve_leg(candidate, i, system, states[i].r, states[i + 1].r, times[i],
 			duration_days, variants != NULL ? variants[i] : 0, &legs[i], NULL)) return DBL_MAX;
 	}
@@ -218,7 +218,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 				arrival_position = add_vec3(body_at_entry.r, flybys[i + 1].incoming_soi_state.r);
 			}
 			double duration_days = arrival_epoch - departure_epoch;
-			if(duration_days < POWERED_MIN_LEG_DAYS) {
+			if(duration_days < powered_min_leg_days(calc_data)) {
 				valid_route = 0;
 				break;
 			}

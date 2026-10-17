@@ -329,6 +329,31 @@ static void check_itinerary_files(void) {
 	free_celestial_system(system);
 }
 
+static void check_minimum_leg(void) {
+	Body sun = {.mu = 1.32712440018e20};
+	Body mercury = {.orbit = {.a = 5.79e10, .e = 0.2}};
+	Body earth = {.orbit = {.a = 1.496e11}};
+	Body *planets[] = {&earth, &mercury};
+	CelestSystem solar = {.cb = &sun, .num_bodies = 2, .bodies = planets};
+	check_near("a system without fast orbits keeps the 10 day minimum", minimum_leg_days(&solar), 10, 1e-9);
+	check_near("no system keeps the 10 day minimum", minimum_leg_days(NULL), 10, 1e-9);
+
+	Body jupiter = {.mu = 1.26686534e17};
+	Body io = {.orbit = {.a = 4.217e8}};
+	Body europa = {.orbit = {.a = 6.711e8}};
+	Body *moons[] = {&europa, &io};
+	CelestSystem jovian = {.cb = &jupiter, .num_bodies = 2, .bodies = moons};
+	double io_period_days = 2 * M_PI * sqrt(io.orbit.a * io.orbit.a * io.orbit.a / jupiter.mu) / 86400;
+	check_near("a moon system uses an eighth of the shortest period", minimum_leg_days(&jovian), io_period_days / 8, 1e-9);
+	check_true("moon legs are allowed below 10 days", minimum_leg_days(&jovian) < 1);
+
+	Body tiny = {.orbit = {.a = 1e6}};
+	Body *tiny_bodies[] = {&tiny};
+	CelestSystem compact = {.cb = &jupiter, .num_bodies = 1, .bodies = tiny_bodies};
+	check_near("the minimum never drops below the floor", minimum_leg_days(&compact), 0.05, 1e-12);
+	check_near("a system change is picked up", minimum_leg_days(&solar), 10, 1e-9);
+}
+
 static void check_search_rejections(void) {
 	char text[200];
 	reset_search_rejections();
@@ -362,5 +387,6 @@ int main(void) {
 	check_conjunction_times();
 	check_itinerary_files();
 	check_search_rejections();
+	check_minimum_leg();
 	return finish_tests("KMAT itinerary unit checks");
 }
