@@ -69,7 +69,10 @@ add_executable(KMAT
     launch_calculator/lp_parameters.h
     tools/thread_pool.c
     tools/thread_pool.h
-    gui/drawing.c
+    gui/drawing_3d.c
+    gui/drawing_2d.c
+    gui/drawing_primitives.c
+    gui/drawing_plots.c
     gui/drawing.h
     tools/thread_pool.h
     database/database.c
@@ -77,6 +80,9 @@ add_executable(KMAT
     ${KMAT_ITINERARY_SOURCES}
     orbit_calculator/itin_tool.h
     gui/transfer_app/transfer_planner.c
+    gui/transfer_app/transfer_planner_view.c
+    gui/transfer_app/transfer_planner_panel.c
+    gui/transfer_app/transfer_planner_io.c
     gui/transfer_app/transfer_planner.h
     gui/transfer_app/porkchop_analyzer.c
     gui/transfer_app/porkchop_analyzer.h
@@ -113,6 +119,8 @@ add_executable(KMAT
     tools/gmat_interface.c
     tools/gmat_interface.h
     gui/transfer_app/itinerary_calculator.c
+    gui/transfer_app/itinerary_calculator_dates.c
+    gui/transfer_app/itinerary_calculator_run.c
     gui/transfer_app/itinerary_calculator.h
     gui/transfer_app/starting_orbit_editor.c
     gui/transfer_app/starting_orbit_editor.h

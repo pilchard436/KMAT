@@ -11,6 +11,10 @@
 enum CoordAxisLabelType {COORD_LABEL_NUMBER, COORD_LABEL_DATE, COORD_LABEL_DURATION};
 
 void draw_stroke(cairo_t *cr, Vector2 p1, Vector2 p2);
+// Line width used by draw_stroke; it stays set until changed.
+void set_stroke_width(double width);
+void draw_center_aligned_text(cairo_t *cr, double x, double y, char *text);
+void draw_right_aligned_text(cairo_t *cr, double x, double y, double rotate_angle, char *text);
 void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date);
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date);
 void register_body_occluders(CelestSystem *system, double jd_date);
