@@ -18,7 +18,7 @@ extern Camera *tp_system_camera;
 
 extern GObject *da_tp;
 extern GObject *cb_tp_system;
-extern GObject *cb_tp_central_body;
+extern int tp_loaded_system_entry;
 extern GObject *cb_tp_tfbody;
 extern GObject *lb_tp_date;
 extern GObject *tb_tp_tfdate;

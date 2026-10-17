@@ -6,6 +6,7 @@
 #include "orbit_calculator/flyby_policy.h"
 
 #include <math.h>
+#include <string.h>
 #include <stdio.h>
 
 G_MODULE_EXPORT void on_show_itin_overview() {
@@ -27,6 +28,29 @@ G_MODULE_EXPORT void on_save_itinerary(GtkWidget* widget, gpointer data) {
 	store_single_itinerary_in_bfile(first, tp_system, filepath);
 }
 
+static int same_value(double a, double b) {
+	return fabs(a - b) <= 1e-9 * fmax(fabs(a), fabs(b));
+}
+
+// A loaded itinerary whose system matches an available one (same bodies and moons) is shown in that one.
+static int find_identical_available_system(CelestSystem *loaded) {
+	for(int i = 0; loaded != NULL && i < get_num_available_systems(); i++) {
+		CelestSystem *available = get_available_systems()[i];
+		if(strcmp(available->name, loaded->name) != 0 || available->num_bodies != loaded->num_bodies ||
+			strcmp(available->cb->name, loaded->cb->name) != 0 || !same_value(available->cb->mu, loaded->cb->mu)) continue;
+		int same = 1;
+		for(int j = 0; same && j < loaded->num_bodies; j++) {
+			Body *a = available->bodies[j], *b = loaded->bodies[j];
+			int moons_a = a->system != NULL ? a->system->num_bodies : 0, moons_b = b->system != NULL ? b->system->num_bodies : 0;
+			same = strcmp(a->name, b->name) == 0 && same_value(a->mu, b->mu) && same_value(a->orbit.a, b->orbit.a) && moons_a == moons_b;
+			for(int k = 0; same && k < moons_a; k++)
+				same = strcmp(a->system->bodies[k]->name, b->system->bodies[k]->name) == 0;
+		}
+		if(same) return i;
+	}
+	return -1;
+}
+
 G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
@@ -39,10 +63,19 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(!is_available_system(tp_system) && tp_system != NULL) free_celestial_system(tp_system);
 	curr_transfer_tp = NULL;
 	tp_system = NULL;
-	if(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system)) == get_num_available_systems()) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
+	if(tp_loaded_system_entry) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
+	tp_loaded_system_entry = 0;
 
 	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
 	if(load_results.itin == NULL) return;
+	int matching_system = find_identical_available_system(load_results.system);
+	if(matching_system >= 0) {
+		CelestSystem *available = get_available_systems()[matching_system];
+		for(struct ItinStep *step = get_first(load_results.itin); step != NULL; step = step->num_next_nodes > 0 ? step->next[0] : NULL)
+			if(step->body != NULL) step->body = available->bodies[get_body_system_id(step->body, load_results.system)];
+		free_celestial_system(load_results.system);
+		load_results.system = available;
+	}
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
 	tp_route_unconverged = 0;
@@ -57,10 +90,13 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	camera_zoom_to_fit_itinerary(tp_system_camera, curr_transfer_tp);
 	update_tp_system_view();
-	char system_name[50];
-	sprintf(system_name, "- %s -", tp_system->name);
-	append_combobox_entry(GTK_COMBO_BOX(cb_tp_system), system_name);
-	update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
+	if(matching_system >= 0) gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_system), matching_system);
+	else {
+		char system_name[50];
+		sprintf(system_name, "- %s -", tp_system->name);
+		append_combobox_entry(GTK_COMBO_BOX(cb_tp_system), system_name);
+		tp_loaded_system_entry = 1;
+	}
 
 	struct ItinStep *step2pr = get_first(curr_transfer_tp);
 	HyperbolaParams hyp_params = get_hyperbola_params(vec3(0,0,0), step2pr->next[0]->v_dep, step2pr->v_body,

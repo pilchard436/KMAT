@@ -2483,18 +2483,6 @@ The departure burn is minimized over the orbit.</property>
                             <property name="top-attach">2</property>
                           </packing>
                         </child>
-                        <child>
-                          <object class="GtkComboBox" id="cb_tp_central_body">
-                            <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <signal name="changed" handler="on_tp_central_body_change" swapped="no"/>
-                          </object>
-                          <packing>
-                            <property name="left-attach">0</property>
-                            <property name="top-attach">1</property>
-                            <property name="width">2</property>
-                          </packing>
-                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>

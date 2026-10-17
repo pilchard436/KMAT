@@ -115,6 +115,17 @@ gboolean on_tp_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpo
 	return FALSE;
 }
 
+// Visibility of each moon of the shown planets, in the order of the show-orbit list.
+static Body **tp_moons;
+static gboolean *tp_moon_show;
+static int tp_num_moons;
+
+static int tp_moon_visible(Body *moon) {
+	for(int i = 0; i < tp_num_moons; i++)
+		if(tp_moons[i] == moon) return tp_moon_show[i];
+	return 1;
+}
+
 void update_tp_system_view() {
 	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	clear_camera_screen(tp_system_camera);
@@ -137,7 +148,7 @@ void update_tp_system_view() {
 		cairo_set_source_rgba(get_camera_screen_cairo(tp_system_camera), tp_system->bodies[i]->color[0],
 			tp_system->bodies[i]->color[1], tp_system->bodies[i]->color[2], 0.4);
 		draw_orbit(tp_system_camera, orbit);
-		draw_body_moons(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
+		draw_body_moons(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp, tp_moon_visible);
 	}
 
 	draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
@@ -196,6 +207,16 @@ void tp_update_show_body_list() {
 		// Set the label in the grid at the specified row and column
 		gtk_grid_attach(GTK_GRID(grid_tp_bodies), widget, 0, row, 1, 1);
 	}
+	// Moons follow all planets so the planet rows keep their index as row.
+	int row = tp_system->num_bodies + 1;
+	for(int moon_idx = 0; moon_idx < tp_num_moons; moon_idx++) {
+		GtkWidget *widget = gtk_check_button_new_with_label(tp_moons[moon_idx]->name);
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), tp_moon_show[moon_idx]);
+		g_signal_connect(widget, "clicked", G_CALLBACK(on_body_toggle), &tp_moon_show[moon_idx]);
+		gtk_widget_set_halign(widget, GTK_ALIGN_START);
+		gtk_widget_set_margin_start(widget, 16);
+		gtk_grid_attach(GTK_GRID(grid_tp_bodies), widget, 0, row++, 1, 1);
+	}
 	gtk_container_add (GTK_CONTAINER (vp_tp_bodies), grid_tp_bodies);
 	gtk_widget_show_all(GTK_WIDGET(vp_tp_bodies));
 }
@@ -210,7 +231,26 @@ void show_bodies_of_itinerary(struct ItinStep *step) {
 	}
 }
 
+static void tp_update_moons(void) {
+	free(tp_moons);
+	free(tp_moon_show);
+	tp_num_moons = 0;
+	for(int i = 0; i < tp_system->num_bodies; i++)
+		if(tp_system->bodies[i]->system != NULL) tp_num_moons += tp_system->bodies[i]->system->num_bodies;
+	tp_moons = calloc(tp_num_moons > 0 ? tp_num_moons : 1, sizeof(*tp_moons));
+	tp_moon_show = calloc(tp_num_moons > 0 ? tp_num_moons : 1, sizeof(*tp_moon_show));
+	int next = 0;
+	for(int i = 0; i < tp_system->num_bodies; i++) {
+		CelestSystem *moons = tp_system->bodies[i]->system;
+		for(int j = 0; moons != NULL && j < moons->num_bodies; j++) {
+			tp_moons[next] = moons->bodies[j];
+			tp_moon_show[next++] = 1;
+		}
+	}
+}
+
 void tp_update_bodies() {
+	tp_update_moons();
 	if(body_show_status_tp != NULL) free(body_show_status_tp);
 	body_show_status_tp = (gboolean*) malloc(tp_system->num_bodies*sizeof(gboolean));
 	if(curr_transfer_tp != NULL) {

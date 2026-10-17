@@ -16,7 +16,6 @@ Camera *tp_system_camera;
 
 GObject *da_tp;
 GObject *cb_tp_system;
-GObject *cb_tp_central_body;
 GObject *cb_tp_tfbody;
 GObject *lb_tp_date;
 GObject *tb_tp_tfdate;
@@ -35,6 +34,9 @@ GObject *lb_tp_param_labels;
 GObject *lb_tp_param_values;
 GObject *vp_tp_bodies;
 GtkWidget *grid_tp_bodies;
+
+// Set while the system dropdown has an extra entry for the system of a loaded itinerary.
+int tp_loaded_system_entry;
 
 GtkWidget *tb_tp_animate, *cb_tp_anim_speed;
 
@@ -55,7 +57,6 @@ void init_transfer_planner(GtkBuilder *builder) {
 	tp_last_transfer_type = TF_FLYBY;
 
 	cb_tp_system = gtk_builder_get_object(builder, "cb_tp_system");
-	cb_tp_central_body = gtk_builder_get_object(builder, "cb_tp_central_body");
 	cb_tp_tfbody = gtk_builder_get_object(builder, "cb_tp_tfbody");
 	tb_tp_tfdate = gtk_builder_get_object(builder, "tb_tp_tfdate");
 	bt_tp_10y6hp = gtk_builder_get_object(builder, "bt_tp_10y6hp");
@@ -88,12 +89,10 @@ void init_transfer_planner(GtkBuilder *builder) {
 	fix_tfbody = TRUE;
 
 	create_combobox_dropdown_text_renderer(cb_tp_system, GTK_ALIGN_CENTER);
-	create_combobox_dropdown_text_renderer(cb_tp_central_body, GTK_ALIGN_CENTER);
 	create_combobox_dropdown_text_renderer(cb_tp_tfbody, GTK_ALIGN_CENTER);
 	if(get_num_available_systems() > 0) {
 		update_system_dropdown(GTK_COMBO_BOX(cb_tp_system));
 		tp_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system))];
-		update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
 		tp_update_bodies();
 
 		update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0);
@@ -116,34 +115,17 @@ G_MODULE_EXPORT void on_tp_system_change() {
 	if(!is_available_system(get_top_level_system(tp_system)) && tp_system != NULL) {
 		free_celestial_system(get_top_level_system(tp_system));
 		tp_system = NULL;
-		remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
+		if(tp_loaded_system_entry) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
+		tp_loaded_system_entry = 0;
 	}
 
 	tp_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_system))];
-	update_central_body_dropdown(GTK_COMBO_BOX(cb_tp_central_body), tp_system);
 	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	remove_all_transfers();
 	tp_update_bodies();
 	update();
 }
 
-
-G_MODULE_EXPORT void on_tp_central_body_change() {
-	if(get_number_of_subsystems(get_top_level_system(tp_system)) == 0) {
-		gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 0);
-		return;
-	}
-	gtk_widget_set_sensitive(GTK_WIDGET(cb_tp_central_body), 1);
-	CelestSystem *selected = get_subsystem_from_system_and_id(get_top_level_system(tp_system), gtk_combo_box_get_active(GTK_COMBO_BOX(cb_tp_central_body)));
-	// Refilling the dropdown (e.g. when an itinerary with moons is loaded) must not discard the itinerary.
-	if(selected == tp_system) return;
-	tp_system = selected;
-
-	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;
-	remove_all_transfers();
-	tp_update_bodies();
-	update();
-}
 
 // Set when the flyby iteration did not settle and the shown delta-v is only the last iterate.
 int tp_route_unconverged;

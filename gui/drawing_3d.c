@@ -101,7 +101,7 @@ void draw_orbit(Camera *camera, Orbit orbit) {
 	draw_orbit_around(camera, orbit, vec3(0, 0, 0));
 }
 
-void draw_body_moons(Camera *camera, CelestSystem *system, Body *planet, double jd_date) {
+void draw_body_moons(Camera *camera, CelestSystem *system, Body *planet, double jd_date, int (*is_visible)(Body *moon)) {
 	CelestSystem *moons = planet->system;
 	if(moons == NULL) return;
 	cairo_t *cr = get_camera_screen_cairo(camera);
@@ -109,6 +109,7 @@ void draw_body_moons(Camera *camera, CelestSystem *system, Body *planet, double 
 	Vector2 planet_point = p3d_to_p2d(camera, planet_position);
 	for(int i = 0; i < moons->num_bodies; i++) {
 		Body *moon = moons->bodies[i];
+		if(is_visible != NULL && !is_visible(moon)) continue;
 		draw_body(camera, system, moon, jd_date);
 		cairo_set_source_rgba(cr, moon->color[0], moon->color[1], moon->color[2], 0.4);
 		draw_orbit_around(camera, moon->orbit, planet_position);
@@ -126,7 +127,7 @@ void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date)
 	for(int i = 0; i < system->num_bodies; i++) {
 		draw_body(camera, system, system->bodies[i], jd_date);
 		draw_orbit(camera, system->bodies[i]->orbit);
-		draw_body_moons(camera, system, system->bodies[i], jd_date);
+		draw_body_moons(camera, system, system->bodies[i], jd_date, NULL);
 	}
 }
 
