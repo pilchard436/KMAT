@@ -63,6 +63,8 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(!is_available_system(tp_system) && tp_system != NULL) free_celestial_system(tp_system);
 	curr_transfer_tp = NULL;
 	tp_system = NULL;
+	// The focused body belonged to the system that was just freed.
+	tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	if(tp_loaded_system_entry) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
 	tp_loaded_system_entry = 0;
 
