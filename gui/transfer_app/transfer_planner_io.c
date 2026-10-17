@@ -3,7 +3,6 @@
 #include "gui/info_win_manager.h"
 #include "gui/gui_manager.h"
 #include "tools/file_io.h"
-#include "tools/gmat_interface.h"
 #include "orbit_calculator/flyby_policy.h"
 
 #include <math.h>
@@ -149,6 +148,3 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 		   rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl));
 }
 
-G_MODULE_EXPORT void on_create_gmat_script() {
-	if(curr_transfer_tp != NULL) write_gmat_script(curr_transfer_tp, "transfer.script");
-}

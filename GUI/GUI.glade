@@ -2401,19 +2401,6 @@ The departure burn is minimized over the orbit.</property>
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkButton" id="bt_tp_gmatscript">
-                                <property name="label" translatable="yes">GMAT Script</property>
-                                <property name="can-focus">True</property>
-                                <property name="receives-default">True</property>
-                                <signal name="clicked" handler="on_create_gmat_script" swapped="no"/>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                                <property name="position">2</property>
-                              </packing>
-                            </child>
-                            <child>
                               <object class="GtkLabel" id="lb_tp_last_transfer">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>

@@ -36,7 +36,6 @@ G_MODULE_EXPORT void on_find_closest_transfer(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_show_itin_overview();
 G_MODULE_EXPORT void on_save_itinerary(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data);
-G_MODULE_EXPORT void on_create_gmat_script();
 
 
 
