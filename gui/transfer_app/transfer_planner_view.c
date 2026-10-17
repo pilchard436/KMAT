@@ -126,6 +126,7 @@ void update_tp_system_view() {
 		cairo_set_source_rgba(get_camera_screen_cairo(tp_system_camera), tp_system->bodies[i]->color[0],
 			tp_system->bodies[i]->color[1], tp_system->bodies[i]->color[2], 0.4);
 		draw_orbit(tp_system_camera, orbit);
+		draw_body_moons(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
 	}
 
 	draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);

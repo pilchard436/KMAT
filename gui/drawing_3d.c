@@ -10,6 +10,9 @@ static int num_occluders;
 
 static Vector3 body_position(CelestSystem *system, Body *body, double jd_date) {
 	if(body == system->cb) return vec3(0, 0, 0);
+	// A moon orbits its planet, so its elements give a position relative to the planet.
+	if(body->orbit.cb != NULL && body->orbit.cb != system->cb && body->orbit.cb != body)
+		return add_vec3(body_position(system, body->orbit.cb, jd_date), osv_from_elements(body->orbit, jd_date).r);
 	return system->prop_method == ORB_ELEMENTS ?
 		osv_from_elements(body->orbit, jd_date).r :
 		osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb).r;
@@ -21,6 +24,11 @@ void register_body_occluders(CelestSystem *system, double jd_date) {
 	for(int i = -1; i < system->num_bodies && num_occluders < 256; i++) {
 		Body *body = i < 0 ? system->cb : system->bodies[i];
 		occluders[num_occluders++] = (BodyOccluder){body_position(system, body, jd_date), body->radius};
+	}
+	for(int i = 0; i < system->num_bodies; i++) {
+		CelestSystem *moons = system->bodies[i]->system;
+		for(int j = 0; moons != NULL && j < moons->num_bodies && num_occluders < 256; j++)
+			occluders[num_occluders++] = (BodyOccluder){body_position(system, moons->bodies[j], jd_date), moons->bodies[j]->radius};
 	}
 }
 
@@ -42,13 +50,10 @@ static int point_is_hidden_by_body(Camera *camera, Vector3 point) {
 
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	set_cairo_body_color(get_camera_screen_cairo(camera), body);
-	OSV osv_body = {.r = vec3(0,0,0)};
-	if(body != system->cb) osv_body = system->prop_method == ORB_ELEMENTS ?
-										osv_from_elements(body->orbit, jd_date) :
-									  	osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb);
-	Vector2 p2d_body = p3d_to_p2d(camera, osv_body.r);
+	Vector3 position = body_position(system, body, jd_date);
+	Vector2 p2d_body = p3d_to_p2d(camera, position);
 	// Never smaller than the marker dot, but the real size once zoomed in close.
-	double depth = camera_depth(camera, osv_body.r);
+	double depth = camera_depth(camera, position);
 	double marker_radius = 5;
 	if(depth > 0) marker_radius = fmax(marker_radius, body->radius * camera_pixels_per_meter(camera, depth));
 	cairo_arc(get_camera_screen_cairo(camera), p2d_body.x, p2d_body.y, marker_radius, 0, 2 * M_PI);
@@ -78,16 +83,39 @@ static void stroke_segment_3d(Camera *camera, Vector3 a, Vector3 b) {
 	}
 }
 
-void draw_orbit(Camera *camera, Orbit orbit) {
+static void draw_orbit_around(Camera *camera, Orbit orbit, Vector3 center) {
 	OSV osv = osv_from_orbit(orbit);
-	Vector3 last_r = osv.r;
+	Vector3 last_r = add_vec3(osv.r, center);
 	double ta_step = deg2rad(0.5);
 
 	for(double dta = 0; dta < M_PI*2 + ta_step; dta += ta_step) {
 		orbit.ta += ta_step;
 		osv = osv_from_orbit(orbit);
-		stroke_segment_3d(camera, last_r, osv.r);
-		last_r = osv.r;
+		Vector3 r = add_vec3(osv.r, center);
+		stroke_segment_3d(camera, last_r, r);
+		last_r = r;
+	}
+}
+
+void draw_orbit(Camera *camera, Orbit orbit) {
+	draw_orbit_around(camera, orbit, vec3(0, 0, 0));
+}
+
+void draw_body_moons(Camera *camera, CelestSystem *system, Body *planet, double jd_date) {
+	CelestSystem *moons = planet->system;
+	if(moons == NULL) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector3 planet_position = body_position(system, planet, jd_date);
+	Vector2 planet_point = p3d_to_p2d(camera, planet_position);
+	for(int i = 0; i < moons->num_bodies; i++) {
+		Body *moon = moons->bodies[i];
+		draw_body(camera, system, moon, jd_date);
+		cairo_set_source_rgba(cr, moon->color[0], moon->color[1], moon->color[2], 0.4);
+		draw_orbit_around(camera, moon->orbit, planet_position);
+		// Labels of moons close to their planet would pile up on it.
+		Vector2 moon_point = p3d_to_p2d(camera, body_position(system, moon, jd_date));
+		if(hypot(moon_point.x - planet_point.x, moon_point.y - planet_point.y) > 30)
+			draw_body_label(camera, system, moon, jd_date);
 	}
 }
 
@@ -98,6 +126,7 @@ void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date)
 	for(int i = 0; i < system->num_bodies; i++) {
 		draw_body(camera, system, system->bodies[i], jd_date);
 		draw_orbit(camera, system->bodies[i]->orbit);
+		draw_body_moons(camera, system, system->bodies[i], jd_date);
 	}
 }
 
@@ -304,11 +333,7 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 
 void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	cairo_t *cr = get_camera_screen_cairo(camera);
-	OSV osv_body = {.r = vec3(0,0,0)};
-	if(body != system->cb) osv_body = system->prop_method == ORB_ELEMENTS ?
-		osv_from_elements(body->orbit, jd_date) :
-		osv_from_ephem(body->ephem, body->num_ephems, jd_date, system->cb);
-	Vector2 p = p3d_to_p2d(camera, osv_body.r);
+	Vector2 p = p3d_to_p2d(camera, body_position(system, body, jd_date));
 	set_cairo_body_color(cr, body);
 	set_label_font(cr, 10, 0);
 	cairo_move_to(cr, p.x + 8, p.y + 14);

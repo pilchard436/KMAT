@@ -136,6 +136,7 @@ void update_pa_itinerary_preview() {
 			orbit = constr_orbit_from_osv(body_osv.r, body_osv.v, pa_system->cb);
 		}
 		draw_orbit(pa_itin_preview_camera, orbit);
+		draw_body_moons(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa);
 	}
 	// Transfers
 	if(curr_transfer_pa != NULL) draw_itinerary(pa_itin_preview_camera, pa_system, curr_transfer_pa, current_date_pa);

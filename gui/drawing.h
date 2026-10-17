@@ -17,6 +17,8 @@ void draw_center_aligned_text(cairo_t *cr, double x, double y, char *text);
 void draw_right_aligned_text(cairo_t *cr, double x, double y, double rotate_angle, char *text);
 void draw_celestial_system(Camera *camera, CelestSystem *system, double jd_date);
 void draw_body(Camera *camera, CelestSystem *system, Body *body, double jd_date);
+// The moons of a planet with their faint orbits; positions follow the planet.
+void draw_body_moons(Camera *camera, CelestSystem *system, Body *planet, double jd_date);
 void register_body_occluders(CelestSystem *system, double jd_date);
 void draw_orbit(Camera *camera, Orbit orbit);
 void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, double current_time);
