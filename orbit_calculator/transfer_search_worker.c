@@ -7,6 +7,12 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
+static double first_leg_window_scale = 1;
+
+void set_first_leg_window_scale(double scale) {
+	first_leg_window_scale = scale;
+}
+
 const int NUM_INITIAL_TRANSFERS_PER_BODY = 500;
 
 void *calc_itins_from_departure(void *args) {
@@ -104,7 +110,7 @@ void *calc_itins_from_departure(void *args) {
 			Hohmann hohmann = calc_hohmann_transfer(r0, r1, system->cb);
 			double hohmann_dur = hohmann.dur/86400;
 			double min_duration = 0.4 * hohmann_dur;
-			double max_duration = (4*(r_ratio-0.85)*(r_ratio-0.85)+1.5) * hohmann_dur; if(max_duration/hohmann_dur > 3) max_duration = hohmann_dur*3;
+			double max_duration = first_leg_window_scale * (4*(r_ratio-0.85)*(r_ratio-0.85)+1.5) * hohmann_dur; if(max_duration/hohmann_dur > 3*first_leg_window_scale) max_duration = hohmann_dur*3*first_leg_window_scale;
 			double max_min_duration_diff = max_duration - min_duration;
 
 			// A return to the departure body only works with the revolution variants.

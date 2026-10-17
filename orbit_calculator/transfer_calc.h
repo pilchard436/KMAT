@@ -52,3 +52,5 @@ Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data);
 Transfer_Calc_Status get_current_transfer_calc_status();
 
 #endif //KSP_TRANSFER_CALC_H
+
+void set_first_leg_window_scale(double scale);

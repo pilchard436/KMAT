@@ -1,5 +1,7 @@
 #include "integration_common.h"
 
+#include <time.h>
+
 static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 		const char *departure_name, const char *arrival_name,
 		const char **flyby_names, int num_flybys, double jd_min_dep, double jd_max_dep,
@@ -140,6 +142,26 @@ int run_coverage_report(void) {
 			6939, 6939, 6939, 190e3, 1600e3);
 	}
 	set_powered_seed_budget(POWERED_SEEDS_PER_DEPARTURE);
+	const char *saturn_flybys[] = {"EARTH", "MARS", "JUPITER", "SATURN"};
+	const double scales[] = {1.0, 1.5, 2.0};
+	for(size_t i = 0; i < sizeof(scales) / sizeof(scales[0]); i++) {
+		set_first_leg_window_scale(scales[i]);
+		printf("\n##### first-leg window scale: %.1f #####\n", scales[i]);
+		time_t started = time(NULL);
+		valid &= run_saved_mission_benchmark(system, "Jupiter",
+			"EARTH", "JUPITER", jupiter_flybys, 3,
+			2461327.50, 2461692.50, 2463325.50, 1998.0,
+			6939, 6939, 6939, 190e3, 1600e3);
+		printf("TIME Jupiter scale %.1f: %.0f s\n", scales[i], difftime(time(NULL), started));
+		if(scales[i] == 1.5) continue;
+		started = time(NULL);
+		valid &= run_saved_mission_benchmark(system, "Saturn",
+			"EARTH", "SATURN", saturn_flybys, 4,
+			2461326.50, 2461691.50, 2466098.50, 4407.0,
+			7282, 7282, 7282, 190e3, 2050e3);
+		printf("TIME Saturn scale %.1f: %.0f s\n", scales[i], difftime(time(NULL), started));
+	}
+	set_first_leg_window_scale(1.0);
 	free_celestial_system(system);
 	return valid ? EXIT_SUCCESS : EXIT_FAILURE;
 }
