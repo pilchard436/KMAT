@@ -1045,7 +1045,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 		double burn_tangential = dot_vec3(departure_burn.burn_delta_v, tangential);
 		double burn_normal = dot_vec3(departure_burn.burn_delta_v, normal);
 		sprintf(string, "%sInitial burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f) "
-			"[parking-orbit RTN]\n", string, departure_burn.burn_magnitude,
+			"[starting-orbit RTN]\n", string, departure_burn.burn_magnitude,
 			burn_radial, burn_tangential, burn_normal);
 	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);

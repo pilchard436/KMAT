@@ -241,13 +241,13 @@ int parking_orbit_editor_prepare_search(Body *dep_body, char *error, size_t erro
 	parking_orbit_set_active(NULL, NULL);
 	if(po_toggle == NULL || !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(po_toggle))) return 1;
 	if(dep_body == NULL || po_body != dep_body) {
-		g_snprintf(error, error_size, "The custom parking orbit was defined for %s. Reopen the parking orbit editor for the current departure body or disable it.",
+		g_snprintf(error, error_size, "The custom starting orbit was defined for %s. Reopen the starting orbit editor for the current departure body or disable it.",
 			po_body != NULL ? po_body->name : "another body");
 		return 0;
 	}
 	ParkingOrbit parsed;
 	if(!po_read_entries(&parsed) || !parking_orbit_is_valid(&parsed, dep_body)) {
-		g_snprintf(error, error_size, "The custom parking orbit is invalid. Fix it in the parking orbit editor or disable it.");
+		g_snprintf(error, error_size, "The custom starting orbit is invalid. Fix it in the starting orbit editor or disable it.");
 		return 0;
 	}
 	parking_orbit_set_active(&parsed, dep_body);
@@ -269,7 +269,7 @@ G_MODULE_EXPORT void on_open_parking_orbit_editor(void) {
 		po_set_default(po_body);
 	}
 	char title[96];
-	g_snprintf(title, sizeof(title), "Parking Orbit - %s", po_body->name);
+	g_snprintf(title, sizeof(title), "Starting Orbit - %s", po_body->name);
 	gtk_window_set_title(GTK_WINDOW(po_window), title);
 	gtk_widget_show_all(po_window);
 	gtk_window_present(GTK_WINDOW(po_window));

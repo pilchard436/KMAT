@@ -532,7 +532,7 @@ void write_gmat_final_optimizer(FILE *filePointer, int num_steps, struct ItinSte
 
 	step2pr = get_first(step2pr);
 
-	fprintf(filePointer, "\n\t%% Delta-v from parking orbit\n");
+	fprintf(filePointer, "\n\t%% Delta-v from starting orbit\n");
 	fprintf(filePointer, "\tCost = %s.%s.VMAG - sqrt(EarthGravParam/6571)\n", sc_name[0], coord_name[step2pr->body->id]);
 
 	fprintf(filePointer, "\n\t%% Store inclinations\n");

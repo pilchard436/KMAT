@@ -65,7 +65,7 @@
   </object>
   <object class="GtkWindow" id="parking_orbit_window">
     <property name="can-focus">False</property>
-    <property name="title" translatable="yes">Parking Orbit</property>
+    <property name="title" translatable="yes">Starting Orbit</property>
     <property name="default-width">760</property>
     <property name="default-height">460</property>
     <signal name="delete-event" handler="on_parking_orbit_window_delete" swapped="no"/>
@@ -86,7 +86,7 @@
             <property name="spacing">8</property>
             <child>
               <object class="GtkCheckButton" id="cb_po_enable">
-                <property name="label" translatable="yes">Use custom parking orbit in searches</property>
+                <property name="label" translatable="yes">Use custom starting orbit in searches</property>
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <property name="receives-default">False</property>
@@ -491,7 +491,7 @@ The departure burn is minimized over the orbit.</property>
                         </child>
                         <child>
                           <object class="GtkButton" id="bt_ic_parking_orbit">
-                            <property name="label" translatable="yes">Parking Orbit...</property>
+                            <property name="label" translatable="yes">Starting Orbit...</property>
                             <property name="visible">True</property>
                             <property name="can-focus">True</property>
                             <property name="receives-default">True</property>
