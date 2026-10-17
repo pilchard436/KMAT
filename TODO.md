@@ -35,3 +35,14 @@
 - [x] Add per-test timing output and a recorded baseline so slowdowns are caught.
 - [x] Cover the `.itin`/`.itins` file tests, which are not part of the 10 reported tests.
 - [x] Add a UI-free check for the porkchop group list (select/deselect all, toggle keeps scroll position).
+## KSP Integration
+
+Goal: read the game state from Kerbal Space Program and write planned burns back as maneuver nodes. Nothing is implemented yet; origin/adding-system-config-creator has an earlier "ksp connector" start that has not been reviewed.
+
+- [ ] Use kRPC (a KSP mod that runs a server inside the game) rather than a custom plugin. Clients exist for C (C-nano), C++ and others; the protocol is protobuf over TCP, so KMAT could also speak it directly. Check how well the C-nano client handles streams and a Windows socket transport before choosing.
+- [ ] Import bodies from the running game (CelestialBody: gravitational parameter, radius, rotation period, atmosphere depth, orbit, satellites) into a system config, replacing hand-written files and covering modded systems. Celestial_Systems/stock_system.cfg already uses KSP units (units = M_DEG_PA, mean_anomaly_ut0 in radians, ut0 = 0).
+- [ ] Read the active vessel's orbit and the game time (Vessel, Orbit, SpaceCenter ut) as the start of an itinerary. KSP time is seconds from the game epoch, KMAT uses Julian dates; reuse the Kerbal date conversion.
+- [ ] Write each departure, powered-flyby and deep-space burn as a maneuver node (Control.add_node, Node). Burns must be expressed along the vessel's own orbit at that time, and KSP's node vector order is radial, normal, prograde (KMAT's is different). KSP only shows nodes along its own patched-conic path, so a multi-flyby plan needs its nodes added one at a time as the earlier ones come into range.
+- [ ] Moon-assisted arrival has no node equivalent: export the capture burn left after the assist, plus the aiming burn.
+- [ ] Optional: Kerbal Alarm Clock alarms for burn times, and the Drawing and UI APIs to show the planned trajectory and a small panel inside the game. Mod integrations (KAC, RemoteTech and others) only work when the player has those mods installed.
+- [ ] Fallbacks if kRPC is not wanted: a custom C# KSP plugin that exposes the same data over a local socket or files in GameData, or reading and writing persistent.sfs while the game is closed (vessel orbits and flight-plan maneuvers).
