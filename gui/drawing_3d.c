@@ -395,79 +395,12 @@ static void draw_periapsis_marker(Camera *camera, Vector3 r, Body *body, struct 
 	cairo_set_line_width(cr, 1);
 }
 
-void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time,
-		double dep_periapsis, double arr_periapsis) {
-	if(itin == NULL || planet == NULL) return;
-	cairo_t *cr = get_camera_screen_cairo(camera);
-	Vector3 offset = body_position(system, planet, current_time);
-	int leg = 0;
-	for(struct ItinStep *step = get_first(itin); step != NULL; step = step->next != NULL ? step->next[0] : NULL, leg++) {
-		if(step->body != planet) continue;
-		int past = current_time > step->date;
-		set_stroke_width(2);
-		if(step->prev != NULL && step->next != NULL) {
-			PoweredFlybyResult flyby;
-			if(!calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, planet,
-				flyby_minimum_periapsis(planet), step->date, &flyby)) { set_stroke_width(1); continue; }
-			Orbit incoming = constr_orbit_from_osv(flyby.incoming_soi_state.r, flyby.incoming_soi_state.v, planet);
-			Orbit outgoing = constr_orbit_from_osv(flyby.outgoing_soi_state.r, flyby.outgoing_soi_state.v, planet);
-			int viable = is_flyby_leg_viable(step->v_arr, step->next[0]->v_dep, step->v_body, planet, step->date);
-			set_leg_color(cr, leg - 1, past, viable);
-			draw_conic_arc(camera, incoming, wrapped_true_anomaly(incoming.ta), 0, offset);
-			set_leg_color(cr, leg, past, viable);
-			draw_conic_arc(camera, outgoing, 0, wrapped_true_anomaly(outgoing.ta), offset);
-			set_stroke_width(1);
-
-			Orbit at_periapsis = incoming;
-			at_periapsis.ta = 0;
-			draw_periapsis_marker(camera, add_vec3(osv_from_orbit(at_periapsis).r, offset), planet, step, flyby_below_min_safe(step));
-
-			double entry = step->date - flyby.incoming_soi_time / 86400, exit = step->date + flyby.outgoing_soi_time / 86400;
-			if(current_time >= entry && current_time < step->date) {
-				OSV start = {flyby.incoming_soi_state.r, flyby.incoming_soi_state.v};
-				draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(start, planet, (current_time - entry) * 86400).r, offset));
-			} else if(current_time >= step->date && current_time <= exit) {
-				Orbit leaving = outgoing;
-				leaving.ta = 0;
-				OSV start = osv_from_orbit(leaving);
-				draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(start, planet, (current_time - step->date) * 86400).r, offset));
-			}
-			continue;
-		}
-		Orbit orbit;
-		if(step->next != NULL) {
-			Vector3 excess = subtract_vec3(step->next[0]->v_dep, step->v_body);
-			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, dep_periapsis), 0, &orbit)) {
-				set_leg_color(cr, leg, past, 1);
-				draw_conic_arc(camera, orbit, 0, wrapped_true_anomaly(orbit.ta), offset);
-				// The departure date is the periapsis passage; the craft leaves along the hyperbola from there.
-				double exit = step->date + fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
-				if(current_time >= step->date && current_time <= exit) {
-					Orbit at_periapsis = orbit;
-					at_periapsis.ta = 0;
-					draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(osv_from_orbit(at_periapsis), planet, (current_time - step->date) * 86400).r, offset));
-				}
-			}
-		} else if(step->prev != NULL) {
-			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
-			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, arr_periapsis), 1, &orbit)) {
-				set_leg_color(cr, leg - 1, past, 1);
-				draw_conic_arc(camera, orbit, wrapped_true_anomaly(orbit.ta), 0, offset);
-				// The arrival date is the periapsis passage; the craft comes in along the hyperbola before it.
-				double entry = step->date - fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
-				if(current_time >= entry && current_time <= step->date)
-					draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(osv_from_orbit(orbit), planet, (current_time - entry) * 86400).r, offset));
-			}
-		}
-		set_stroke_width(1);
-	}
-}
-
-// The part of the route spent inside one planet's sphere of influence, as planet-relative states.
+// The part of the route spent inside one planet's sphere of influence, as planet-relative states propagated forward from start.
 typedef struct {
 	OSV start;
 	double t0, duration;	// JD and days
-	int leg;
+	int leg, viable;
+	struct ItinStep *step;
 } EncounterPiece;
 
 static int encounter_pieces(Body *planet, struct ItinStep *itin, double dep_periapsis, double arr_periapsis, EncounterPiece *pieces, int max) {
@@ -478,11 +411,12 @@ static int encounter_pieces(Body *planet, struct ItinStep *itin, double dep_peri
 			PoweredFlybyResult flyby;
 			if(!calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, planet,
 				flyby_minimum_periapsis(planet), step->date, &flyby)) continue;
+			int viable = is_flyby_leg_viable(step->v_arr, step->next[0]->v_dep, step->v_body, planet, step->date);
 			double in_days = flyby.incoming_soi_time / 86400, out_days = flyby.outgoing_soi_time / 86400;
-			pieces[count++] = (EncounterPiece){{flyby.incoming_soi_state.r, flyby.incoming_soi_state.v}, step->date - in_days, in_days, leg - 1};
+			pieces[count++] = (EncounterPiece){{flyby.incoming_soi_state.r, flyby.incoming_soi_state.v}, step->date - in_days, in_days, leg - 1, viable, step};
 			Orbit leaving = constr_orbit_from_osv(flyby.outgoing_soi_state.r, flyby.outgoing_soi_state.v, planet);
 			leaving.ta = 0;
-			pieces[count++] = (EncounterPiece){osv_from_orbit(leaving), step->date, out_days, leg};
+			pieces[count++] = (EncounterPiece){osv_from_orbit(leaving), step->date, out_days, leg, viable, step};
 			continue;
 		}
 		Orbit orbit;
@@ -491,76 +425,203 @@ static int encounter_pieces(Body *planet, struct ItinStep *itin, double dep_peri
 			if(!hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, dep_periapsis), 0, &orbit)) continue;
 			double days = fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
 			orbit.ta = 0;
-			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date, days, leg};
+			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date, days, leg, 1, step};
 		} else if(step->prev != NULL) {
 			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
 			if(!hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, arr_periapsis), 1, &orbit)) continue;
 			double days = fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
-			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date - days, days, leg - 1};
+			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date - days, days, leg - 1, 1, step};
 		}
 	}
 	return count;
 }
 
-// The route's path as seen from a moon of the flyby planet: the planet-relative trajectory minus the moon's motion.
-// The closest approach is marked, and flagged when the craft would hit the moon.
+static OSV piece_state_at(Body *planet, const EncounterPiece *piece, double jd) {
+	double seconds = (jd - piece->t0) * 86400;
+	return seconds == 0 ? piece->start : propagate_osv_time(piece->start, planet, seconds);
+}
+
+// Where the planet-relative path crosses into a moon's sphere of influence. As in the KSP map view, the path is then a
+// conic around the moon until it leaves again, and a new conic around the planet continues from the exit state.
+typedef struct {
+	int found;
+	Body *moon;
+	double t_in, t_out;	// JD
+	OSV entry, exit;	// moon-relative states at the two crossings
+	OSV exit_planet;	// planet-relative state when leaving
+	Orbit orbit;		// the conic around the moon, from entry
+} MoonPatch;
+
+static int moon_state_relative_to_planet(Body *planet, Body *moon, double jd, OSV *state) {
+	return moon_state_at(planet, moon, jd, state);
+}
+
+static int find_moon_patch(Body *planet, const EncounterPiece *piece, Body *only_moon, MoonPatch *patch) {
+	*patch = (MoonPatch){0};
+	if(planet->system == NULL) return 0;
+	for(int m = 0; m < planet->system->num_bodies; m++) {
+		Body *moon = planet->system->bodies[m];
+		if(moon == NULL || (only_moon != NULL && moon != only_moon)) continue;
+		double soi = sphere_of_influence_radius(moon);
+		if(!(soi > 0)) continue;
+		const int samples = 300;
+		double previous_time = piece->t0;
+		int previous_inside = 0;
+		for(int i = 0; i <= samples; i++) {
+			double time = piece->t0 + piece->duration * i / samples;
+			OSV craft = piece_state_at(planet, piece, time), moon_state;
+			if(!moon_state_relative_to_planet(planet, moon, time, &moon_state)) break;
+			int inside = mag_vec3(subtract_vec3(craft.r, moon_state.r)) < soi;
+			if(inside && !previous_inside && i > 0) {
+				double low = previous_time, high = time;
+				for(int iteration = 0; iteration < 30; iteration++) {
+					double mid = (low + high) / 2;
+					OSV c = piece_state_at(planet, piece, mid), ms;
+					moon_state_relative_to_planet(planet, moon, mid, &ms);
+					if(mag_vec3(subtract_vec3(c.r, ms.r)) < soi) high = mid;
+					else low = mid;
+				}
+				OSV c = piece_state_at(planet, piece, high), ms;
+				moon_state_relative_to_planet(planet, moon, high, &ms);
+				OSV entry = {subtract_vec3(c.r, ms.r), subtract_vec3(c.v, ms.v)};
+				Orbit orbit = constr_orbit_from_osv(entry.r, entry.v, moon);
+				double since_periapsis = calc_orbit_time_since_periapsis(orbit);
+				// An approaching craft has r.v < 0, whichever range the orbit's true anomaly is given in.
+				if(!(orbit.e > 1) || !isfinite(since_periapsis) || dot_vec3(entry.r, entry.v) >= 0) goto next_moon;
+				double days = 2 * fabs(since_periapsis) / 86400;
+				OSV exit = propagate_osv_time(entry, moon, days * 86400), moon_at_exit;
+				if(!moon_state_relative_to_planet(planet, moon, high + days, &moon_at_exit)) goto next_moon;
+				*patch = (MoonPatch){1, moon, high, high + days, entry, exit,
+					{add_vec3(exit.r, moon_at_exit.r), add_vec3(exit.v, moon_at_exit.v)}, orbit};
+				return 1;
+			}
+			previous_inside = inside;
+			previous_time = time;
+		}
+next_moon:;
+	}
+	return 0;
+}
+
+static void draw_propagated_arc(Camera *camera, Body *attractor, OSV start, double days, Vector3 offset) {
+	if(!(days > 0)) return;
+	const int steps = 160;
+	Vector3 last = add_vec3(start.r, offset);
+	for(int i = 1; i <= steps; i++) {
+		Vector3 point = add_vec3(propagate_osv_time(start, attractor, days * i / steps * 86400).r, offset);
+		stroke_segment_3d(camera, last, point);
+		last = point;
+	}
+}
+
+static void draw_marker_ring(Camera *camera, Vector3 position, double radius, const char *label, int crashes) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector2 p = p3d_to_p2d(camera, position);
+	cairo_new_path(cr);
+	if(crashes) draw_crash_symbol(cr, p);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1.5);
+	cairo_arc(cr, p.x, p.y, radius, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	set_label_font(cr, 11, crashes);
+	if(crashes) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
+	cairo_move_to(cr, p.x + radius + 4, p.y - 6);
+	cairo_show_text(cr, label);
+	cairo_new_path(cr);
+	cairo_set_line_width(cr, 1);
+}
+
+void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time,
+		double dep_periapsis, double arr_periapsis) {
+	if(itin == NULL || planet == NULL) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector3 offset = body_position(system, planet, current_time);
+	EncounterPiece pieces[8];
+	int count = encounter_pieces(planet, itin, dep_periapsis, arr_periapsis, pieces, 8);
+	for(int p = 0; p < count; p++) {
+		EncounterPiece *piece = &pieces[p];
+		MoonPatch patch;
+		int patched = find_moon_patch(planet, piece, NULL, &patch);
+		double end = piece->t0 + piece->duration;
+		set_leg_color(cr, piece->leg, current_time > piece->step->date, piece->viable);
+		set_stroke_width(2);
+		draw_propagated_arc(camera, planet, piece->start, (patched ? patch.t_in : end) - piece->t0, offset);
+		if(patched) {
+			draw_propagated_arc(camera, planet, patch.exit_planet, end - patch.t_out, offset);
+			char label[80];
+			snprintf(label, sizeof(label), "%s SOI entry", patch.moon->name);
+			draw_marker_ring(camera, add_vec3(piece_state_at(planet, piece, patch.t_in).r, offset), 4, label, 0);
+			snprintf(label, sizeof(label), "%s SOI exit", patch.moon->name);
+			draw_marker_ring(camera, add_vec3(patch.exit_planet.r, offset), 4, label, 0);
+		}
+		set_stroke_width(1);
+
+		// The craft along the piece, or along the moon's conic while inside its sphere of influence.
+		if(current_time >= piece->t0 && current_time <= end) {
+			Vector3 position;
+			OSV moon_state;
+			if(patched && current_time >= patch.t_in && current_time <= patch.t_out &&
+				moon_state_relative_to_planet(planet, patch.moon, current_time, &moon_state))
+				position = add_vec3(propagate_osv_time(patch.entry, patch.moon, (current_time - patch.t_in) * 86400).r, moon_state.r);
+			else if(patched && current_time > patch.t_out)
+				position = propagate_osv_time(patch.exit_planet, planet, (current_time - patch.t_out) * 86400).r;
+			else position = piece_state_at(planet, piece, current_time).r;
+			draw_itinerary_spacecraft(camera, add_vec3(position, offset));
+		}
+		// A flyby's periapsis is where its outgoing piece starts.
+		if(piece->step->prev != NULL && piece->step->next != NULL && fabs(piece->t0 - piece->step->date) < 1e-9) {
+			char label[80], date_text[20];
+			date_to_string(convert_JD_date(piece->step->date, get_settings_datetime_type()), date_text, 0);
+			int crashes = flyby_below_min_safe(piece->step);
+			snprintf(label, sizeof(label), "%s  %s%s", planet->name, date_text, crashes ? "  CRASH" : "");
+			draw_marker_ring(camera, add_vec3(piece->start.r, offset), 6, label, crashes);
+		}
+	}
+}
+
+// The route inside a moon's sphere of influence, drawn as a conic around the moon with entry, exit and periapsis marked.
 void draw_itinerary_around_moon(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *moon, double current_time,
 		double dep_periapsis, double arr_periapsis) {
 	Body *planet = moon != NULL ? moon->orbit.cb : NULL;
 	if(itin == NULL || planet == NULL || planet == system->cb) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
 	EncounterPiece pieces[8];
 	int count = encounter_pieces(planet, itin, dep_periapsis, arr_periapsis, pieces, 8);
-	OSV now_state;
-	if(count == 0 || !moon_state_at(planet, moon, current_time, &now_state)) return;
-	cairo_t *cr = get_camera_screen_cairo(camera);
-	Vector3 offset = add_vec3(body_position(system, planet, current_time), now_state.r);
-	double closest = HUGE_VAL;
-	Vector3 closest_point = vec3(0, 0, 0);
-	double closest_date = 0;
-	const int steps = 240;
+	Vector3 offset = body_position(system, moon, current_time);
+	int encounters = 0;
 	for(int p = 0; p < count; p++) {
-		set_leg_color(cr, pieces[p].leg, current_time > pieces[p].t0 + pieces[p].duration, 1);
+		MoonPatch patch;
+		if(!find_moon_patch(planet, &pieces[p], moon, &patch)) continue;
+		encounters++;
+		double entry_ta = wrapped_true_anomaly(patch.orbit.ta);
+		set_leg_color(cr, pieces[p].leg, current_time > patch.t_out, pieces[p].viable);
 		set_stroke_width(2);
-		Vector3 last = vec3(0, 0, 0);
-		for(int i = 0; i <= steps; i++) {
-			double t = pieces[p].t0 + pieces[p].duration * i / steps;
-			OSV moon_state;
-			if(!moon_state_at(planet, moon, t, &moon_state)) break;
-			Vector3 craft = i == 0 ? pieces[p].start.r : propagate_osv_time(pieces[p].start, planet, pieces[p].duration * i / steps * 86400).r;
-			Vector3 relative = subtract_vec3(craft, moon_state.r);
-			Vector3 point = add_vec3(relative, offset);
-			if(i > 0) stroke_segment_3d(camera, last, point);
-			last = point;
-			double distance = mag_vec3(relative);
-			if(distance < closest) { closest = distance; closest_point = point; closest_date = t; }
-		}
+		draw_conic_arc(camera, patch.orbit, entry_ta, -entry_ta, offset);
 		set_stroke_width(1);
-		if(current_time >= pieces[p].t0 && current_time <= pieces[p].t0 + pieces[p].duration) {
-			OSV moon_state;
-			if(moon_state_at(planet, moon, current_time, &moon_state)) {
-				Vector3 craft = propagate_osv_time(pieces[p].start, planet, (current_time - pieces[p].t0) * 86400).r;
-				draw_itinerary_spacecraft(camera, add_vec3(subtract_vec3(craft, moon_state.r), offset));
-			}
-		}
+
+		draw_marker_ring(camera, add_vec3(patch.entry.r, offset), 4, "SOI entry", 0);
+		draw_marker_ring(camera, add_vec3(patch.exit.r, offset), 4, "SOI exit", 0);
+		Orbit at_periapsis = patch.orbit;
+		at_periapsis.ta = 0;
+		double periapsis = calc_orbit_periapsis(patch.orbit);
+		int impact = periapsis < moon->radius;
+		char label[100], date_text[20];
+		date_to_string(convert_JD_date((patch.t_in + patch.t_out) / 2, get_settings_datetime_type()), date_text, 0);
+		snprintf(label, sizeof(label), "%s Pe %.0f km  %s%s", moon->name, (periapsis - moon->radius) / 1e3, date_text, impact ? "  IMPACT" : "");
+		draw_marker_ring(camera, add_vec3(osv_from_orbit(at_periapsis).r, offset), 6, label, impact);
+
+		if(current_time >= patch.t_in && current_time <= patch.t_out)
+			draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(patch.entry, moon, (current_time - patch.t_in) * 86400).r, offset));
 	}
-	if(!isfinite(closest)) return;
-	int impact = closest < moon->radius;
-	Vector2 p2d = p3d_to_p2d(camera, closest_point);
-	cairo_new_path(cr);
-	if(impact) draw_crash_symbol(cr, p2d);
-	cairo_set_source_rgb(cr, 1, 1, 1);
-	cairo_set_line_width(cr, 1.5);
-	cairo_arc(cr, p2d.x, p2d.y, 6, 0, 2 * M_PI);
-	cairo_stroke(cr);
-	char date_text[20], label[100];
-	date_to_string(convert_JD_date(closest_date, get_settings_datetime_type()), date_text, 0);
-	snprintf(label, sizeof(label), "%s closest %.0f km  %s%s", moon->name, (closest - moon->radius) / 1e3, date_text, impact ? "  IMPACT" : "");
-	set_label_font(cr, 11, impact);
-	if(impact) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
-	cairo_move_to(cr, p2d.x + 10, p2d.y - 8);
-	cairo_show_text(cr, label);
-	cairo_new_path(cr);
-	cairo_set_line_width(cr, 1);
+	if(encounters == 0) {
+		char text[100];
+		snprintf(text, sizeof(text), "No encounter with %s on this route", moon->name);
+		set_label_font(cr, 12, 0);
+		cairo_set_source_rgb(cr, 0.8, 0.8, 0.8);
+		cairo_move_to(cr, 12, 42);
+		cairo_show_text(cr, text);
+		cairo_new_path(cr);
+	}
 }
 
 void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
