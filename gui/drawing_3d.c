@@ -463,6 +463,106 @@ void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct Iti
 	}
 }
 
+// The part of the route spent inside one planet's sphere of influence, as planet-relative states.
+typedef struct {
+	OSV start;
+	double t0, duration;	// JD and days
+	int leg;
+} EncounterPiece;
+
+static int encounter_pieces(Body *planet, struct ItinStep *itin, double dep_periapsis, double arr_periapsis, EncounterPiece *pieces, int max) {
+	int count = 0, leg = 0;
+	for(struct ItinStep *step = get_first(itin); step != NULL && count + 2 <= max; step = step->next != NULL ? step->next[0] : NULL, leg++) {
+		if(step->body != planet) continue;
+		if(step->prev != NULL && step->next != NULL) {
+			PoweredFlybyResult flyby;
+			if(!calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, planet,
+				flyby_minimum_periapsis(planet), step->date, &flyby)) continue;
+			double in_days = flyby.incoming_soi_time / 86400, out_days = flyby.outgoing_soi_time / 86400;
+			pieces[count++] = (EncounterPiece){{flyby.incoming_soi_state.r, flyby.incoming_soi_state.v}, step->date - in_days, in_days, leg - 1};
+			Orbit leaving = constr_orbit_from_osv(flyby.outgoing_soi_state.r, flyby.outgoing_soi_state.v, planet);
+			leaving.ta = 0;
+			pieces[count++] = (EncounterPiece){osv_from_orbit(leaving), step->date, out_days, leg};
+			continue;
+		}
+		Orbit orbit;
+		if(step->next != NULL) {
+			Vector3 excess = subtract_vec3(step->next[0]->v_dep, step->v_body);
+			if(!hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, dep_periapsis), 0, &orbit)) continue;
+			double days = fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
+			orbit.ta = 0;
+			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date, days, leg};
+		} else if(step->prev != NULL) {
+			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
+			if(!hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), alt2radius(planet, arr_periapsis), 1, &orbit)) continue;
+			double days = fabs(calc_orbit_time_since_periapsis(orbit)) / 86400;
+			pieces[count++] = (EncounterPiece){osv_from_orbit(orbit), step->date - days, days, leg - 1};
+		}
+	}
+	return count;
+}
+
+// The route's path as seen from a moon of the flyby planet: the planet-relative trajectory minus the moon's motion.
+// The closest approach is marked, and flagged when the craft would hit the moon.
+void draw_itinerary_around_moon(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *moon, double current_time,
+		double dep_periapsis, double arr_periapsis) {
+	Body *planet = moon != NULL ? moon->orbit.cb : NULL;
+	if(itin == NULL || planet == NULL || planet == system->cb) return;
+	EncounterPiece pieces[8];
+	int count = encounter_pieces(planet, itin, dep_periapsis, arr_periapsis, pieces, 8);
+	OSV now_state;
+	if(count == 0 || !moon_state_at(planet, moon, current_time, &now_state)) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector3 offset = add_vec3(body_position(system, planet, current_time), now_state.r);
+	double closest = HUGE_VAL;
+	Vector3 closest_point = vec3(0, 0, 0);
+	double closest_date = 0;
+	const int steps = 240;
+	for(int p = 0; p < count; p++) {
+		set_leg_color(cr, pieces[p].leg, current_time > pieces[p].t0 + pieces[p].duration, 1);
+		set_stroke_width(2);
+		Vector3 last = vec3(0, 0, 0);
+		for(int i = 0; i <= steps; i++) {
+			double t = pieces[p].t0 + pieces[p].duration * i / steps;
+			OSV moon_state;
+			if(!moon_state_at(planet, moon, t, &moon_state)) break;
+			Vector3 craft = i == 0 ? pieces[p].start.r : propagate_osv_time(pieces[p].start, planet, pieces[p].duration * i / steps * 86400).r;
+			Vector3 relative = subtract_vec3(craft, moon_state.r);
+			Vector3 point = add_vec3(relative, offset);
+			if(i > 0) stroke_segment_3d(camera, last, point);
+			last = point;
+			double distance = mag_vec3(relative);
+			if(distance < closest) { closest = distance; closest_point = point; closest_date = t; }
+		}
+		set_stroke_width(1);
+		if(current_time >= pieces[p].t0 && current_time <= pieces[p].t0 + pieces[p].duration) {
+			OSV moon_state;
+			if(moon_state_at(planet, moon, current_time, &moon_state)) {
+				Vector3 craft = propagate_osv_time(pieces[p].start, planet, (current_time - pieces[p].t0) * 86400).r;
+				draw_itinerary_spacecraft(camera, add_vec3(subtract_vec3(craft, moon_state.r), offset));
+			}
+		}
+	}
+	if(!isfinite(closest)) return;
+	int impact = closest < moon->radius;
+	Vector2 p2d = p3d_to_p2d(camera, closest_point);
+	cairo_new_path(cr);
+	if(impact) draw_crash_symbol(cr, p2d);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1.5);
+	cairo_arc(cr, p2d.x, p2d.y, 6, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	char date_text[20], label[100];
+	date_to_string(convert_JD_date(closest_date, get_settings_datetime_type()), date_text, 0);
+	snprintf(label, sizeof(label), "%s closest %.0f km  %s%s", moon->name, (closest - moon->radius) / 1e3, date_text, impact ? "  IMPACT" : "");
+	set_label_font(cr, 11, impact);
+	if(impact) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
+	cairo_move_to(cr, p2d.x + 10, p2d.y - 8);
+	cairo_show_text(cr, label);
+	cairo_new_path(cr);
+	cairo_set_line_width(cr, 1);
+}
+
 void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector2 p = p3d_to_p2d(camera, body_position(system, body, jd_date));
