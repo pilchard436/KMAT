@@ -194,28 +194,24 @@ void tp_update_show_body_list() {
 	gtk_grid_attach(GTK_GRID(grid_tp_bodies), label, 0, 0, 1, 1);
 	gtk_widget_set_halign(label, GTK_ALIGN_START);
 
-	// Create labels and buttons and add them to the grid
-	for (int body_idx = 0; body_idx < tp_system->num_bodies; body_idx++) {
-		int row = body_idx+1;
-		GtkWidget *widget;
-		// Create a show body check button
-		widget = gtk_check_button_new_with_label(tp_system->bodies[body_idx]->name);
+	// Each planet is followed by its moons, which are stored in the same order.
+	int row = 1, moon_idx = 0;
+	for(int body_idx = 0; body_idx < tp_system->num_bodies; body_idx++) {
+		GtkWidget *widget = gtk_check_button_new_with_label(tp_system->bodies[body_idx]->name);
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), body_show_status_tp[body_idx]);
 		g_signal_connect(widget, "clicked", G_CALLBACK(on_body_toggle), &(body_show_status_tp[body_idx]));
 		gtk_widget_set_halign(widget, GTK_ALIGN_START);
-
-		// Set the label in the grid at the specified row and column
-		gtk_grid_attach(GTK_GRID(grid_tp_bodies), widget, 0, row, 1, 1);
-	}
-	// Moons follow all planets so the planet rows keep their index as row.
-	int row = tp_system->num_bodies + 1;
-	for(int moon_idx = 0; moon_idx < tp_num_moons; moon_idx++) {
-		GtkWidget *widget = gtk_check_button_new_with_label(tp_moons[moon_idx]->name);
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), tp_moon_show[moon_idx]);
-		g_signal_connect(widget, "clicked", G_CALLBACK(on_body_toggle), &tp_moon_show[moon_idx]);
-		gtk_widget_set_halign(widget, GTK_ALIGN_START);
-		gtk_widget_set_margin_start(widget, 16);
 		gtk_grid_attach(GTK_GRID(grid_tp_bodies), widget, 0, row++, 1, 1);
+
+		CelestSystem *moons = tp_system->bodies[body_idx]->system;
+		for(int j = 0; moons != NULL && j < moons->num_bodies && moon_idx < tp_num_moons; j++, moon_idx++) {
+			GtkWidget *moon_widget = gtk_check_button_new_with_label(tp_moons[moon_idx]->name);
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(moon_widget), tp_moon_show[moon_idx]);
+			g_signal_connect(moon_widget, "clicked", G_CALLBACK(on_body_toggle), &tp_moon_show[moon_idx]);
+			gtk_widget_set_halign(moon_widget, GTK_ALIGN_START);
+			gtk_widget_set_margin_start(moon_widget, 16);
+			gtk_grid_attach(GTK_GRID(grid_tp_bodies), moon_widget, 0, row++, 1, 1);
+		}
 	}
 	gtk_container_add (GTK_CONTAINER (vp_tp_bodies), grid_tp_bodies);
 	gtk_widget_show_all(GTK_WIDGET(vp_tp_bodies));
