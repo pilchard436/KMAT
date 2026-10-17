@@ -161,6 +161,14 @@ add_executable(KMAT
 
 add_executable(KMATUnitTests
     00_Testing/unit_tests.c
+    00_Testing/test_support.c
+    00_Testing/unit_tests_math.c
+    00_Testing/unit_tests_lambert.c
+    00_Testing/unit_tests_powered_flyby.c
+    00_Testing/unit_tests_starting_orbit.c
+    00_Testing/unit_tests_formats.c
+    00_Testing/unit_tests_porkchop.c
+    00_Testing/unit_tests_reference_defaults.c
     tools/file_io_format.c
     tools/itinerary_date_limits.c
     tools/itinerary_reference_defaults.c
@@ -177,6 +185,7 @@ target_include_directories(KMATUnitTests PRIVATE
 
 add_executable(KMATItineraryUnitTests
     00_Testing/unit_tests_itinerary.c
+    00_Testing/test_support.c
     ${KMAT_ITINERARY_SOURCES}
     ${KMAT_FILE_IO_SOURCES}
     tools/gmat_interface.c
@@ -194,6 +203,7 @@ target_include_directories(KMATItineraryUnitTests PRIVATE
 
 add_executable(KMATOptimizerUnitTests
     00_Testing/unit_tests_optimizer.c
+    00_Testing/test_support.c
     orbit_calculator/powered_route_candidates.c
     ${KMAT_ITINERARY_SOURCES}
     tools/starting_orbit.c
