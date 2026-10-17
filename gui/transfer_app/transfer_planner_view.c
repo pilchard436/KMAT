@@ -135,6 +135,9 @@ void update_tp_system_view() {
 
 	draw_body(tp_system_camera, tp_system, tp_system->cb, current_date_tp);
 
+	// Focused on a body (or a moon, which uses its planet), the trajectory is shown relative to that body.
+	Body *frame_body = tp_focus_body;
+	if(frame_body != NULL && frame_body->orbit.cb != NULL && frame_body->orbit.cb != tp_system->cb) frame_body = frame_body->orbit.cb;
 	for(int i = 0; i < tp_system->num_bodies; i++) {
 		if(!body_show_status_tp[i]) continue;
 		draw_body(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp);
@@ -147,11 +150,12 @@ void update_tp_system_view() {
 		// Body orbits are kept faint so the trajectory stands out.
 		cairo_set_source_rgba(get_camera_screen_cairo(tp_system_camera), tp_system->bodies[i]->color[0],
 			tp_system->bodies[i]->color[1], tp_system->bodies[i]->color[2], 0.4);
-		draw_orbit(tp_system_camera, orbit);
+		if(frame_body == NULL) draw_orbit(tp_system_camera, orbit);
 		draw_body_moons(tp_system_camera, tp_system, tp_system->bodies[i], current_date_tp, tp_moon_visible);
 	}
 
-	draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
+	if(frame_body != NULL) draw_itinerary_around_body(tp_system_camera, tp_system, curr_transfer_tp, frame_body, current_date_tp);
+	else draw_itinerary(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
 	draw_camera_image(tp_system_camera);

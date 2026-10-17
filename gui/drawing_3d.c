@@ -332,6 +332,124 @@ void draw_itinerary(Camera *camera, CelestSystem *system, struct ItinStep *tf, d
 	}
 }
 
+// Itinerary seen from inside one body's sphere of influence, as in the KSP map view: the conics are relative to the
+// body and drawn around its current position, so they stay put while the body moves.
+static double wrapped_true_anomaly(double ta) {
+	while(ta > M_PI) ta -= 2 * M_PI;
+	while(ta < -M_PI) ta += 2 * M_PI;
+	return ta;
+}
+
+static void draw_conic_arc(Camera *camera, Orbit orbit, double ta_from, double ta_to, Vector3 offset) {
+	const int steps = 240;
+	orbit.ta = ta_from;
+	Vector3 last = add_vec3(osv_from_orbit(orbit).r, offset);
+	for(int i = 1; i <= steps; i++) {
+		orbit.ta = ta_from + (ta_to - ta_from) * i / steps;
+		Vector3 r = add_vec3(osv_from_orbit(orbit).r, offset);
+		stroke_segment_3d(camera, last, r);
+		last = r;
+	}
+}
+
+static double sphere_of_influence_radius(Body *body) {
+	if(body->orbit.cb == NULL || !(body->orbit.cb->mu > 0)) return 0;
+	return fabs(body->orbit.a) * pow(body->mu / body->orbit.cb->mu, 0.4);
+}
+
+// Hyperbola with the given asymptotic travel direction and periapsis radius, from the edge of the sphere of influence.
+static int hyperbola_from_asymptote(Body *body, Vector3 direction, double excess_speed, double periapsis_radius, int incoming, Orbit *orbit) {
+	double soi = sphere_of_influence_radius(body);
+	if(!(soi > periapsis_radius) || !(excess_speed > 0) || !(body->mu > 0)) return 0;
+	double impact = periapsis_radius * sqrt(1 + 2 * body->mu / (periapsis_radius * excess_speed * excess_speed));
+	if(!(soi > impact)) return 0;
+	Vector3 axis = fabs(direction.z) < 0.95 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+	Vector3 normal = norm_vec3(cross_vec3(direction, axis));
+	Vector3 side = cross_vec3(normal, direction);
+	double along = sqrt(soi * soi - impact * impact);
+	Vector3 r = add_vec3(scale_vec3(direction, incoming ? -along : along), scale_vec3(side, impact));
+	Vector3 v = scale_vec3(direction, sqrt(excess_speed * excess_speed + 2 * body->mu / soi));
+	*orbit = constr_orbit_from_osv(r, v, body);
+	return isfinite(orbit->a) && isfinite(orbit->e) && isfinite(orbit->ta);
+}
+
+static void draw_periapsis_marker(Camera *camera, Vector3 r, Body *body, struct ItinStep *step, int crashes) {
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector2 p = p3d_to_p2d(camera, r);
+	cairo_new_path(cr);
+	if(crashes) draw_crash_symbol(cr, p);
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_line_width(cr, 1.5);
+	cairo_arc(cr, p.x, p.y, 6, 0, 2 * M_PI);
+	cairo_stroke(cr);
+	char date_text[20], label[80];
+	date_to_string(convert_JD_date(step->date, get_settings_datetime_type()), date_text, 0);
+	snprintf(label, sizeof(label), "%s  %s%s", body->name, date_text, crashes ? "  CRASH" : "");
+	set_label_font(cr, 11, crashes);
+	if(crashes) cairo_set_source_rgb(cr, 1, 0.45, 0.35);
+	cairo_move_to(cr, p.x + 10, p.y - 8);
+	cairo_show_text(cr, label);
+	cairo_new_path(cr);
+	cairo_set_line_width(cr, 1);
+}
+
+void draw_itinerary_around_body(Camera *camera, CelestSystem *system, struct ItinStep *itin, Body *planet, double current_time) {
+	if(itin == NULL || planet == NULL) return;
+	cairo_t *cr = get_camera_screen_cairo(camera);
+	Vector3 offset = body_position(system, planet, current_time);
+	double clearance = planet->radius + planet->atmo_alt + 50e3;
+	int leg = 0;
+	for(struct ItinStep *step = get_first(itin); step != NULL; step = step->next != NULL ? step->next[0] : NULL, leg++) {
+		if(step->body != planet) continue;
+		int past = current_time > step->date;
+		set_stroke_width(2);
+		if(step->prev != NULL && step->next != NULL) {
+			PoweredFlybyResult flyby;
+			if(!calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, planet,
+				flyby_minimum_periapsis(planet), step->date, &flyby)) { set_stroke_width(1); continue; }
+			Orbit incoming = constr_orbit_from_osv(flyby.incoming_soi_state.r, flyby.incoming_soi_state.v, planet);
+			Orbit outgoing = constr_orbit_from_osv(flyby.outgoing_soi_state.r, flyby.outgoing_soi_state.v, planet);
+			int viable = is_flyby_leg_viable(step->v_arr, step->next[0]->v_dep, step->v_body, planet, step->date);
+			set_leg_color(cr, leg - 1, past, viable);
+			draw_conic_arc(camera, incoming, wrapped_true_anomaly(incoming.ta), 0, offset);
+			set_leg_color(cr, leg, past, viable);
+			draw_conic_arc(camera, outgoing, 0, wrapped_true_anomaly(outgoing.ta), offset);
+			set_stroke_width(1);
+
+			Orbit at_periapsis = incoming;
+			at_periapsis.ta = 0;
+			draw_periapsis_marker(camera, add_vec3(osv_from_orbit(at_periapsis).r, offset), planet, step, flyby_below_min_safe(step));
+
+			double entry = step->date - flyby.incoming_soi_time / 86400, exit = step->date + flyby.outgoing_soi_time / 86400;
+			if(current_time >= entry && current_time < step->date) {
+				OSV start = {flyby.incoming_soi_state.r, flyby.incoming_soi_state.v};
+				draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(start, planet, (current_time - entry) * 86400).r, offset));
+			} else if(current_time >= step->date && current_time <= exit) {
+				Orbit leaving = outgoing;
+				leaving.ta = 0;
+				OSV start = osv_from_orbit(leaving);
+				draw_itinerary_spacecraft(camera, add_vec3(propagate_osv_time(start, planet, (current_time - step->date) * 86400).r, offset));
+			}
+			continue;
+		}
+		Orbit orbit;
+		if(step->next != NULL) {
+			Vector3 excess = subtract_vec3(step->next[0]->v_dep, step->v_body);
+			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 0, &orbit)) {
+				set_leg_color(cr, leg, past, 1);
+				draw_conic_arc(camera, orbit, 0, wrapped_true_anomaly(orbit.ta), offset);
+			}
+		} else if(step->prev != NULL) {
+			Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
+			if(hyperbola_from_asymptote(planet, norm_vec3(excess), mag_vec3(excess), clearance, 1, &orbit)) {
+				set_leg_color(cr, leg - 1, past, 1);
+				draw_conic_arc(camera, orbit, wrapped_true_anomaly(orbit.ta), 0, offset);
+			}
+		}
+		set_stroke_width(1);
+	}
+}
+
 void draw_body_label(Camera *camera, CelestSystem *system, Body *body, double jd_date) {
 	cairo_t *cr = get_camera_screen_cairo(camera);
 	Vector2 p = p3d_to_p2d(camera, body_position(system, body, jd_date));
