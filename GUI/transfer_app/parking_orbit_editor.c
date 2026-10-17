@@ -63,14 +63,64 @@ static void po_line(cairo_t *cr, Vector3 a, Vector3 b) {
 	cairo_stroke(cr);
 }
 
-static void po_draw_circle(cairo_t *cr, Vector3 axis_u, Vector3 axis_v, double radius) {
-	Vector2 last = {0, 0};
-	for(int i = 0; i <= 120; i++) {
-		double angle = 2 * M_PI * i / 120;
-		Vector3 point = add_vec3(scale_vec3(axis_u, radius * cos(angle)), scale_vec3(axis_v, radius * sin(angle)));
-		Vector2 p = p3d_to_p2d(po_camera, point);
-		if(i > 0) { cairo_move_to(cr, last.x, last.y); cairo_line_to(cr, p.x, p.y); cairo_stroke(cr); }
-		last = p;
+// True when the sphere of the body lies between the camera and the point.
+static int po_hidden_by_body(Vector3 point) {
+	Vector3 ray = subtract_vec3(point, po_camera->pos);
+	double distance = mag_vec3(ray);
+	if(!(distance > 0)) return 0;
+	Vector3 direction = scale_vec3(ray, 1 / distance);
+	double b = dot_vec3(po_camera->pos, direction);
+	double discriminant = b * b - (dot_vec3(po_camera->pos, po_camera->pos) - po_body->radius * po_body->radius);
+	if(discriminant <= 0) return 0;
+	double entry = -b - sqrt(discriminant);
+	return entry > 0 && entry < distance;
+}
+
+// Strokes in short pieces so the part of a line behind the body is left out.
+static void po_line_3d(cairo_t *cr, Vector3 a, Vector3 b, int pieces) {
+	for(int i = 0; i < pieces; i++) {
+		Vector3 from = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)i / pieces));
+		Vector3 to = add_vec3(a, scale_vec3(subtract_vec3(b, a), (double)(i + 1) / pieces));
+		if(po_hidden_by_body(scale_vec3(add_vec3(from, to), 0.5))) continue;
+		po_line(cr, from, to);
+	}
+}
+
+// The planet as a shaded disc in its color, with a latitude and longitude grid on the side facing the camera.
+static void po_draw_body(cairo_t *cr) {
+	double depth = camera_depth(po_camera, vec3(0, 0, 0));
+	if(!(depth > 0)) return;
+	Vector2 center = p3d_to_p2d(po_camera, vec3(0, 0, 0));
+	double radius = po_body->radius * camera_pixels_per_meter(po_camera, depth);
+	const double *color = po_body->color;
+	cairo_pattern_t *shade = cairo_pattern_create_radial(center.x - radius * 0.35, center.y - radius * 0.35, radius * 0.1,
+		center.x, center.y, radius);
+	cairo_pattern_add_color_stop_rgb(shade, 0, fmin(1, color[0] * 1.3 + 0.1), fmin(1, color[1] * 1.3 + 0.1), fmin(1, color[2] * 1.3 + 0.1));
+	cairo_pattern_add_color_stop_rgb(shade, 1, color[0] * 0.35, color[1] * 0.35, color[2] * 0.35);
+	cairo_arc(cr, center.x, center.y, radius, 0, 2 * M_PI);
+	cairo_set_source(cr, shade);
+	cairo_fill(cr);
+	cairo_pattern_destroy(shade);
+
+	cairo_set_line_width(cr, 0.8);
+	cairo_set_source_rgba(cr, 1, 1, 1, 0.25);
+	for(int ring = -2; ring <= 2; ring++) {
+		double latitude = ring * M_PI / 6, ring_radius = po_body->radius * cos(latitude), height = po_body->radius * sin(latitude);
+		for(int i = 0; i < 72; i++) {
+			double a0 = 2 * M_PI * i / 72, a1 = 2 * M_PI * (i + 1) / 72;
+			Vector3 p0 = vec3(ring_radius * cos(a0), ring_radius * sin(a0), height);
+			Vector3 p1 = vec3(ring_radius * cos(a1), ring_radius * sin(a1), height);
+			if(dot_vec3(p0, po_camera->pos) > 0 && dot_vec3(p1, po_camera->pos) > 0) po_line(cr, p0, p1);
+		}
+	}
+	for(int meridian = 0; meridian < 12; meridian++) {
+		double longitude = 2 * M_PI * meridian / 12;
+		for(int i = 0; i < 36; i++) {
+			double l0 = -M_PI / 2 + M_PI * i / 36, l1 = -M_PI / 2 + M_PI * (i + 1) / 36;
+			Vector3 p0 = vec3(po_body->radius * cos(l0) * cos(longitude), po_body->radius * cos(l0) * sin(longitude), po_body->radius * sin(l0));
+			Vector3 p1 = vec3(po_body->radius * cos(l1) * cos(longitude), po_body->radius * cos(l1) * sin(longitude), po_body->radius * sin(l1));
+			if(dot_vec3(p0, po_camera->pos) > 0 && dot_vec3(p1, po_camera->pos) > 0) po_line(cr, p0, p1);
+		}
 	}
 }
 
@@ -80,37 +130,33 @@ static void po_redraw(void) {
 	cairo_t *cr = get_camera_screen_cairo(po_camera);
 	cairo_set_line_width(cr, 1.2);
 
-	// Body drawn as three great circles
-	cairo_set_source_rgb(cr, 0.45, 0.45, 0.5);
-	po_draw_circle(cr, vec3(1, 0, 0), vec3(0, 1, 0), po_body->radius);
-	po_draw_circle(cr, vec3(1, 0, 0), vec3(0, 0, 1), po_body->radius);
-	po_draw_circle(cr, vec3(0, 1, 0), vec3(0, 0, 1), po_body->radius);
+	po_draw_body(cr);
+	cairo_set_line_width(cr, 1.2);
 
 	// Reference frame axes: x red, y green, z blue (the celestial system's inertial frame)
 	double axis_len = po_body->radius * 1.6;
 	if(po_orbit_ok) axis_len = fmax(axis_len, parking_orbit_apoapsis_radius(&po_orbit) * 1.1);
-	cairo_set_source_rgb(cr, 0.8, 0.3, 0.3); po_line(cr, vec3(0, 0, 0), vec3(axis_len, 0, 0));
-	cairo_set_source_rgb(cr, 0.3, 0.8, 0.3); po_line(cr, vec3(0, 0, 0), vec3(0, axis_len, 0));
-	cairo_set_source_rgb(cr, 0.3, 0.5, 0.9); po_line(cr, vec3(0, 0, 0), vec3(0, 0, axis_len));
+	cairo_set_source_rgb(cr, 0.8, 0.3, 0.3); po_line_3d(cr, vec3(0, 0, 0), vec3(axis_len, 0, 0), 64);
+	cairo_set_source_rgb(cr, 0.3, 0.8, 0.3); po_line_3d(cr, vec3(0, 0, 0), vec3(0, axis_len, 0), 64);
+	cairo_set_source_rgb(cr, 0.3, 0.5, 0.9); po_line_3d(cr, vec3(0, 0, 0), vec3(0, 0, axis_len), 64);
 
 	if(po_orbit_ok) {
 		cairo_set_source_rgb(cr, 1.0, 0.85, 0.3);
-		Vector2 last = {0, 0};
+		Vector3 last_r = vec3(0, 0, 0);
 		for(int i = 0; i <= 360; i++) {
 			OSV state;
 			if(!parking_orbit_state_at(&po_orbit, po_body, 2 * M_PI * i / 360, &state)) continue;
-			Vector2 p = p3d_to_p2d(po_camera, state.r);
-			if(i > 0) { cairo_move_to(cr, last.x, last.y); cairo_line_to(cr, p.x, p.y); cairo_stroke(cr); }
-			last = p;
+			if(i > 0 && !po_hidden_by_body(scale_vec3(add_vec3(last_r, state.r), 0.5))) po_line(cr, last_r, state.r);
+			last_r = state.r;
 		}
 		OSV periapsis, start;
-		if(parking_orbit_state_at(&po_orbit, po_body, 0, &periapsis)) {
+		if(parking_orbit_state_at(&po_orbit, po_body, 0, &periapsis) && !po_hidden_by_body(periapsis.r)) {
 			Vector2 p = p3d_to_p2d(po_camera, periapsis.r);
 			cairo_set_source_rgb(cr, 0.3, 1.0, 0.5);
 			cairo_arc(cr, p.x, p.y, 4, 0, 2 * M_PI);
 			cairo_fill(cr);
 		}
-		if(parking_orbit_state_at(&po_orbit, po_body, po_orbit.true_anomaly, &start)) {
+		if(parking_orbit_state_at(&po_orbit, po_body, po_orbit.true_anomaly, &start) && !po_hidden_by_body(start.r)) {
 			Vector2 p = p3d_to_p2d(po_camera, start.r);
 			cairo_set_source_rgb(cr, 1, 1, 1);
 			cairo_arc(cr, p.x, p.y, 4, 0, 2 * M_PI);
