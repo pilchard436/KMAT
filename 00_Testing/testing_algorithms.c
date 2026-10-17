@@ -2,6 +2,8 @@
 #include "tools/tool_funcs.h"
 #include "orbit_calculator/transfer_calc.h"
 #include "tools/file_io.h"
+#include <math.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -86,6 +88,56 @@ int has_porkchop_point_valid_itinerary(struct PorkchopPoint porkchop_point) {
 
 
 
+static double total_dv_of(struct PorkchopPoint point, struct Dv_Filter dv_filter) {
+	double satellite_dv = point.dv_dsm;
+	if(dv_filter.last_transfer_type == TF_CIRC) satellite_dv += point.dv_arr_circ;
+	else if(dv_filter.last_transfer_type == TF_CAPTURE) satellite_dv += point.dv_arr_cap;
+	return point.dv_dep + satellite_dv + point.dv_flyby;
+}
+
+static uint64_t body_sequence_signature(struct ItinStep *arrival) {
+	uint64_t signature = 1469598103934665603ULL;
+	for(struct ItinStep *step = arrival; step != NULL; step = step->prev) {
+		signature = (signature ^ (uint64_t)(uintptr_t)step->body) * 1099511628211ULL;
+		signature ^= signature >> 29;
+	}
+	return signature;
+}
+
+static int count_distinct_body_sequences(struct PorkchopPoint *points, int count) {
+	uint64_t *seen = malloc((size_t)(count > 0 ? count : 1) * sizeof(*seen));
+	int distinct = 0;
+	for(int i = 0; seen != NULL && i < count; i++) {
+		uint64_t signature = body_sequence_signature(points[i].arrival);
+		int known = 0;
+		for(int j = 0; j < distinct && !known; j++) known = seen[j] == signature;
+		if(!known) seen[distinct++] = signature;
+	}
+	free(seen);
+	return distinct;
+}
+
+// The best route must not get worse than the recorded reference, and the result must keep offering alternatives.
+static enum TestResult check_result_quality(struct PorkchopPoint *points, int count, struct Dv_Filter dv_filter,
+		double reference_best_dv, int min_distinct_sequences) {
+	double best = HUGE_VAL;
+	for(int i = 0; i < count; i++) {
+		double total = total_dv_of(points[i], dv_filter);
+		if(total < best) best = total;
+	}
+	int distinct = count_distinct_body_sequences(points, count);
+	printf("Best total dv: %.3f m/s | Distinct body sequences: %d\n", best, distinct);
+	if(reference_best_dv > 0 && best > reference_best_dv * 1.01) {
+		printf("Best total dv %.3f m/s is more than 1 percent above the reference %.3f m/s\n", best, reference_best_dv);
+		return TEST_FAIL_BEST_DV_REGRESSION;
+	}
+	if(min_distinct_sequences > 0 && distinct < min_distinct_sequences) {
+		printf("Only %d distinct body sequences, expected at least %d\n", distinct, min_distinct_sequences);
+		return TEST_FAIL_TOO_FEW_DISTINCT_ROUTES;
+	}
+	return TEST_PASSED;
+}
+
 // TEST METHODS -----------------------------------------------------------------------------------------------------------------------------------
 
 
@@ -158,6 +210,9 @@ enum TestResult test_itinerary_calculator(struct Itin_To_Target_Calc_Test test_d
 		if(!is_porkchop_point_inside_dv_filter(porkchop_points[i], dv_filter)) {test_result = TEST_FAIL_ITINERARY_NOT_INSIDE_DV_FILTER; break;}
 		if(!has_porkchop_point_valid_itinerary(porkchop_points[i])) {test_result = TEST_FAIL_INVALID_ITINERARY; break;}
 	}
+
+	if(test_result == TEST_PASSED) test_result = check_result_quality(porkchop_points, num_itins, dv_filter,
+		test_data.reference_best_dv, test_data.min_distinct_sequences);
 
 	// FREE
 	free(porkchop_points);
@@ -241,6 +296,9 @@ enum TestResult test_sequence_calculator(struct Itin_Spec_Seq_Calc_Test test_dat
 		if(!has_porkchop_point_valid_itinerary(porkchop_points[i])) {test_result = TEST_FAIL_INVALID_ITINERARY; break;}
 	}
 
+	if(test_result == TEST_PASSED) test_result = check_result_quality(porkchop_points, num_itins, dv_filter,
+		test_data.reference_best_dv, test_data.min_distinct_sequences);
+
 	// FREE
 	free(porkchop_points);
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
@@ -256,6 +314,48 @@ enum TestResult test_sequence_calculator(struct Itin_Spec_Seq_Calc_Test test_dat
 	printf("SUCCESS\n");
 
 	return TEST_PASSED;
+}
+
+int create_file_test_fixtures(const char *directory) {
+	CelestSystem *system = get_system_by_name("Stock System");
+	Body *departure_body = system != NULL ? get_body_by_name("Kerbin", system) : NULL;
+	Body *arrival_body = system != NULL ? get_body_by_name("Duna", system) : NULL;
+	if(departure_body == NULL || arrival_body == NULL) {
+		printf("File test fixtures need Kerbin and Duna in the Stock System\n");
+		return 0;
+	}
+	create_directory_if_not_exists(directory);
+
+	Body *flyby_bodies[] = {departure_body, arrival_body};
+	struct Itin_Calc_Data calc_data = {
+		.jd_min_dep = convert_date_JD((struct Datetime) {.y = 2, .d = 1, .date_type = DATE_KERBAL}),
+		.jd_max_dep = convert_date_JD((struct Datetime) {.y = 2, .d = 41, .date_type = DATE_KERBAL}),
+		.jd_max_arr = convert_date_JD((struct Datetime) {.y = 100, .d = 1, .date_type = DATE_KERBAL}),
+		.max_duration = 250,
+		.dv_filter = {.max_depdv = 1500, .max_satdv = 1e9, .max_totdv = 1e9,
+			.dep_periapsis = departure_body->atmo_alt + 50e3, .arr_periapsis = arrival_body->atmo_alt + 50e3,
+			.last_transfer_type = TF_FLYBY}
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body, .arr_body = arrival_body,
+		.flyby_bodies = flyby_bodies, .num_flyby_bodies = 2
+	};
+
+	struct Itin_Calc_Results results = search_for_itineraries(calc_data);
+	int created = 0;
+	if(results.num_itins > 0) {
+		char itins_path[260], itin_path[260];
+		snprintf(itins_path, sizeof(itins_path), "%sfixture.itins", directory);
+		snprintf(itin_path, sizeof(itin_path), "%sfixture.itin", directory);
+		store_itineraries_in_bfile(results.departures, results.num_nodes, results.num_deps, results.num_itins,
+			calc_data, system, itins_path, get_current_bin_file_type());
+		store_single_itinerary_in_bfile(results.departures[0], system, itin_path);
+		created = 1;
+	} else printf("The file test fixture search found no itineraries\n");
+
+	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
+	free(results.departures);
+	return created;
 }
 
 enum TestResult test_itins_file(char *filepath) {
@@ -317,7 +417,7 @@ enum TestResult test_itin_file(char *filepath) {
 	printf("\n");
 
 	enum TestResult test_result = TEST_PASSED;
-	struct PorkchopPoint porkchop_point = create_porkchop_point(arrival, get_first(ptr)->body->atmo_alt+50e3, get_last(ptr)->body->atmo_alt+50e3);
+	struct PorkchopPoint porkchop_point = create_porkchop_point(arrival, get_first(arrival)->body->atmo_alt+50e3, arrival->body->atmo_alt+50e3);
 
 	printf("DV: (%f | %f | %f | %f)\nDeparture date: ", porkchop_point.dv_dep, porkchop_point.dv_dsm, porkchop_point.dv_arr_cap, porkchop_point.dv_arr_circ);
 	print_date(convert_JD_date(porkchop_point.dep_date, DATE_ISO), 0); printf("  |  "); print_date(convert_JD_date(porkchop_point.dep_date, DATE_KERBAL), 1);

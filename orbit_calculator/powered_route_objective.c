@@ -307,6 +307,10 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 		goto cleanup;
 	}
 
+	// Checked once on the converged flybys; the iteration above changes them too often to check each time.
+	for(size_t i = 1; i + 1 < candidate->num_steps; i++)
+		if(flyby_blocked_by_moon(candidate->bodies[i], &flybys[i], times[i])) goto cleanup;
+
 	Body *departure_body = candidate->bodies[0];
 	Vector3 departure_vinf = subtract_vec3(legs[0].v0, states[0].v);
 	double departure_dv;

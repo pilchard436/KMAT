@@ -122,7 +122,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 			Vector3 v_body = step->v_body;
 			PoweredFlybyResult flyby;
 			double min_periapsis = flyby_minimum_periapsis(step->body);
-			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			int valid_flyby = calculate_flyby_with_moons(v_arr, v_dep, v_body, step->body, min_periapsis, step->date, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
 			sprintf(string, "%s | Periapsis: %.2fkm | Burn: %.2f m/s\n", string,
@@ -208,7 +208,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			double incl = get_flyby_inclination(v_arr, v_dep, v_body, get_body_equatorial_plane(step->body));
 			PoweredFlybyResult flyby;
 			double min_periapsis = flyby_minimum_periapsis(step->body);
-			int valid_flyby = calculate_powered_flyby(v_arr, v_dep, v_body, step->body, min_periapsis, &flyby);
+			int valid_flyby = calculate_flyby_with_moons(v_arr, v_dep, v_body, step->body, min_periapsis, step->date, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
 			Vector3 burn_normal = valid_flyby ?
@@ -303,8 +303,8 @@ void itinerary_step_parameters_to_string(char *s_labels, char *s_values, enum Da
 											  step->v_body, step->body, 0, HYP_FLYBY);
 			// The unpowered periapsis can lie below the surface; the route actually flies the powered one.
 			PoweredFlybyResult powered_flyby;
-			int powered_valid = calculate_powered_flyby(v_arr, v_dep, v_body, step->body,
-				flyby_minimum_periapsis(step->body), &powered_flyby);
+			int powered_valid = calculate_flyby_with_moons(v_arr, v_dep, v_body, step->body,
+				flyby_minimum_periapsis(step->body), step->date, &powered_flyby);
 			double periapsis_radius = powered_valid ? powered_flyby.periapsis_radius : hyp_params.rp;
 			double flyby_burn = powered_valid ? powered_flyby.burn_delta_v : 0;
 			double dt_in_days = step->date - get_first(step)->date;

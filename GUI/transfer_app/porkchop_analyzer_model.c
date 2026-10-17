@@ -26,3 +26,14 @@ void mark_itinerary_bodies_visible(int *visible, size_t num_bodies, const struct
 		selected_step = selected_step->prev;
 	}
 }
+
+int set_porkchop_groups_visibility(struct PorkchopGroup *groups, int num_groups, int show) {
+        if(groups == NULL) return 0;
+        int changed = 0;
+        for(int group_idx = 0; group_idx < num_groups; group_idx++) {
+                if(!groups[group_idx].has_itin_inside_filter) continue;
+                changed += groups[group_idx].show_group != show;
+                groups[group_idx].show_group = show;
+        }
+        return changed;
+}

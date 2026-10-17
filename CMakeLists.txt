@@ -43,6 +43,7 @@ set(KMAT_ITINERARY_SOURCES
     orbit_calculator/itinerary_tree.c
     orbit_calculator/itinerary_text.c
     orbit_calculator/flyby_policy.c
+    orbit_calculator/moon_flyby.c
     orbit_calculator/flyby_search.c
     orbit_calculator/leg_variants.c
     orbit_calculator/resonant_flybys.c
@@ -183,6 +184,7 @@ target_include_directories(KMATUnitTests PRIVATE
 
 add_executable(KMATItineraryUnitTests
     00_Testing/unit_tests_itinerary.c
+    00_Testing/unit_tests_moon_flyby.c
     00_Testing/test_support.c
     ${KMAT_ITINERARY_SOURCES}
     ${KMAT_FILE_IO_SOURCES}

@@ -118,7 +118,7 @@ static void check_flyby_policy(void) {
 	check_near("shortfall is the depth below the surface", flyby_periapsis_shortfall(flyby), expected_shortfall, 1e-3);
 	check_near("a departure step has no shortfall", flyby_periapsis_shortfall(departure), 0, 0);
 	check_near("a missing step has no shortfall", flyby_periapsis_shortfall(NULL), 0, 0);
-	check_true("the powered flyby can be flown at the minimum periapsis", flyby_is_viable(flyby->v_arr, arrival->v_dep, body_velocity, &venus));
+	check_true("the powered flyby can be flown at the minimum periapsis", flyby_is_viable(flyby->v_arr, arrival->v_dep, body_velocity, &venus, flyby->date));
 	check_true("the powered flyby stays above the safe radius", !flyby_below_min_safe(flyby));
 	check_true("no flyby of the route is below the safe radius", count_flybys_below_min_safe(arrival) == 0);
 	double largest = 0;
@@ -379,6 +379,8 @@ static void check_search_rejections(void) {
 	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
 }
 
+void check_moon_flybys(void);
+
 int main(void) {
 	check_itinerary_tree();
 	check_flyby_policy();
@@ -388,5 +390,6 @@ int main(void) {
 	check_itinerary_files();
 	check_search_rejections();
 	check_minimum_leg();
+	check_moon_flybys();
 	return finish_tests("KMAT itinerary unit checks");
 }

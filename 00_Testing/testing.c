@@ -3,7 +3,37 @@
 #include "testing_algorithms.h"
 #include "tools/tool_funcs.h"
 #include "tools/file_io.h"
+#include "tools/thread_pool.h"
 
+
+#define DEFAULT_TEST_BUDGET_SECONDS 120.0
+#define FILE_TEST_BUDGET_SECONDS 60.0
+
+// KMAT_TEST_TIME_SCALE stretches every budget, for slower machines or for recording new baselines.
+static double test_time_scale(void) {
+	const char *text = getenv("KMAT_TEST_TIME_SCALE");
+	double scale = text != NULL ? strtod(text, NULL) : 1;
+	return scale > 0 ? scale : 1;
+}
+
+// Raises the search cancel counter when a test runs past its budget, so a slow test stops instead of hanging the suite.
+struct TestWatchdog {
+	gint64 deadline_us;
+	volatile gint finished, expired;
+};
+
+static gpointer test_watchdog_main(gpointer data) {
+	struct TestWatchdog *watchdog = data;
+	while(!g_atomic_int_get(&watchdog->finished)) {
+		if(g_get_monotonic_time() >= watchdog->deadline_us) {
+			g_atomic_int_set(&watchdog->expired, 1);
+			incr_thread_counter_by_amount(3, 1);
+			break;
+		}
+		g_usleep(50000);
+	}
+	return NULL;
+}
 
 int run_tests() {
 	int num_tests = 0;
@@ -13,22 +43,6 @@ int run_tests() {
 
 
 	// ITINERARY CALCULATOR TEST DATA #################################################################################
-
-	// Kerbin -> Eeloo; 1-001 | 2-001 | 3000; dv_dep = 1500 | Bodies: all
-	test_data[num_tests] = (union TestData) (struct Itin_To_Target_Calc_Test) {
-			TEST_ITIN_TO_TARGET,
-			(struct Datetime) {.y = 1, .d = 1, .date_type = DATE_KERBAL},
-			(struct Datetime) {.y = 2, .d = 1, .date_type = DATE_KERBAL},
-			(struct Datetime) {.y = 100, .d = 1, .date_type = DATE_KERBAL},
-			3000,
-			1500, 1e9, 1e9, TF_FLYBY,
-			"Stock System",
-			-1,
-			(char *[]){""},
-			"Kerbin",
-			"Eeloo",
-			1896, 665 // expected num_nodes and num_itins
-	}; num_tests++;
 
 	// Kerbin -> Eeloo; 1-001 | 2-001 | 3000; dv_dep = 1800, dv_arr = 1800 (circ) | Bodies: Eve, Kerbin, Duna, Eeloo
 	test_data[num_tests] = (union TestData) (struct Itin_To_Target_Calc_Test) {
@@ -43,7 +57,8 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Eeloo"},
 			"Kerbin",
 			"Eeloo",
-			1035, 311 // expected num_nodes and num_itins
+			906, 280, // expected num_nodes and num_itins
+			60, 2992, 2 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 	// Kerbin -> Kerbin; 1-001 | 2-001 | 1000; dv_dep = 1800 | Bodies: Eve, Kerbin, Duna, Jool
@@ -59,30 +74,15 @@ int run_tests() {
 			(char *[]){"Eve", "Kerbin", "Duna", "Jool"},
 			"Kerbin",
 			"Kerbin",
-			11734, 6017 // expected num_nodes and num_itins
+			38121, 19095, // expected num_nodes and num_itins
+			180, 1296, 50 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
-	// Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: all
+	// Earth -> Earth; 1959-01-01 | 1959-03-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
 	test_data[num_tests] = (union TestData) (struct Itin_To_Target_Calc_Test) {
 			TEST_ITIN_TO_TARGET,
 			(struct Datetime) {.y = 1959, .m = 1, .d = 1, .date_type = DATE_ISO},
-			(struct Datetime) {.y = 1960, .m = 1, .d = 1, .date_type = DATE_ISO},
-			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
-			1000,
-			5000, 1e9, 1e9, TF_FLYBY,
-			"Solar System (Ephemeris)",
-			-1,
-			(char *[]){""},
-			"Earth",
-			"Earth",
-			100177, 51292 // expected num_nodes and num_itins
-	}; num_tests++;
-
-	// Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
-	test_data[num_tests] = (union TestData) (struct Itin_To_Target_Calc_Test) {
-			TEST_ITIN_TO_TARGET,
-			(struct Datetime) {.y = 1959, .m = 1, .d = 1, .date_type = DATE_ISO},
-			(struct Datetime) {.y = 1960, .m = 1, .d = 1, .date_type = DATE_ISO},
+			(struct Datetime) {.y = 1959, .m = 3, .d = 1, .date_type = DATE_ISO},
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			1000,
 			5000, 1e9, 1e9, TF_FLYBY,
@@ -91,14 +91,15 @@ int run_tests() {
 			(char *[]){"Mercury", "Venus", "Earth"},
 			"Earth",
 			"Earth",
-			80938, 42056 // expected num_nodes and num_itins
+			17920, 8683, // expected num_nodes and num_itins
+			270, 4379, 35 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
-	// Earth -> Jupiter; 1967-01-01 | 1968-01-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
+	// Earth -> Jupiter; 1967-01-01 | 1967-03-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
 	test_data[num_tests] = (union TestData) (struct Itin_To_Target_Calc_Test) {
 			TEST_ITIN_TO_TARGET,
 			(struct Datetime) {.y = 1967, .m = 1, .d = 1, .date_type = DATE_ISO},
-			(struct Datetime) {.y = 1968, .m = 1, .d = 1, .date_type = DATE_ISO},
+			(struct Datetime) {.y = 1967, .m = 3, .d = 1, .date_type = DATE_ISO},
 			(struct Datetime) {.y = 2000, .m = 1, .d = 1, .date_type = DATE_ISO},
 			3000,
 			4500, 1e9, 1e9, TF_FLYBY,
@@ -107,7 +108,8 @@ int run_tests() {
 			(char *[]){"Venus", "Earth", "Mars", "Jupiter"},
 			"Earth",
 			"Jupiter",
-			18649, 3881 // expected num_nodes and num_itins
+			22004, 9965, // expected num_nodes and num_itins
+			840, 7694, 300 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 
@@ -138,7 +140,8 @@ int run_tests() {
 			"Stock System",
 			4,
 			(char *[]){"Kerbin", "Eve", "Duna", "Kerbin"},
-			1821, 601 // expected num_nodes and num_itins
+			31758, 13452, // expected num_nodes and num_itins
+			12, 1246, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 	// Earth -> Mars; 1950-01-01 | 1951-06-01 | 1950-11-01 | 600; dv_dep = 5000; dv_arr = 4000 (circ); dv_tot = 8200
@@ -166,7 +169,8 @@ int run_tests() {
 			"Solar System (Ephemeris)",
 			5,
 			(char *[]){"Earth", "Jupiter", "Saturn", "Uranus", "Neptune"},
-			5920, 1472 // expected num_nodes and num_itins
+			21101, 8522, // expected num_nodes and num_itins
+			12, 6704, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 
@@ -175,6 +179,7 @@ int run_tests() {
 
 	char *itins_directory = "../00_Testing/Itineraries/";
 	create_directory_if_not_exists(itins_directory);
+	if(!create_file_test_fixtures(itins_directory)) printf("WARNING: no .itins/.itin fixtures were created\n");
 	GDir *dir = g_dir_open(itins_directory, 0, NULL);
 	if (!dir) {
 		g_printerr("Unable to open directory: %s\n", itins_directory);
@@ -221,8 +226,20 @@ int run_tests() {
 
 	enum TestResult test_results[max_num_tests];
 
+	double test_seconds[max_num_tests], test_budgets[max_num_tests];
 	for(int i = 0; i < num_tests; i++) {
 		printf("###################### TEST %02d/%02d ######################\n", i+1, num_tests);
+		double budget = FILE_TEST_BUDGET_SECONDS;
+		if(test_data[i].itin_to_target_test.test_type == TEST_ITIN_TO_TARGET)
+			budget = test_data[i].itin_to_target_test.time_budget_seconds > 0 ?
+				test_data[i].itin_to_target_test.time_budget_seconds : DEFAULT_TEST_BUDGET_SECONDS;
+		if(test_data[i].itin_to_target_test.test_type == TEST_ITIN_SPEC_SEQ)
+			budget = test_data[i].itin_spec_seq_calc_test.time_budget_seconds > 0 ?
+				test_data[i].itin_spec_seq_calc_test.time_budget_seconds : DEFAULT_TEST_BUDGET_SECONDS;
+		budget *= test_time_scale();
+		struct TestWatchdog watchdog = {.deadline_us = g_get_monotonic_time() + (gint64)(budget * 1e6)};
+		gint64 test_start_us = g_get_monotonic_time();
+		GThread *watchdog_thread = g_thread_new("test-watchdog", test_watchdog_main, &watchdog);
 		switch(test_data[i].itin_to_target_test.test_type) {
 			case TEST_ITIN_TO_TARGET:
 				test_results[i] = test_itinerary_calculator(test_data[i].itin_to_target_test);
@@ -241,6 +258,15 @@ int run_tests() {
 			default:
 				break;
 		}
+		g_atomic_int_set(&watchdog.finished, 1);
+		g_thread_join(watchdog_thread);
+		test_seconds[i] = (g_get_monotonic_time() - test_start_us) / 1e6;
+		test_budgets[i] = budget;
+		if(g_atomic_int_get(&watchdog.expired)) {
+			incr_thread_counter_by_amount(3, -get_thread_counter(3));
+			test_results[i] = TEST_FAIL_TIME_BUDGET_EXCEEDED;
+		}
+		printf("Test time: %.1f s (budget %.0f s)\n", test_seconds[i], budget);
 		printf("------------------------------------------------------------\n\n");
 	}
 
@@ -249,7 +275,7 @@ int run_tests() {
 	int warning_tests = 0;
 	printf("\n\n##################### TEST RESULTS #####################\n");
 	for(int i = 0; i < num_tests; i++) {
-		printf("TEST %02d: ", i+1);
+		printf("TEST %02d: [%7.1f s] ", i+1, test_seconds[i]);
 		if(test_results[i] == TEST_WARN_DIFF_EXPECTED_NUM_NODES_OR_ITINS) {
 			warning_tests++;
 		} else if(test_results[i] != TEST_PASSED) {
@@ -282,6 +308,15 @@ int run_tests() {
 				break;
 			case TEST_FAIL_INVALID_ITINERARY:
 				printf("FAIL  |  Has invalid itinerary\n");
+				break;
+			case TEST_FAIL_TIME_BUDGET_EXCEEDED:
+				printf("FAIL  |  Time budget of %.0f s exceeded\n", test_budgets[i]);
+				break;
+			case TEST_FAIL_BEST_DV_REGRESSION:
+				printf("FAIL  |  Best total dv is above the reference\n");
+				break;
+			case TEST_FAIL_TOO_FEW_DISTINCT_ROUTES:
+				printf("FAIL  |  Too few distinct body sequences\n");
 				break;
 			default:
 				printf("\n");

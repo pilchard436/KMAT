@@ -142,10 +142,10 @@ G_MODULE_EXPORT void on_change_itin_group_visibility(GtkWidget* widget, gpointer
 }
 
 static void set_all_visible_groups_shown(int show) {
+	set_porkchop_groups_visibility(pa_groups, pa_num_groups, show);
 	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) {
 		struct PorkchopGroup *group = &pa_groups[group_idx];
 		if(!group->has_itin_inside_filter) continue;
-		group->show_group = show;
 		// set_active emits "toggled", not "clicked", so this does not re-enter the handler.
 		if(group->cb_pa_show_group != NULL)
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(group->cb_pa_show_group), show);

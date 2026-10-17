@@ -1,4 +1,5 @@
 #include "flyby_policy.h"
+#include "moon_flyby.h"
 #include <math.h>
 
 #define DEFAULT_MINIMUM_LEG_DAYS 10.0
@@ -18,10 +19,36 @@ double flyby_minimum_periapsis(Body *body) {
 	return unrestricted_flyby_periapsis ? body->radius * 0.1 : body->radius + body->atmo_alt + 1e4;
 }
 
+int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
+		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result) {
+	if(!calculate_powered_flyby(v_arr, v_dep, v_body, body, minimum_periapsis, result)) return 0;
+	MoonFlybyEffect effect;
+	if(!analyze_moon_flyby(body, result, flyby_jd, unrestricted_flyby_periapsis, &effect)) return 1;
+	// The planner relaxes the limits to show what is wrong, so it keeps flybys that hit a moon.
+	if(effect.hits_moon && !unrestricted_flyby_periapsis) return 0;
+	if(effect.integrated) result->burn_delta_v += mag_vec3(effect.velocity_error);
+	return 1;
+}
+
+int flyby_blocked_by_moon(Body *body, const PoweredFlybyResult *flyby, double flyby_jd) {
+	MoonFlybyEffect effect;
+	return !unrestricted_flyby_periapsis && analyze_moon_flyby(body, flyby, flyby_jd, 0, &effect) && effect.hits_moon;
+}
+
+Body * flyby_moon_hit(struct ItinStep *step) {
+	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return NULL;
+	PoweredFlybyResult flyby;
+	if(!calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body,
+		flyby_minimum_periapsis(step->body), &flyby)) return NULL;
+	MoonFlybyEffect effect;
+	return analyze_moon_flyby(step->body, &flyby, step->date, 0, &effect) && effect.hits_moon ? effect.moon_hit : NULL;
+}
+
 // Drawing asks about the same flybys every animation frame, and each solve scans many periapsis radii.
 typedef struct {
 	Vector3 v_arr, v_dep, v_body;
 	Body *body;
+	double jd;
 	int unrestricted, feasible;
 	double periapsis;
 } FlybyCacheEntry;
@@ -30,18 +57,18 @@ static _Thread_local int flyby_cache_next;
 
 static int same_vec(Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
 
-static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double *periapsis) {
+static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double jd, double *periapsis) {
 	for(int i = 0; i < 32; i++) {
 		FlybyCacheEntry *entry = &flyby_cache[i];
-		if(entry->body == body && entry->unrestricted == unrestricted_flyby_periapsis &&
+		if(entry->body == body && entry->jd == jd && entry->unrestricted == unrestricted_flyby_periapsis &&
 				same_vec(entry->v_arr, v_arr) && same_vec(entry->v_dep, v_dep) && same_vec(entry->v_body, v_body)) {
 			if(periapsis != NULL) *periapsis = entry->periapsis;
 			return entry->feasible;
 		}
 	}
 	PoweredFlybyResult flyby;
-	int feasible = calculate_powered_flyby(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), &flyby);
-	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, unrestricted_flyby_periapsis,
+	int feasible = calculate_flyby_with_moons(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), jd, &flyby);
+	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, jd, unrestricted_flyby_periapsis,
 		feasible, feasible ? flyby.periapsis_radius : 0};
 	flyby_cache_next = (flyby_cache_next + 1) % 32;
 	if(periapsis != NULL) *periapsis = feasible ? flyby.periapsis_radius : 0;
@@ -60,13 +87,13 @@ int flyby_below_min_safe(struct ItinStep *step) {
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->next == NULL) return 0;
 	double safe_radius = step->body->radius + step->body->atmo_alt + 1e4;
 	double flown;
-	if(!cached_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, &flown))
+	if(!cached_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, step->date, &flown))
 		flown = get_flyby_periapsis(step->v_arr, step->next[0]->v_dep, step->v_body, step->body);
-	return isfinite(flown) && flown < safe_radius - 1;
+	return (isfinite(flown) && flown < safe_radius - 1) || flyby_moon_hit(step) != NULL;
 }
 
-int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body) {
-	return cached_powered_flyby(v_arr, v_dep, v_body, body, NULL);
+int flyby_is_viable(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double jd) {
+	return cached_powered_flyby(v_arr, v_dep, v_body, body, jd, NULL);
 }
 
 int count_flybys_below_min_safe(struct ItinStep *step_in_route) {

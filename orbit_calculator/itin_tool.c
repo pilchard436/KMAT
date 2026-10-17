@@ -47,6 +47,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
+			// Called for every search node, so moon hits are left to the route scoring.
 			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
 				flyby->body, minimum_periapsis, &flyby_result))
 				pp.dv_flyby += flyby_result.burn_delta_v;
@@ -262,7 +263,7 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 	}
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = flyby_minimum_periapsis(step->body);
-	if(calculate_powered_flyby(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, &flyby))
+	if(calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, step->date, &flyby))
 		return flyby.burn_delta_v;
 	return HUGE_VAL;
 }

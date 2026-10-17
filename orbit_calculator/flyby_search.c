@@ -226,6 +226,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 			if(fabs(diff_vinf) < 1) {
 				PoweredFlybyResult flyby_result;
 				double minimum_periapsis = flyby_minimum_periapsis(tf->body);
+				// Moon hits are rejected when the finished route is scored, not for every candidate.
 				if(calculate_powered_flyby(tf->v_arr, new_transfer.v0, tf->v_body,
 					tf->body, minimum_periapsis, &flyby_result)) {
 					new_steps[counter] = (struct ItinStep*) malloc(sizeof(struct ItinStep));

@@ -55,7 +55,7 @@ void draw_trajectory_2d(cairo_t *cr, Vector2 center, double scale, struct ItinSt
 	double dt = (tf->date-prev->date)*24*60*60;
 
 	if(prev->prev != NULL && prev->body != NULL && tf->prev->body != NULL && tf->body != NULL) {
-		if(!flyby_is_viable(tf->prev->v_arr, tf->v_dep, tf->prev->v_body, tf->body)) cairo_set_source_rgb(cr, 1, 0, 0);
+		if(!flyby_is_viable(tf->prev->v_arr, tf->v_dep, tf->prev->v_body, tf->body, tf->prev->date)) cairo_set_source_rgb(cr, 1, 0, 0);
 	}
 
 	int steps = 1000;

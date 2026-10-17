@@ -17,6 +17,9 @@ enum TestResult {
 	TEST_FAIL_ITINERARY_HAS_INVALID_CELESTIAL_BODY,
 	TEST_FAIL_ITINERARY_OUTSIDE_TIME_CONSTRAINTS,
 	TEST_FAIL_INVALID_ITINERARY,
+	TEST_FAIL_TIME_BUDGET_EXCEEDED,
+	TEST_FAIL_BEST_DV_REGRESSION,
+	TEST_FAIL_TOO_FEW_DISTINCT_ROUTES,
 };
 
 union TestData { ;
@@ -32,6 +35,10 @@ union TestData { ;
 		char *dep_body_name;
 		char *arr_body_name;
 		int expected_num_nodes, expected_num_itins;
+		// Optional (0 = default or skipped): seconds the test may take, best total delta-v it must not exceed by
+		// more than 1 percent, and the number of different body sequences the result must contain.
+		double time_budget_seconds, reference_best_dv;
+		int min_distinct_sequences;
 	} itin_to_target_test;
 
 	struct Itin_Spec_Seq_Calc_Test {
@@ -44,6 +51,10 @@ union TestData { ;
 		int num_steps;
 		char **body_names;
 		int expected_num_nodes, expected_num_itins;
+		// Optional (0 = default or skipped): seconds the test may take, best total delta-v it must not exceed by
+		// more than 1 percent, and the number of different body sequences the result must contain.
+		double time_budget_seconds, reference_best_dv;
+		int min_distinct_sequences;
 	} itin_spec_seq_calc_test;
 
 	struct Itins_File_Test {
@@ -60,6 +71,10 @@ union TestData { ;
 enum TestResult test_itinerary_calculator(struct Itin_To_Target_Calc_Test test_data);
 
 enum TestResult test_sequence_calculator(struct Itin_Spec_Seq_Calc_Test test_data);
+
+// Runs a small search and stores its result as one .itins and one .itin file in the directory, so the file tests
+// always have something to load. Returns 1 on success.
+int create_file_test_fixtures(const char *directory);
 
 enum TestResult test_itins_file(char *filepath);
 

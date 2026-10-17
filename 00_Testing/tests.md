@@ -6,13 +6,11 @@
 - has only valid itineraries (Periapsides etc.)
 ## Tests:
 ### Stock:
-- 1: Kerbin -> Eeloo; 1-001 | 2-001 | 3000; dv_dep = 1500 | Bodies: all 
 - 2: Kerbin -> Eeloo; 1-001 | 2-001 | 3000; dv_dep = 1800, dv_arr = 1800 (circ) | Bodies: Eve, Kerbin, Duna, Eeloo
 - 3: Kerbin -> Kerbin; 1-001 | 2-001 | 1000; dv_dep = 1800 | Bodies: Eve, Kerbin, Duna, Jool
 ### RSS (Ephem)
-- 4: Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: all
-- 5: Earth -> Earth; 1959-01-01 | 1960-01-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
-- 6: Earth -> Jupiter; 1967-01-01 | 1968-01-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
+- 5: Earth -> Earth; 1959-01-01 | 1959-03-01 | 1000; dv_dep = 5000 | Bodies: Mercury, Venus, Earth
+- 6: Earth -> Jupiter; 1967-01-01 | 1967-03-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
 
 # Sequence Calculator:
 ## Passes if:
@@ -26,6 +24,20 @@
 ### RSS (Ephem)
 - 3: Earth -> Mars; 1950-01-01 | 1950-06-01 | 1950-11-01 | 600; dv_dep = 5000; dv_arr = 4000 (circ); dv_tot = 8200
 - 4: Earth -> Jupiter -> Saturn -> Uranus -> Neptune; 1977-01-01 | 1978-01-01 | 8000; dv_dep = 7200
+
+# Budgets and baselines (`KMAT --test`)
+Each calculation test has a time budget, a reference best total dv and a minimum number of distinct body sequences. A run past its budget is cancelled and fails, a best dv more than 1% above the reference fails, and fewer sequences than the minimum fail. `KMAT_TEST_TIME_SCALE` multiplies every budget (use a large value when recording new baselines).
+
+| Test | Baseline time | Budget | Reference best dv | Min. sequences |
+|---|---|---|---|---|
+| Itinerary 1 (Kerbin -> Eeloo) | 22 s | 60 s | 2992 m/s | 2 |
+| Itinerary 2 (Kerbin -> Kerbin) | 56 s | 180 s | 1296 m/s | 50 |
+| Itinerary 3 (Earth -> Earth) | 88 s | 270 s | 4379 m/s | 35 |
+| Itinerary 4 (Earth -> Jupiter) | 278 s | 840 s | 7694 m/s | 300 |
+| Sequence 2 (Kerbin -> Eve -> Duna -> Kerbin) | 2 s | 12 s | 1246 m/s | 1 |
+| Sequence 4 (Earth -> ... -> Neptune) | 2 s | 12 s | 6704 m/s | 1 |
+
+The `.itins`/`.itin` file tests load fixtures that the suite generates (`00_Testing/Itineraries/fixture.itins` and `fixture.itin`, Kerbin -> Duna).
 
 # Porkchop Analyzer:
 ## Passes if:
