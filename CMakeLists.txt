@@ -68,6 +68,8 @@ add_executable(KMAT
     launch_calculator/lp_parameters.c
     launch_calculator/lp_parameters.h
     orbit_calculator/transfer_calc.c
+    orbit_calculator/transfer_search_worker.c
+    orbit_calculator/transfer_search_progress.c
     orbit_calculator/transfer_calc.h
     orbit_calculator/powered_flyby_optimizer.c
     orbit_calculator/powered_route_objective.c
@@ -214,6 +216,8 @@ add_executable(KMATSearchIntegration
     00_Testing/integration_operations.c
     00_Testing/integration_flybys.c
     orbit_calculator/transfer_calc.c
+    orbit_calculator/transfer_search_worker.c
+    orbit_calculator/transfer_search_progress.c
     orbit_calculator/powered_flyby_optimizer.c
     orbit_calculator/powered_route_objective.c
     orbit_calculator/powered_route_dsm.c
