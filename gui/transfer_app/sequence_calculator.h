@@ -6,6 +6,7 @@
 
 void init_sequence_calculator(GtkBuilder *builder);
 void sc_change_date_type(enum DateType old_date_type, enum DateType new_date_type);
+void sc_select_system(int index);
 void reset_sc();
 
 struct PlannedScStep {

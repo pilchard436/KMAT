@@ -126,6 +126,11 @@ G_MODULE_EXPORT void on_tp_system_change() {
 	update();
 }
 
+void tp_select_system(int index) {
+	if(cb_tp_system != NULL && index >= 0 && index < get_num_available_systems())
+		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_tp_system), index);
+}
+
 
 // Set when the flyby iteration did not settle and the shown delta-v is only the last iterate.
 int tp_route_unconverged;

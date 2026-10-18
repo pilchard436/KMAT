@@ -23,6 +23,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	pa_departures = load_results.departures;
 	pa_system = load_results.header.system;
 	update_camera_to_celestial_system(pa_itin_preview_camera, pa_system, deg2rad(90), 0);
+	pa_itin_preview_camera->min_pos_dist = 1e6;
 	if(body_show_status_pa != NULL) free(body_show_status_pa);
 	body_show_status_pa = (int*) calloc(pa_system->num_bodies, sizeof(int));
 	analyze_departure_itins();

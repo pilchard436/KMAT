@@ -397,3 +397,74 @@ int moon_assist_arrival(Body *planet, Vector3 incoming_excess, double arrival_ra
 	double periapses[] = {arrival_radius, 2 * arrival_radius, 4 * arrival_radius};
 	return search_moon_assist(&goal, incoming_excess, periapses, 3, arrival_jd, plain_dv, assist);
 }
+
+int moon_propagate_outbound(Body *planet, double jd, double max_seconds, double soi_radius, Vector3 *r, Vector3 *v,
+		double *elapsed_out, Body **hit) {
+	*hit = NULL;
+	*elapsed_out = 0;
+	if(planet == NULL || planet->system == NULL || !(planet->mu > 0) || !(soi_radius > 0)) return 0;
+	// KSP flies patched conics: moons pull only inside their own sphere of influence. The path is therefore two-body
+	// around the planet, and entering a moon's sphere of influence (or surface clearance) counts as a hit.
+	MoonSet pure = {.planet = planet}, set = {.planet = planet};
+	double moon_soi[MAX_TRACKED_MOONS];
+	for(int i = 0; i < planet->system->num_bodies && set.count < MAX_TRACKED_MOONS; i++) {
+		Body *moon = planet->system->bodies[i];
+		OSV state;
+		if(moon != NULL && moon != planet && moon->orbit.cb == planet && moon->radius > 0 && moon->mu > 0 &&
+			moon_state_at(planet, moon, jd, &state)) {
+			moon_soi[set.count] = fmax(fabs(moon->orbit.a) * pow(moon->mu / planet->mu, 0.4), moon_clear_radius(moon));
+			set.moons[set.count++] = moon;
+		}
+	}
+	double elapsed = 0;
+	for(int steps = 0; steps < MAX_INTEGRATION_STEPS && elapsed < max_seconds; steps++) {
+		double now = jd + elapsed / 86400;
+		double radius = mag_vec3(*r);
+		if(radius >= soi_radius) {
+			*elapsed_out = elapsed;
+			return 1;
+		}
+		if(radius < planet->radius + planet->atmo_alt) {
+			*hit = planet;
+			*elapsed_out = elapsed;
+			return 1;
+		}
+		double nearest = HUGE_VAL;
+		for(int i = 0; i < set.count; i++) {
+			OSV moon;
+			if(!moon_state_at(planet, set.moons[i], now, &moon)) continue;
+			double distance = mag_vec3(subtract_vec3(moon.r, *r));
+			if(distance < moon_soi[i]) {
+				*hit = set.moons[i];
+				*elapsed_out = elapsed;
+				return 1;
+			}
+			nearest = fmin(nearest, distance - moon_soi[i]);
+		}
+		double h = 0.005 * radius / fmax(mag_vec3(*v), 1);
+		if(nearest < HUGE_VAL) h = fmin(h, 0.05 * fmax(nearest, 0) / fmax(mag_vec3(*v), 1) + 1);
+		h = fmin(fmax(h, 0.5), 900);
+		Vector3 r_before = *r, v_before = *v;
+		rk4_step(&pure, now, h, r, v);
+		if(!isfinite(r->x + r->y + r->z + v->x + v->y + v->z)) return 0;
+		if(mag_vec3(*r) >= soi_radius) {
+			// The patch changes exactly at the sphere of influence, so locate the crossing within the step.
+			double low = 0, high = h;
+			for(int i = 0; i < 40; i++) {
+				double mid = (low + high) / 2;
+				Vector3 r_mid = r_before, v_mid = v_before;
+				rk4_step(&pure, now, mid, &r_mid, &v_mid);
+				if(mag_vec3(r_mid) >= soi_radius) high = mid; else low = mid;
+			}
+			*r = r_before;
+			*v = v_before;
+			rk4_step(&pure, now, high, r, v);
+			elapsed += high;
+			*elapsed_out = elapsed;
+			return 1;
+		}
+		elapsed += h;
+	}
+	*elapsed_out = elapsed;
+	return mag_vec3(*r) >= soi_radius;
+}

@@ -1,5 +1,64 @@
 cmake_minimum_required(VERSION 3.26)
 project(KMAT C)
+include(FetchContent)
+FetchContent_Declare(nanopb
+    GIT_REPOSITORY https://github.com/nanopb/nanopb.git
+    GIT_TAG 0.4.9.1
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(nanopb)
+FetchContent_Declare(krpc_cnano
+    URL https://github.com/krpc/krpc/releases/download/v0.6.0/krpc-cnano-0.6.0.zip
+    URL_HASH SHA256=9FAE249B97D156C4BCA5CB239C79156D73C8261F596F9CBAF9D830ACABA6AD97
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    SOURCE_SUBDIR _kmat_fetch_only
+)
+FetchContent_MakeAvailable(krpc_cnano)
+set(KMAT_KRPC_WIRE_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/kmat_krpc_wire.c")
+if(NOT EXISTS "${KMAT_KRPC_WIRE_SOURCE}")
+    file(DOWNLOAD
+        https://raw.githubusercontent.com/krpc/krpc/0fc0c74439ae609a3794d7f54cfe4510dea3d620/client/cnano/src/krpc.c
+        "${KMAT_KRPC_WIRE_SOURCE}"
+        EXPECTED_HASH SHA256=8a7127c5f2e4b9b359eecff33c8f0e355738558a5aff2d1cbda27581ba9a0d6d
+        TLS_VERIFY ON
+        STATUS KMAT_KRPC_WIRE_DOWNLOAD_STATUS
+    )
+    list(GET KMAT_KRPC_WIRE_DOWNLOAD_STATUS 0 KMAT_KRPC_WIRE_DOWNLOAD_CODE)
+    if(NOT KMAT_KRPC_WIRE_DOWNLOAD_CODE EQUAL 0)
+        message(FATAL_ERROR "Could not download the pinned Cnano TCP framing source: ${KMAT_KRPC_WIRE_DOWNLOAD_STATUS}")
+    endif()
+endif()
+file(SHA256 "${KMAT_KRPC_WIRE_SOURCE}" KMAT_KRPC_WIRE_ACTUAL_HASH)
+if(NOT KMAT_KRPC_WIRE_ACTUAL_HASH STREQUAL "8a7127c5f2e4b9b359eecff33c8f0e355738558a5aff2d1cbda27581ba9a0d6d")
+    message(FATAL_ERROR "The pinned Cnano TCP framing source has an unexpected hash")
+endif()
+set(KMAT_KRPC_ROOT "${krpc_cnano_SOURCE_DIR}")
+if(NOT EXISTS "${KMAT_KRPC_ROOT}/src/krpc.c")
+    file(GLOB KMAT_KRPC_CHILDREN LIST_DIRECTORIES TRUE "${KMAT_KRPC_ROOT}/*")
+    list(GET KMAT_KRPC_CHILDREN 0 KMAT_KRPC_ROOT)
+endif()
+file(GLOB KMAT_NANOPB_HEADERS CONFIGURE_DEPENDS "${nanopb_SOURCE_DIR}/*.h")
+file(COPY ${KMAT_NANOPB_HEADERS} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/kmat_nanopb/krpc_cnano")
+file(GLOB KMAT_KRPC_SOURCES CONFIGURE_DEPENDS "${KMAT_KRPC_ROOT}/src/*.c")
+list(FILTER KMAT_KRPC_SOURCES EXCLUDE REGEX "/communication\\.c$")
+list(FILTER KMAT_KRPC_SOURCES EXCLUDE REGEX "/krpc\\.c$")
+list(APPEND KMAT_KRPC_SOURCES "${KMAT_KRPC_WIRE_SOURCE}")
+add_library(kmat_krpc_cnano STATIC ${KMAT_KRPC_SOURCES} ksp/ksp_transport.c)
+target_include_directories(kmat_krpc_cnano PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}/ksp"
+    "${KMAT_KRPC_ROOT}/include"
+    "${CMAKE_CURRENT_BINARY_DIR}/kmat_nanopb"
+)
+target_compile_definitions(kmat_krpc_cnano PUBLIC KRPC_ERROR_MESSAGES KRPC_COMMUNICATION_CUSTOM KRPC_SINGLE_CONNECTION KRPC_BUFFER_SIZE=1024)
+if(MSVC)
+    target_compile_options(kmat_krpc_cnano PUBLIC "/FI${CMAKE_CURRENT_SOURCE_DIR}/ksp/krpc_types.h")
+else()
+    target_compile_options(kmat_krpc_cnano PUBLIC -include "${CMAKE_CURRENT_SOURCE_DIR}/ksp/krpc_types.h")
+endif()
+target_link_libraries(kmat_krpc_cnano PUBLIC protobuf-nanopb-static)
+if(WIN32)
+    target_link_libraries(kmat_krpc_cnano PUBLIC ws2_32)
+endif()
 
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
@@ -63,6 +122,9 @@ add_executable(KMAT
     launch_calculator/lv_profile.c
     launch_calculator/lv_profile.h
     main.c
+    ksp/ksp_rpc.c
+    ksp/ksp_session.c
+    ksp/ksp_nodes.c
     tools/crash_log.c
     tools/tool_funcs.c
     tools/tool_funcs.h
@@ -162,6 +224,7 @@ add_executable(KMAT
     00_Testing/unit_tests_itinerary.c
     00_Testing/unit_tests_moon_flyby.c
     00_Testing/unit_tests_optimizer.c
+    00_Testing/unit_tests_ksp.c
     gui/gui_tools/camera.c
     gui/gui_tools/camera.h
     gui/gui_tools/screen.c
@@ -170,6 +233,7 @@ add_executable(KMAT
     tools/version_tool.h
     tools/celestial_systems.c
 )
+target_link_libraries(KMAT kmat_krpc_cnano)
 
 # The unit suites are compiled into KMAT and run after every build of it.
 option(KMAT_RUN_UNIT_TESTS "Run the unit tests after building KMAT" ON)

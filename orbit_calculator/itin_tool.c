@@ -30,6 +30,9 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 	return porkchop_points;
 }
 
+static int porkchop_exact_flybys;
+void set_porkchop_exact_flybys(int exact) { porkchop_exact_flybys = exact; }
+
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis) {
 	struct PorkchopPoint pp;
 	pp.arrival = itin;
@@ -56,9 +59,13 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 			struct ItinStep *flyby = itin->prev;
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
-			// Called for every search node, so moon hits are left to the route scoring.
-			if(calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
-				flyby->body, minimum_periapsis, &flyby_result))
+			// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
+			int flyby_ok = porkchop_exact_flybys ?
+				calculate_flyby_with_moons(flyby->v_arr, itin->v_dep, flyby->v_body, flyby->body,
+					minimum_periapsis, flyby->date, &flyby_result) :
+				calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
+					flyby->body, minimum_periapsis, &flyby_result);
+			if(flyby_ok)
 				pp.dv_flyby += flyby_result.burn_delta_v;
 			else
 				pp.dv_flyby = HUGE_VAL;
@@ -259,9 +266,9 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 	}
 	if(step->prev == NULL) {
 		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
-		DepartureBurn3D burn;
-		if(calculate_free_plane_departure_burn(vinf, step->body, alt2radius(step->body, dep_periapsis), &burn))
-			return burn.burn_magnitude;
+		double departure_dv;
+		if(starting_orbit_departure_dv(step->body, vinf, alt2radius(step->body, dep_periapsis), &departure_dv))
+			return departure_dv;
 		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
 	}
 	if(step->next == NULL) {

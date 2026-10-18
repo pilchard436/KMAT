@@ -248,6 +248,11 @@ G_MODULE_EXPORT void on_sc_system_change() {
 	update_sc_preview();
 }
 
+void sc_select_system(int index) {
+	if(cb_sc_system != NULL && index >= 0 && index < get_num_available_systems())
+		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_sc_system), index);
+}
+
 G_MODULE_EXPORT void on_get_sc_ref_values() {
 	if(sc_system == NULL || get_num_sc_steps(sc_step) < 2) return;
 	double dv_dep, dv_arr_cap, dv_arr_circ, dur;

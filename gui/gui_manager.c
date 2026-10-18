@@ -18,6 +18,7 @@
 #include "gui/database_app/mission_db.h"
 #include "tools/file_io.h"
 #include "tools/version_tool.h"
+#include "ksp/ksp_session.h"
 
 
 #ifdef _WIN32
@@ -52,6 +53,7 @@ void start_gui(const char* gui_filepath) {
 	GtkApplication *app = gtk_application_new ("org.gtk.example", G_APPLICATION_DEFAULT_FLAGS);
 	g_signal_connect (app, "activate", G_CALLBACK (activate_app), (gpointer) gui_filepath);
 	g_application_run (G_APPLICATION (app), 0, NULL);
+	ksp_session_disconnect();
 	g_object_unref (app);
 
 	// gui runs...
@@ -122,6 +124,7 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	init_mission_db(builder);
 	// init progress window
 	init_info_windows(builder);
+	ksp_auto_connect();
 
 	if(!is_latest_version()) {
 		char msg[100];
@@ -373,21 +376,15 @@ char * get_itins_directory() {
 }
 
 void update_system_dropdown(GtkComboBox *cb_sel_system) {
+	if(cb_sel_system == NULL) return;
 	GtkListStore *store = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_INT);
-	if(cb_sel_system != NULL) {
-		GtkTreeIter iter;
-		// Add items to the list store
-		for(int i = 0; i < get_num_available_systems(); i++) {
-			gtk_list_store_append(store, &iter);
-			char entry[50];
-			sprintf(entry, "%s", get_available_systems()[i]->name);
-			gtk_list_store_set(store, &iter, 0, entry, 1, i, -1);
-		}
+	GtkTreeIter iter;
+	for(int i = 0; i < get_num_available_systems(); i++) {
+		gtk_list_store_append(store, &iter);
+		gtk_list_store_set(store, &iter, 0, get_available_systems()[i]->name, 1, i, -1);
 	}
-
 	gtk_combo_box_set_model(cb_sel_system, GTK_TREE_MODEL(store));
 	gtk_combo_box_set_active(cb_sel_system, 0);
-
 	g_object_unref(store);
 }
 

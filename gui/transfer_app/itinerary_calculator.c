@@ -7,6 +7,7 @@
 #include <math.h>
 
 
+static GtkWidget *lb_ic_ksp_note;
 GObject *tf_ic_window;
 GObject *cb_ic_system;
 GObject *cb_ic_central_body;
@@ -32,6 +33,10 @@ GtkWidget *ic_latest_arr_minus_month_button;
 GtkWidget *ic_latest_arr_plus_month_button;
 gboolean ic_changing_date_type;
 gboolean ic_syncing_time_limits;
+gboolean ic_setting_ksp_start_date;
+gboolean ic_ksp_start_active;
+double ic_ksp_start_jd;
+Body *ic_ksp_start_body;
 
 CelestSystem *ic_system;
 
@@ -41,6 +46,7 @@ double ic_arr_periapsis = 50e3;
 
 void init_itinerary_calculator(GtkBuilder *builder) {
 	tf_ic_window = gtk_builder_get_object(builder, "window");
+	lb_ic_ksp_note = GTK_WIDGET(gtk_builder_get_object(builder, "lb_ic_ksp_note"));
 	cb_ic_system = gtk_builder_get_object(builder, "cb_ic_system");
 	cb_ic_central_body = gtk_builder_get_object(builder, "cb_ic_central_body");
 	lb_ic_central_body = gtk_builder_get_object(builder, "lb_ic_central_body");
@@ -117,6 +123,49 @@ void set_ic_default_system(char *system_name) {
 			break;
 		}
 	}
+}
+
+int ic_select_ksp_start(CelestSystem *system, Body *departure_body, double departure_jd) {
+	if(system == NULL || departure_body == NULL || !isfinite(departure_jd)) return 0;
+	CelestSystem *top_level = get_top_level_system(system);
+	int system_index = -1, central_body_index = -1;
+	for(int i = 0; i < get_num_available_systems(); i++)
+		if(get_available_systems()[i] == top_level) { system_index = i; break; }
+	if(system_index < 0 || departure_body->orbit.cb == NULL) return 0;
+	for(int i = 0; i <= get_number_of_subsystems(top_level); i++) {
+		CelestSystem *subsystem = get_subsystem_from_system_and_id(top_level, i);
+		if(subsystem != NULL && subsystem->cb == departure_body->orbit.cb) {
+			central_body_index = i;
+			ic_system = subsystem;
+			break;
+		}
+	}
+	if(central_body_index < 0) return 0;
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cb_ic_system), system_index);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cb_ic_central_body), central_body_index);
+	int departure_index = get_body_system_id(departure_body, ic_system);
+	if(departure_index < 0) return 0;
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cb_ic_depbody), departure_index);
+	char date_text[32];
+	date_to_string(convert_JD_date(departure_jd, get_settings_datetime_type()), date_text, 0);
+	ic_setting_ksp_start_date = TRUE;
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
+	ic_setting_ksp_start_date = FALSE;
+	ic_ksp_start_jd = departure_jd;
+	ic_ksp_start_body = departure_body;
+	ic_ksp_start_active = TRUE;
+	return 1;
+}
+
+void ic_set_ksp_note(const char *text) {
+	if(lb_ic_ksp_note == NULL) return;
+	gtk_label_set_text(GTK_LABEL(lb_ic_ksp_note), text != NULL ? text : "");
+	gtk_widget_set_visible(lb_ic_ksp_note, text != NULL && text[0] != 0);
+}
+
+void ic_clear_ksp_start(void) {
+	ic_ksp_start_active = FALSE;
+	ic_ksp_start_body = NULL;
 }
 
 void ic_change_date_type(enum DateType old_date_type, enum DateType new_date_type) {

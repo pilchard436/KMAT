@@ -26,5 +26,6 @@ void run_starting_orbit_tests(void);
 void run_formats_tests(void);
 void run_porkchop_tests(void);
 void run_reference_defaults_tests(void);
+void run_ksp_tests(void);
 
 #endif

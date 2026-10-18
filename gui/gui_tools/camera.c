@@ -171,8 +171,14 @@ void resize_camera_screen(Camera *camera) {
 
 void on_camera_zoom(GtkWidget *widget, GdkEventScroll *event, Camera *camera) {
 	double distance = get_camera_distance_to_center(camera);
-	if(event->direction == GDK_SCROLL_UP && distance / 1.2 > camera->min_pos_dist) distance /= 1.2;
-	if(event->direction == GDK_SCROLL_DOWN && distance * 1.2 < camera->max_pos_dist) distance *= 1.2;
+	int zoom_in = event->direction == GDK_SCROLL_UP;
+	int zoom_out = event->direction == GDK_SCROLL_DOWN;
+	if(event->direction == GDK_SCROLL_SMOOTH) {
+		zoom_in = event->delta_y < 0;
+		zoom_out = event->delta_y > 0;
+	}
+	if(zoom_in && distance / 1.2 > camera->min_pos_dist) distance /= 1.2;
+	if(zoom_out && distance * 1.2 < camera->max_pos_dist) distance *= 1.2;
 
 	update_camera_distance_to_center(camera, distance);
 }

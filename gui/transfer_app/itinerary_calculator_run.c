@@ -41,6 +41,13 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.jd_min_dep = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdepdate));
 	ic_calc_data.jd_max_dep = convert_date_JD(date_from_string(string, get_settings_datetime_type()));
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	if(ic_ksp_start_active && departure_index >= 0 && departure_index < ic_system->num_bodies &&
+		ic_system->bodies[departure_index] == ic_ksp_start_body) {
+		// The vessel cannot depart before its snapshot, but the latest departure date is the user's choice.
+		ic_calc_data.jd_min_dep = ic_ksp_start_jd;
+		if(!(ic_calc_data.jd_max_dep >= ic_calc_data.jd_min_dep)) ic_calc_data.jd_max_dep = ic_calc_data.jd_min_dep;
+	}
 	int use_max_arrival_date = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(rb_ic_maxarrdate));
 	double max_arrival_jd = 0;
 	double user_max_duration = 0;

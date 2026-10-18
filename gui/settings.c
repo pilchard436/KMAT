@@ -1,18 +1,33 @@
 #include "settings.h"
 #include "orbitlib.h"
 #include "gui_manager.h"
+#include "ksp/ksp_session.h"
+#include "tools/starting_orbit.h"
+#include "transfer_app/itinerary_calculator.h"
+#include "transfer_app/sequence_calculator.h"
+#include "transfer_app/starting_orbit_editor.h"
+#include "transfer_app/transfer_planner.h"
+#include "tools/celestial_systems.h"
+#include <errno.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 
 GObject *cb_settings_datetime_type;
 GObject *cb_settings_default_system;
 GObject *cb_settings_default_departure_date;
+GObject *bt_settings_ksp_connect, *lb_settings_ksp_status;
 
 struct GlobalSettings {
 	enum DateType date_type;
 	char default_system_name[100];
 	enum DefaultDepartureDate default_departure_date;
-} global_settings = {DATE_ISO, "Solar System (Ephemeris)", DEFAULT_DEPARTURE_DATE_1950};
+	char ksp_host[128];
+	uint16_t ksp_port;
+	} global_settings = {.date_type = DATE_ISO, .default_system_name = "Solar System (Ephemeris)",
+		.default_departure_date = DEFAULT_DEPARTURE_DATE_1950, .ksp_host = "127.0.0.1", .ksp_port = 50000};
 
 static gchar *get_settings_file_path() {
 	return g_build_filename(g_get_user_config_dir(), "kmat", "settings.ini", NULL);
@@ -31,6 +46,12 @@ static void load_persisted_settings() {
 		if(g_strcmp0(departure_date, "today") == 0)
 			global_settings.default_departure_date = DEFAULT_DEPARTURE_DATE_TODAY;
 		g_free(departure_date);
+		gchar *ksp_host = g_key_file_get_string(key_file, "Settings", "ksp-host", NULL);
+		if(ksp_host != NULL && ksp_host[0] != 0)
+			g_strlcpy(global_settings.ksp_host, ksp_host, sizeof(global_settings.ksp_host));
+		g_free(ksp_host);
+		gint ksp_port = g_key_file_get_integer(key_file, "Settings", "ksp-port", NULL);
+		if(ksp_port > 0 && ksp_port <= UINT16_MAX) global_settings.ksp_port = (uint16_t)ksp_port;
 	} else {
 		g_clear_error(&error);
 	}
@@ -50,6 +71,8 @@ static void save_settings() {
 	g_key_file_set_string(key_file, "Settings", "default-celestial-system", global_settings.default_system_name);
 	g_key_file_set_string(key_file, "Settings", "default-departure-date",
 		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950-01-01");
+	g_key_file_set_string(key_file, "Settings", "ksp-host", global_settings.ksp_host);
+	g_key_file_set_integer(key_file, "Settings", "ksp-port", global_settings.ksp_port);
 	gchar *data = g_key_file_to_data(key_file, &data_length, NULL);
 	if(g_mkdir_with_parents(directory, 0700) != 0) {
 		g_warning("Failed to create KMAT settings directory: %s", directory);
@@ -67,7 +90,11 @@ void init_global_settings(GtkBuilder *builder) {
 	cb_settings_datetime_type = gtk_builder_get_object(builder, "cb_settings_datetime_type");
 	cb_settings_default_system = gtk_builder_get_object(builder, "cb_settings_default_system");
 	cb_settings_default_departure_date = gtk_builder_get_object(builder, "cb_settings_default_departure_date");
+	bt_settings_ksp_connect = gtk_builder_get_object(builder, "bt_settings_ksp_connect");
+	lb_settings_ksp_status = gtk_builder_get_object(builder, "lb_settings_ksp_status");
 	load_persisted_settings();
+	gtk_button_set_label(GTK_BUTTON(bt_settings_ksp_connect), ksp_session_is_connected() ? "Disconnect from KSP" : "Connect to KSP");
+	gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), ksp_session_is_connected() ? "Connected to KSP" : "Not connected");
 	g_signal_handlers_block_by_func(cb_settings_default_departure_date, G_CALLBACK(on_change_default_departure_date), NULL);
 	gtk_combo_box_set_active_id(GTK_COMBO_BOX(cb_settings_default_departure_date),
 		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950");
@@ -124,4 +151,169 @@ G_MODULE_EXPORT void on_change_default_departure_date() {
 	global_settings.default_departure_date = g_strcmp0(active_id, "today") == 0 ?
 		DEFAULT_DEPARTURE_DATE_TODAY : DEFAULT_DEPARTURE_DATE_1950;
 	save_settings();
+}
+
+typedef struct KspSettingsConnectTask {
+	GtkWidget *button;
+	GtkWidget *status;
+	char *host;
+	uint16_t port;
+	int success;
+	int matched_index;
+	char error[256];
+} KspSettingsConnectTask;
+
+static gboolean finish_ksp_settings_connect(gpointer data) {
+	KspSettingsConnectTask *task = data;
+	gtk_widget_set_sensitive(task->button, TRUE);
+	if(task->success && task->matched_index >= 0 && task->matched_index < get_num_available_systems()) {
+		CelestSystem *system = get_available_systems()[task->matched_index];
+		g_strlcpy(global_settings.ksp_host, task->host, sizeof(global_settings.ksp_host));
+		global_settings.ksp_port = task->port;
+		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_settings_default_system), task->matched_index);
+		on_change_default_system();
+		set_ic_default_system(system->name);
+		sc_select_system(task->matched_index);
+		tp_select_system(task->matched_index);
+		if(strcmp(system->name, "Stock System") == 0 && global_settings.date_type != DATE_KERBAL)
+			gtk_combo_box_set_active(GTK_COMBO_BOX(cb_settings_datetime_type), DATE_KERBAL);
+		KspVesselStart vessel_start;
+		ic_set_ksp_note(NULL);
+		char vessel_error[256] = {0};
+		if(ksp_session_get_vessel_start(&vessel_start, vessel_error, sizeof(vessel_error))) {
+			starting_orbit_set_active(&vessel_start.orbit, vessel_start.orbiting_body);
+			if(ic_select_ksp_start(vessel_start.system, vessel_start.orbiting_body, vessel_start.date_jd)) {
+				starting_orbit_editor_load(&vessel_start.orbit, vessel_start.orbiting_body);
+				char status[256], start_date[40];
+				date_to_string(convert_JD_date(vessel_start.date_jd, get_settings_datetime_type()), start_date, 1);
+				snprintf(status, sizeof(status), "Connected; %s around %s at %s", vessel_start.vessel_name,
+					vessel_start.orbiting_body->name, start_date);
+				gtk_label_set_text(GTK_LABEL(task->status), status);
+			} else {
+				starting_orbit_set_active(NULL, NULL);
+				gtk_label_set_text(GTK_LABEL(task->status), "Connected; matched system, but could not select the vessel's departure body");
+			}
+		} else {
+			starting_orbit_set_active(NULL, NULL);
+			ic_clear_ksp_start();
+			char status[320], note[320];
+			snprintf(status, sizeof(status), "Connected; matched %s", system->name);
+			snprintf(note, sizeof(note), "KSP: the active vessel is not in a usable starting orbit, so the normal settings are used (%s)", vessel_error);
+			ic_set_ksp_note(note);
+			gtk_label_set_text(GTK_LABEL(task->status), status);
+		}
+		save_settings();
+		gtk_button_set_label(GTK_BUTTON(task->button), "Disconnect from KSP");
+	} else {
+		gtk_label_set_text(GTK_LABEL(task->status), task->error[0] != 0 ? task->error : "KSP connection failed");
+	}
+	g_object_unref(task->button);
+	g_object_unref(task->status);
+	g_free(task->host);
+	g_free(task);
+	return G_SOURCE_REMOVE;
+}
+
+static gpointer run_ksp_settings_connect(gpointer data) {
+	KspSettingsConnectTask *task = data;
+	task->success = ksp_session_connect_and_match(task->host, task->port, &task->matched_index,
+		task->error, sizeof(task->error));
+	g_idle_add(finish_ksp_settings_connect, task);
+	return NULL;
+}
+
+G_MODULE_EXPORT void on_settings_ksp_connect(GtkWidget *widget, gpointer data) {
+	(void)data;
+	if(ksp_session_is_connected()) {
+		ksp_session_disconnect();
+		starting_orbit_set_active(NULL, NULL);
+		ic_clear_ksp_start();
+		ic_set_ksp_note(NULL);
+		gtk_button_set_label(GTK_BUTTON(widget), "Connect to KSP");
+		gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Not connected");
+		return;
+	}
+	GtkWidget *parent = gtk_widget_get_toplevel(widget);
+	GtkWidget *dialog = gtk_dialog_new_with_buttons("Connect to KSP",
+		GTK_IS_WINDOW(parent) ? GTK_WINDOW(parent) : NULL, GTK_DIALOG_MODAL,
+		"_Cancel", GTK_RESPONSE_CANCEL, "_Connect", GTK_RESPONSE_ACCEPT, NULL);
+	GtkWidget *grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 8);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+	gtk_widget_set_margin_start(grid, 12);
+	gtk_widget_set_margin_end(grid, 12);
+	gtk_widget_set_margin_top(grid, 12);
+	gtk_widget_set_margin_bottom(grid, 12);
+	GtkWidget *host_label = gtk_label_new("Server host");
+	GtkWidget *host_entry = gtk_entry_new();
+	gtk_entry_set_text(GTK_ENTRY(host_entry), global_settings.ksp_host);
+	GtkWidget *port_label = gtk_label_new("RPC port");
+	GtkWidget *port_entry = gtk_entry_new();
+	char port_text[8];
+	snprintf(port_text, sizeof(port_text), "%u", (unsigned int)global_settings.ksp_port);
+	gtk_entry_set_text(GTK_ENTRY(port_entry), port_text);
+	gtk_grid_attach(GTK_GRID(grid), host_label, 0, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), host_entry, 1, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), port_label, 0, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), port_entry, 1, 1, 1, 1);
+	gtk_container_add(GTK_CONTAINER(gtk_dialog_get_content_area(GTK_DIALOG(dialog))), grid);
+	gtk_widget_show_all(dialog);
+	int response = gtk_dialog_run(GTK_DIALOG(dialog));
+	char *host = g_strdup(gtk_entry_get_text(GTK_ENTRY(host_entry)));
+	char *port_input = g_strdup(gtk_entry_get_text(GTK_ENTRY(port_entry)));
+	gtk_widget_destroy(dialog);
+	if(response != GTK_RESPONSE_ACCEPT) {
+		g_free(host);
+		g_free(port_input);
+		return;
+	}
+	char *end = NULL;
+	errno = 0;
+	unsigned long port = strtoul(port_input, &end, 10);
+	g_free(port_input);
+	if(host[0] == 0 || errno != 0 || end == NULL || *end != 0 || port == 0 || port > UINT16_MAX) {
+		gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Enter a host and port from 1 to 65535");
+		g_free(host);
+		return;
+	}
+	KspSettingsConnectTask *task = g_new0(KspSettingsConnectTask, 1);
+	task->button = g_object_ref(widget);
+	task->status = g_object_ref(GTK_WIDGET(lb_settings_ksp_status));
+	task->host = host;
+	task->port = (uint16_t)port;
+	gtk_widget_set_sensitive(widget, FALSE);
+	gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Connecting to KSP and matching system...");
+	GThread *thread = g_thread_new("ksp-session-connect", run_ksp_settings_connect, task);
+	if(thread == NULL) {
+		gtk_widget_set_sensitive(widget, TRUE);
+		gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Could not start KSP connection worker");
+		g_object_unref(task->button);
+		g_object_unref(task->status);
+		g_free(task->host);
+		g_free(task);
+		return;
+	}
+	g_thread_unref(thread);
+}
+
+void ksp_auto_connect(void) {
+	if(bt_settings_ksp_connect == NULL || lb_settings_ksp_status == NULL || ksp_session_is_connected()) return;
+	KspSettingsConnectTask *task = g_new0(KspSettingsConnectTask, 1);
+	task->button = g_object_ref(GTK_WIDGET(bt_settings_ksp_connect));
+	task->status = g_object_ref(GTK_WIDGET(lb_settings_ksp_status));
+	task->host = g_strdup(global_settings.ksp_host);
+	task->port = global_settings.ksp_port;
+	gtk_widget_set_sensitive(task->button, FALSE);
+	gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Connecting to KSP and matching system...");
+	GThread *thread = g_thread_new("ksp-auto-connect", run_ksp_settings_connect, task);
+	if(thread == NULL) {
+		gtk_widget_set_sensitive(task->button, TRUE);
+		gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), "Not connected");
+		g_object_unref(task->button);
+		g_object_unref(task->status);
+		g_free(task->host);
+		g_free(task);
+		return;
+	}
+	g_thread_unref(thread);
 }

@@ -3,9 +3,12 @@
 
 #include <gtk/gtk.h>
 #include "orbitlib.h"
+#include "tools/starting_orbit.h"
 
 void init_starting_orbit_editor(GtkBuilder *builder);
 void end_starting_orbit_editor(void);
+/* Fills the editor with a connected vessel's orbit and enables it as the custom starting orbit. */
+void starting_orbit_editor_load(const StartingOrbit *orbit, Body *body);
 
 /* Activates the custom starting orbit for a search from dep_body, or clears it when disabled.
  * Returns 0 with a message in `error` if it is enabled but cannot be used. */
