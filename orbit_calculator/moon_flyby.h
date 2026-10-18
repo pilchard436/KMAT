@@ -46,4 +46,15 @@ int moon_assist_arrival(Body *planet, Vector3 incoming_excess, double arrival_ra
 /** @brief Position and velocity of a moon relative to its planet. */
 int moon_state_at(Body *planet, Body *moon, double jd, OSV *state);
 
+/**
+ * @brief Integrates a planet-centred state outward until it leaves soi_radius, as KSP's patched conics do: two-body
+ * around the planet, with moons only mattering as a hit when the path enters their sphere of influence.
+ * @param r, v state at jd, replaced by the state where the integration stopped
+ * @param elapsed_out seconds integrated
+ * @param hit set to a moon (or the planet) when the path comes within its surface clearance; integration stops there
+ * @return 1 when the integration finished (left the sphere of influence or hit something)
+ */
+int moon_propagate_outbound(Body *planet, double jd, double max_seconds, double soi_radius, Vector3 *r, Vector3 *v,
+	double *elapsed_out, Body **hit);
+
 #endif

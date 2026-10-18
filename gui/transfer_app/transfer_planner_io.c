@@ -3,7 +3,10 @@
 #include "gui/info_win_manager.h"
 #include "gui/gui_manager.h"
 #include "tools/file_io.h"
+#include "orbit_calculator/itinerary_tree.h"
 #include "orbit_calculator/flyby_policy.h"
+#include "ksp/ksp_session.h"
+#include <orbitlib_fileio.h>
 
 #include <math.h>
 #include <string.h>
@@ -16,6 +19,92 @@ G_MODULE_EXPORT void on_show_itin_overview() {
 	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
 	set_flyby_unrestricted_periapsis(previous);
 	show_msg_window_owned(text, &tp_details_owner);
+}
+
+typedef struct KspNodeExportTask {
+	GtkWidget *button;
+	struct ItinStep *route;
+	int success;
+	int correction;
+	char message[768];
+} KspNodeExportTask;
+
+static gboolean finish_ksp_node_export(gpointer data) {
+	KspNodeExportTask *task = data;
+	gtk_widget_set_sensitive(task->button, TRUE);
+	GtkWidget *parent = gtk_widget_get_toplevel(task->button);
+	GtkWidget *dialog = gtk_message_dialog_new(GTK_IS_WINDOW(parent) ? GTK_WINDOW(parent) : NULL,
+		GTK_DIALOG_MODAL, task->success ? GTK_MESSAGE_INFO : GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, NULL);
+	// A trailing "Note:" paragraph is a warning and is shown in red.
+	char *warning = strstr(task->message, "\nNote:");
+	char *plain = g_markup_escape_text(task->message, warning != NULL ? warning - task->message : -1);
+	char *warning_text = warning != NULL ? g_markup_escape_text(warning + 1, -1) : NULL;
+	char *markup = warning_text != NULL ? g_strdup_printf("%s\n<span foreground=\"#d02020\" weight=\"bold\">%s</span>", plain, warning_text) : g_strdup(plain);
+	gtk_message_dialog_set_markup(GTK_MESSAGE_DIALOG(dialog), markup);
+	g_free(markup);
+	g_free(warning_text);
+	g_free(plain);
+	GtkWidget *message_area = gtk_message_dialog_get_message_area(GTK_MESSAGE_DIALOG(dialog));
+	GList *children = gtk_container_get_children(GTK_CONTAINER(message_area));
+	for(GList *child = children; child != NULL; child = child->next)
+		if(GTK_IS_LABEL(child->data)) gtk_label_set_selectable(GTK_LABEL(child->data), TRUE);
+	g_list_free(children);
+	gtk_dialog_run(GTK_DIALOG(dialog));
+	gtk_widget_destroy(dialog);
+	free_itinerary(get_first(task->route));
+	g_object_unref(task->button);
+	g_free(task);
+	return G_SOURCE_REMOVE;
+}
+
+static gpointer run_ksp_node_export(gpointer data) {
+	KspNodeExportTask *task = data;
+	task->success = task->correction ? ksp_session_add_correction_node(task->route, tp_arr_periapsis, task->message, sizeof(task->message)) :
+		ksp_session_add_next_maneuver_node(task->route, tp_dep_periapsis,
+		tp_arr_periapsis, tp_last_transfer_type, task->message, sizeof(task->message));
+	g_idle_add(finish_ksp_node_export, task);
+	return NULL;
+}
+
+static void start_ksp_node_export(GtkWidget *widget, int correction) {
+	if(!ksp_session_is_connected()) {
+		show_msg_window("Connect to a matching KSP system from Settings first.");
+		return;
+	}
+	if(curr_transfer_tp == NULL) {
+		show_msg_window("Load or calculate an itinerary in the Transfer Planner first.");
+		return;
+	}
+	KspNodeExportTask *task = g_new0(KspNodeExportTask, 1);
+	task->correction = correction;
+	task->route = create_itin_copy(get_first(curr_transfer_tp));
+	if(task->route == NULL) {
+		g_free(task);
+		show_msg_window("Could not copy the current itinerary.");
+		return;
+	}
+	task->button = g_object_ref(widget);
+	gtk_widget_set_sensitive(widget, FALSE);
+	GThread *thread = g_thread_new("ksp-node-export", run_ksp_node_export, task);
+	if(thread == NULL) {
+		gtk_widget_set_sensitive(widget, TRUE);
+		free_itinerary(task->route);
+		g_object_unref(task->button);
+		g_free(task);
+		show_msg_window("Could not start the KSP node export worker.");
+		return;
+	}
+	g_thread_unref(thread);
+}
+
+G_MODULE_EXPORT void on_tp_send_ksp_node(GtkWidget *widget, gpointer data) {
+	(void)data;
+	start_ksp_node_export(widget, 0);
+}
+
+G_MODULE_EXPORT void on_tp_send_ksp_correction(GtkWidget *widget, gpointer data) {
+	(void)data;
+	start_ksp_node_export(widget, 1);
 }
 
 G_MODULE_EXPORT void on_save_itinerary(GtkWidget* widget, gpointer data) {

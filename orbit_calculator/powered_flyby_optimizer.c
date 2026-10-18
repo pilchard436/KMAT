@@ -347,6 +347,14 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 	int improvements = 0;
 	int candidate_index = 0;
+	// Replace the early estimate with the work that is actually left: fewer routes may have reached refinement than
+	// the limit allows, and deep-space maneuver searches cost many times a plain refinement.
+	int dsm_progress_units = POWERED_REFINE_PROGRESS_WEIGHT * POWERED_DSM_OBJECTIVES_PER_ROUTE / POWERED_OBJECTIVES_PER_ROUTE;
+	int planned_dsm_routes = calc_data->allow_dsm ? (top_count < POWERED_DSM_ROUTE_LIMIT ? top_count : POWERED_DSM_ROUTE_LIMIT) : 0;
+	int planned_total = get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) + POWERED_REFINE_PROGRESS_WEIGHT * top_count +
+		dsm_progress_units * planned_dsm_routes;
+	progress_total = planned_total;
+	incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, planned_total - get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER));
 	double timing_refinement_start = wall_seconds();
 	int multi_start_routes = 0;
 	int resonant_dsm_routes = 0;
@@ -382,6 +390,11 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 			objective_budget = POWERED_DSM_OBJECTIVES_PER_ROUTE;
 			optimize_candidate_dsm(candidate, calc_data);
 			objective_budget = -1;
+			incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, dsm_progress_units);
+			if(candidate_index >= POWERED_DSM_ROUTE_LIMIT) {
+				incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, dsm_progress_units);
+				progress_total += dsm_progress_units;
+			}
 			if(stats != NULL) {
 				stats->dsm_routes_optimized++;
 				if(candidate->dsms != NULL) {

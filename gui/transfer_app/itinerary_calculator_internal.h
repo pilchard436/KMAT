@@ -37,6 +37,10 @@ extern GtkWidget *ic_latest_arr_minus_month_button;
 extern GtkWidget *ic_latest_arr_plus_month_button;
 extern gboolean ic_changing_date_type;
 extern gboolean ic_syncing_time_limits;
+extern gboolean ic_setting_ksp_start_date;
+extern gboolean ic_ksp_start_active;
+extern double ic_ksp_start_jd;
+extern Body *ic_ksp_start_body;
 
 extern CelestSystem *ic_system;
 extern double ic_dep_periapsis, ic_arr_periapsis;

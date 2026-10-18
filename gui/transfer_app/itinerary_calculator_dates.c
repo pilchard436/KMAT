@@ -245,6 +245,7 @@ static void on_ic_latest_date_adjust(GtkButton *button, gpointer user_data) {
 
 void on_ic_earliest_dep_changed(GtkEditable *editable, gpointer user_data) {
 	if(ic_changing_date_type) return;
+	if(!ic_setting_ksp_start_date) ic_clear_ksp_start();
 	const char *date_text = gtk_entry_get_text(GTK_ENTRY(editable));
 	if(is_string_valid_date_format(date_text, get_settings_datetime_type())) {
 		ic_syncing_time_limits = TRUE;

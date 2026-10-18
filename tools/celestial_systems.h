@@ -9,6 +9,9 @@ int get_num_available_systems();
 
 CelestSystem ** get_available_systems();
 
+int celestial_systems_equivalent(const CelestSystem *left, const CelestSystem *right);
+int find_equivalent_available_system(const CelestSystem *system);
+
 int is_available_system(CelestSystem *system);
 
 CelestSystem * get_subsystem_from_system_and_id(CelestSystem *system, int id);

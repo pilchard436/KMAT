@@ -5,6 +5,9 @@
 #include "orbitlib.h"
 
 void init_itinerary_calculator(GtkBuilder *builder);
+int ic_select_ksp_start(CelestSystem *system, Body *departure_body, double departure_jd);
+void ic_clear_ksp_start(void);
+void ic_set_ksp_note(const char *text);
 void ic_change_date_type(enum DateType old_date_type, enum DateType new_date_type);
 void set_ic_default_system(char *system_name);
 void reset_ic();

@@ -230,6 +230,16 @@ void init_starting_orbit_editor(GtkBuilder *builder) {
 	po_orbit_ok = 0;
 }
 
+void starting_orbit_editor_load(const StartingOrbit *orbit, Body *body) {
+	if(orbit == NULL || body == NULL || po_toggle == NULL || !starting_orbit_is_valid(orbit, body)) return;
+	po_body = body;
+	po_orbit = *orbit;
+	po_write_entries();
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(po_toggle), TRUE);
+	po_update();
+	po_fit_camera();
+}
+
 void end_starting_orbit_editor(void) {
 	starting_orbit_set_active(NULL, NULL);
 	if(po_camera != NULL) destroy_camera(po_camera);

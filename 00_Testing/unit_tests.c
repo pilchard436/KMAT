@@ -23,6 +23,7 @@ static int run_all_suites(void) {
     run_formats_tests();
     run_porkchop_tests();
     run_reference_defaults_tests();
+    run_ksp_tests();
     int failed = finish_tests("KMAT unit checks");
     checks = failures = 0;
     failed |= run_itinerary_unit_tests();

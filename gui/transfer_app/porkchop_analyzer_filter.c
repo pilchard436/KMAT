@@ -70,14 +70,8 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 }
 
 gboolean are_any_porkchop_points_in_filter(const double min[6], const double max[6]) {
-	// show only groups inside filter in gui (setting visible below)
-	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) pa_groups[group_idx].has_itin_inside_filter = 0;
-
-	int init_num_itins = 0;
-
 	struct PorkchopPoint pp;
 	for(int i = 0; i < pa_num_itins; i++) {
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) init_num_itins++;
 		pp = pa_porkchop_points[i].data;
 
 		double dv_sat = pp.dv_dsm;
@@ -111,7 +105,7 @@ void apply_filter() {
 		min[i] = strtod(string, NULL)-1;	// rounding imprecision in filter entry field
 		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[i]));
 		max[i] = strtod(string, NULL)+1;	// rounding imprecision in filter entry field
-		if(get_settings_datetime_type() == DATE_KERBAL && i == 1) {min[i] /= 4; max[i] /= 4;}
+		if(get_settings_datetime_type() == DATE_KERBAL && i == PA_DUR) {min[i] /= 4; max[i] /= 4;}
 	}
 
 	for(int i = 0; i < 6; i++) {
@@ -189,11 +183,13 @@ void analyze_departure_itins() {
 	struct ItinStep **arrivals = (struct ItinStep**) malloc(num_itins * sizeof(struct ItinStep*));
 	for(int i = 0; i < pa_num_deps; i++) store_itineraries_in_array(pa_departures[i], arrivals, &index);
 	pa_porkchop_points = malloc(num_itins * sizeof(struct PorkchopAnalyzerPoint));
+	set_porkchop_exact_flybys(1);
 	for(int i = 0; i < num_itins; i++) {
 		pa_porkchop_points[i].data = create_porkchop_point(arrivals[i], get_first(arrivals[0])->body->atmo_alt + pa_dep_periapsis, arrivals[0]->body->atmo_alt + pa_arr_periapsis);
 		pa_porkchop_points[i].inside_filter = 1;
 		pa_porkchop_points[i].group = NULL;
 	}
+	set_porkchop_exact_flybys(0);
 	free(arrivals);
 
 	pa_num_itins = num_itins;

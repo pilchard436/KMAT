@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include <math.h>
 #include <gtk/gtk.h>
 #include "celestial_systems.h"
 #include "tools/file_io.h"
@@ -20,6 +21,48 @@ void init_available_systems(const char *directory) {
 
 int get_num_available_systems() {return num_available_systems;}
 CelestSystem ** get_available_systems() {return available_systems;}
+
+static int same_system_value(double left, double right) {
+    return isfinite(left) && isfinite(right) && fabs(left - right) <= 1e-8 * fmax(1.0, fmax(fabs(left), fabs(right)));
+}
+
+static Body *find_direct_body(CelestSystem *system, const char *name) {
+    for(int i = 0; system != NULL && i < system->num_bodies; i++)
+        if(strcmp(system->bodies[i]->name, name) == 0) return system->bodies[i];
+    return NULL;
+}
+
+static int bodies_match(const Body *left, const Body *right) {
+    if(left == NULL || right == NULL || strcmp(left->name, right->name) != 0 ||
+        !same_system_value(left->mu, right->mu) || !same_system_value(left->radius, right->radius) ||
+        !same_system_value(left->rotation_period, right->rotation_period) ||
+        !same_system_value(left->atmo_alt, right->atmo_alt) || ((left->orbit.cb == NULL) != (right->orbit.cb == NULL))) return 0;
+    if((left->system == NULL) != (right->system == NULL)) return 0;
+    int left_count = left->system != NULL ? left->system->num_bodies : 0;
+    int right_count = right->system != NULL ? right->system->num_bodies : 0;
+    if(left_count != right_count) return 0;
+    if(left->orbit.cb != NULL &&
+        (!same_system_value(left->orbit.a, right->orbit.a) || !same_system_value(left->orbit.e, right->orbit.e) ||
+        !same_system_value(left->orbit.i, right->orbit.i) || !same_system_value(left->orbit.raan, right->orbit.raan) ||
+        !same_system_value(left->orbit.arg_peri, right->orbit.arg_peri) || !same_system_value(left->orbit.ta, right->orbit.ta)))
+        return 0;
+    for(int i = 0; i < left_count; i++) {
+        Body *right_child = find_direct_body(right->system, left->system->bodies[i]->name);
+        if(!bodies_match(left->system->bodies[i], right_child)) return 0;
+    }
+    return 1;
+}
+
+int celestial_systems_equivalent(const CelestSystem *left, const CelestSystem *right) {
+    return left != NULL && right != NULL && left->cb != NULL && right->cb != NULL &&
+        left->num_bodies == right->num_bodies && bodies_match(left->cb, right->cb);
+}
+
+int find_equivalent_available_system(const CelestSystem *system) {
+    for(int i = 0; system != NULL && i < num_available_systems; i++)
+        if(celestial_systems_equivalent(available_systems[i], system)) return i;
+    return -1;
+}
 
 int is_available_system(CelestSystem *system) {
 	if(system == NULL) return 0;
