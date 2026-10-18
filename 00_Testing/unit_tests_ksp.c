@@ -1,6 +1,7 @@
 #include "unit_tests.h"
 #include "tools/celestial_systems.h"
 #include "ksp/ksp_nodes.h"
+#include "ksp/ksp_node_internal.h"
 #include <string.h>
 
 static Body test_body(const char *name, double mu, double radius) {
@@ -67,4 +68,77 @@ void run_ksp_tests(void) {
 		ksp_project_delta_v_to_node(vec3(0, 0, 0), vec3(0, 1, 0), vec3(1, 2, 3), &components), 0);
 	expect_int("KSP RTN node projection rejects a radial-only velocity",
 		ksp_project_delta_v_to_node(vec3(1, 0, 0), vec3(2, 0, 0), vec3(1, 2, 3), &components), 0);
+
+	Body planet = test_body("Test", 3.9860043543609598e14, 6371000);
+	struct ItinStep departure = {0};
+	struct ItinStep arrival = {
+		.body = &planet,
+		.v_arr = vec3(0, 6000, 0),
+		.v_body = vec3(0, 0, 0),
+		.prev = &departure
+	};
+	double arrival_altitude = 100000, periapsis_radius = planet.radius + arrival_altitude;
+	Vector3 final_offset = planned_aim_offset(&arrival, arrival_altitude);
+	double expected_impact_parameter = periapsis_radius *
+		sqrt(1 + 2 * planet.mu / (periapsis_radius * 6000 * 6000));
+	expect_near("KSP final-arrival aim targets the requested periapsis impact parameter",
+		mag_vec3(final_offset), expected_impact_parameter, 1e-8);
+	expect_near("KSP final-arrival aim preserves the expected side of the body", final_offset.x,
+		-expected_impact_parameter, 1e-8);
+	expect_near("KSP final-arrival aim is perpendicular to the incoming asymptote", final_offset.y, 0, 1e-8);
+	expect_near("KSP final-arrival aim stays in the transfer plane", final_offset.z, 0, 1e-8);
+
+	Body central = test_body("Central", 1.3271244004193938e20, 6.9e8);
+	planet.orbit = (Orbit){.a = 1.5e11, .cb = &central};
+	struct ItinStep flyby = {.body = &planet, .v_arr = vec3(6000, 0, 0)};
+	struct ItinStep outbound = {.v_dep = vec3(3000, 5196.152422706632, 0)};
+	struct ItinStep *outbound_next[] = {&outbound};
+	arrival.v_arr = flyby.v_arr;
+	arrival.next = outbound_next;
+	flyby.next = outbound_next;
+	PoweredFlybyResult planned_flyby;
+	int flyby_valid = calculate_powered_flyby(flyby.v_arr, outbound.v_dep, flyby.v_body, &planet,
+		planet.radius + 10000, &planned_flyby);
+	expect_int("KSP intermediate-flyby aim fixture is feasible", flyby_valid, 1);
+	if(flyby_valid) {
+		Vector3 flyby_offset = planned_aim_offset(&arrival, arrival_altitude);
+		Vector3 incoming = norm_vec3(flyby.v_arr);
+		Vector3 intended_side = subtract_vec3(planned_flyby.periapsis_direction,
+			scale_vec3(incoming, dot_vec3(planned_flyby.periapsis_direction, incoming)));
+		double flyby_impact_parameter = planned_flyby.periapsis_radius *
+			sqrt(1 + 2 * planet.mu / (planned_flyby.periapsis_radius * 6000 * 6000));
+		expect_near("KSP intermediate-flyby aim uses the planned impact parameter",
+			mag_vec3(flyby_offset), flyby_impact_parameter, 1e-8);
+		expect_near("KSP intermediate-flyby aim uses the planned periapsis side",
+			dot_vec3(flyby_offset, norm_vec3(intended_side)), flyby_impact_parameter, 1e-8);
+	}
+
+	const double mu = 3.9860043543609598e14;
+	Vector3 burn_state = vec3(7e6, 0, 0), old_velocity = vec3(0, 7500, 0), desired_excess = vec3(0, 3000, 0);
+	Vector3 candidate_burns[4];
+	int burn_count = burn_to_asymptote(mu, burn_state, old_velocity, desired_excess, 6.9e6, candidate_burns, 4);
+	expect_int("KSP asymptote solver finds a burn for a reachable outbound direction", burn_count > 0, 1);
+	double previous_burn_size = -1;
+	for(int i = 0; i < burn_count; i++) {
+		Vector3 outgoing_direction;
+		double outgoing_periapsis;
+		double burn_size = mag_vec3(candidate_burns[i]);
+		expect_int("KSP asymptote solver returns finite burns",
+			isfinite(candidate_burns[i].x) && isfinite(candidate_burns[i].y) && isfinite(candidate_burns[i].z), 1);
+		expect_int("KSP asymptote solver returns burns in increasing cost order", burn_size >= previous_burn_size, 1);
+		expect_int("KSP asymptote solver produces a valid outgoing hyperbola",
+			outgoing_asymptote(mu, burn_state, add_vec3(old_velocity, candidate_burns[i]),
+				&outgoing_direction, &outgoing_periapsis), 1);
+		if(isfinite(outgoing_direction.x + outgoing_direction.y + outgoing_direction.z)) {
+			double angular_error = acos(fmax(-1, fmin(1, dot_vec3(outgoing_direction, norm_vec3(desired_excess)))));
+			expect_near("KSP asymptote solver meets its direction tolerance", angular_error, 0, 1e-6);
+			int already_past_periapsis = dot_vec3(burn_state,
+				add_vec3(old_velocity, candidate_burns[i])) >= 0;
+			expect_int("KSP asymptote solver respects the periapsis floor before periapsis",
+				already_past_periapsis || outgoing_periapsis >= 6.9e6 * 0.999, 1);
+		}
+		previous_burn_size = burn_size;
+	}
+	expect_int("KSP asymptote solver rejects collinear radius and excess velocity",
+		burn_to_asymptote(mu, burn_state, old_velocity, vec3(3000, 0, 0), 6.9e6, candidate_burns, 4), 0);
 }

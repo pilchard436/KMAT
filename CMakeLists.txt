@@ -125,6 +125,8 @@ add_executable(KMAT
     ksp/ksp_rpc.c
     ksp/ksp_session.c
     ksp/ksp_nodes.c
+    ksp/ksp_node_refinement.c
+    ksp/ksp_node_correction.c
     tools/crash_log.c
     tools/tool_funcs.c
     tools/tool_funcs.h
