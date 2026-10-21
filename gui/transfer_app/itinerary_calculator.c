@@ -23,6 +23,8 @@ GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
 GtkWidget *cb_ic_allow_dsm;
 GtkWidget *cb_ic_allow_resonant;
+GtkWidget *cb_ic_moon_aware_flybys;
+GtkWidget *cb_ic_moon_assist_arrival;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
 GObject *vp_ic_fbbodies;
@@ -97,6 +99,12 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 
 	create_combobox_dropdown_text_renderer(cb_ic_system, GTK_ALIGN_CENTER);
 	create_combobox_dropdown_text_renderer(cb_ic_central_body, GTK_ALIGN_CENTER);
+	cb_ic_moon_aware_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_aware_flybys"));
+	if(cb_ic_moon_aware_flybys != NULL)
+		set_stable_tooltip(cb_ic_moon_aware_flybys, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search slower.");
+	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
+	if(cb_ic_moon_assist_arrival != NULL)
+		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture or circularization burn when one is available.");
 	create_combobox_dropdown_text_renderer(cb_ic_depbody, GTK_ALIGN_CENTER);
 	create_combobox_dropdown_text_renderer(cb_ic_arrbody, GTK_ALIGN_CENTER);
 	update_system_dropdown(GTK_COMBO_BOX(cb_ic_system));

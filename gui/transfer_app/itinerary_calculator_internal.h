@@ -27,6 +27,8 @@ extern GObject *rb_ic_maxdur;
 extern GObject *cb_ic_transfertype;
 extern GtkWidget *cb_ic_allow_dsm;
 extern GtkWidget *cb_ic_allow_resonant;
+extern GtkWidget *cb_ic_moon_aware_flybys;
+extern GtkWidget *cb_ic_moon_assist_arrival;
 extern GObject *tf_ic_depdv;
 extern GObject *tf_ic_satdv;
 extern GObject *vp_ic_fbbodies;

@@ -1009,6 +1009,34 @@ The departure burn is minimized over the orbit.</property>
                             <property name="top-attach">3</property>
                           </packing>
                         </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_moon_aware_flybys">
+                            <property name="label" translatable="yes">Moon-aware flybys</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">4</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_moon_assist_arrival">
+                            <property name="label" translatable="yes">Allow moon assist on arrival</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">5</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>

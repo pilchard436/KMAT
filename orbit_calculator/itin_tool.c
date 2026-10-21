@@ -20,11 +20,9 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 	int index = 0;
 	for(int i = 0; i < num_deps; i++) store_itineraries_in_array(departures[i], arrivals, &index);
 	struct PorkchopPoint *porkchop_points = malloc(num_itins * sizeof(struct PorkchopPoint));
-	int previous_assist = set_moon_assist_enabled(1);
 	for(int i = 0; i < num_itins; i++) {
 		porkchop_points[i] = create_porkchop_point(arrivals[i], dep_periapsis, arr_periapsis);
 	}
-	set_moon_assist_enabled(previous_assist);
 	free(arrivals);
 
 	return porkchop_points;
@@ -64,7 +62,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 			PoweredFlybyResult flyby_result;
 			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
 			// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
-			int flyby_ok = porkchop_exact_flybys ?
+			int flyby_ok = (porkchop_exact_flybys || moon_aware_flybys_is_active()) ?
 				calculate_flyby_with_moons(flyby->v_arr, itin->v_dep, flyby->v_body, flyby->body,
 					minimum_periapsis, flyby->date, &flyby_result) :
 				calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
@@ -289,4 +287,3 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 		return flyby.burn_delta_v;
 	return HUGE_VAL;
 }
-

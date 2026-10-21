@@ -22,8 +22,9 @@ double flyby_minimum_periapsis(Body *body) {
 	return unrestricted_flyby_periapsis ? body->radius * 0.1 : body->radius + body->atmo_alt + 1e4;
 }
 
-// Search nodes keep the plain burn; the final scoring and the planner use moon assists.
+// Moon assists are opt-in for arrival costs; unrestricted planner mode also enables them.
 static _Thread_local int moon_assist_enabled;
+static _Thread_local int moon_aware_flybys_enabled;
 
 int set_moon_assist_enabled(int enable) {
 	int previous = moon_assist_enabled;
@@ -35,10 +36,20 @@ int moon_assist_is_active(void) {
 	return moon_assist_enabled || unrestricted_flyby_periapsis;
 }
 
+int set_moon_aware_flybys_enabled(int enable) {
+	int previous = moon_aware_flybys_enabled;
+	moon_aware_flybys_enabled = !!enable;
+	return previous;
+}
+
+int moon_aware_flybys_is_active(void) {
+	return moon_aware_flybys_enabled && !unrestricted_flyby_periapsis;
+}
+
 double arrival_dv_with_assist(Body *body, Vector3 incoming_excess, double arrival_radius, int circularize, double plain_dv,
 		double jd, MoonAssist *assist) {
 	if(assist != NULL) assist->moon = NULL;
-	if(plain_dv < MIN_ASSISTED_BURN) return plain_dv;
+	if(!moon_assist_is_active() || plain_dv < MIN_ASSISTED_BURN) return plain_dv;
 	MoonAssist found;
 	if(!moon_assist_arrival(body, incoming_excess, arrival_radius, circularize ? dv_circ : dv_capture, plain_dv, jd, &found))
 		return plain_dv;
@@ -118,6 +129,7 @@ int plan_flyby_around_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *
 int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
 		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result) {
 	if(!calculate_powered_flyby(v_arr, v_dep, v_body, body, minimum_periapsis, result)) return 0;
+	if(!moon_aware_flybys_is_active() && !unrestricted_flyby_periapsis) return 1;
 	MoonFlybyEffect effect;
 	if(!analyze_moon_flyby(body, result, flyby_jd, unrestricted_flyby_periapsis, &effect)) return 1;
 	// The planner relaxes the limits to show what is wrong, so it keeps flybys that hit a moon.
@@ -130,8 +142,9 @@ int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Bod
 }
 
 int flyby_blocked_by_moon(Body *body, const PoweredFlybyResult *flyby, double flyby_jd) {
+	if(!moon_aware_flybys_is_active()) return 0;
 	MoonFlybyEffect effect;
-	return !unrestricted_flyby_periapsis && analyze_moon_flyby(body, flyby, flyby_jd, 0, &effect) &&
+	return analyze_moon_flyby(body, flyby, flyby_jd, 0, &effect) &&
 		(effect.hits_moon || effect.perturbing_moon != NULL);
 }
 
@@ -151,7 +164,7 @@ typedef struct {
 	Vector3 v_arr, v_dep, v_body;
 	Body *body;
 	double jd;
-	int unrestricted, feasible;
+	int unrestricted, moon_aware, feasible;
 	double periapsis;
 } FlybyCacheEntry;
 static _Thread_local FlybyCacheEntry flyby_cache[32];
@@ -163,6 +176,7 @@ static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Bo
 	for(int i = 0; i < 32; i++) {
 		FlybyCacheEntry *entry = &flyby_cache[i];
 		if(entry->body == body && entry->jd == jd && entry->unrestricted == unrestricted_flyby_periapsis &&
+				entry->moon_aware == moon_aware_flybys_enabled &&
 				same_vec(entry->v_arr, v_arr) && same_vec(entry->v_dep, v_dep) && same_vec(entry->v_body, v_body)) {
 			if(periapsis != NULL) *periapsis = entry->periapsis;
 			return entry->feasible;
@@ -171,6 +185,7 @@ static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Bo
 	PoweredFlybyResult flyby;
 	int feasible = calculate_flyby_with_moons(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), jd, &flyby);
 	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, jd, unrestricted_flyby_periapsis,
+		moon_aware_flybys_enabled,
 		feasible, feasible ? flyby.periapsis_radius : 0};
 	flyby_cache_next = (flyby_cache_next + 1) % 32;
 	if(periapsis != NULL) *periapsis = feasible ? flyby.periapsis_radius : 0;
@@ -225,6 +240,7 @@ static int flyby_step_blocked_by_moon(struct ItinStep *flyby, struct ItinStep *n
 }
 
 int route_blocked_by_moons(struct ItinStep *arrival) {
+	if(!moon_aware_flybys_is_active()) return 0;
 	for(struct ItinStep *next = arrival; next->prev != NULL && next->prev->prev != NULL; next = next->prev)
 		if(next->prev->body != NULL && flyby_step_blocked_by_moon(next->prev, next)) return 1;
 	return 0;

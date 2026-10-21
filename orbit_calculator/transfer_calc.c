@@ -66,6 +66,8 @@ static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Dat
 
 
 struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
+	int previous_moon_aware = set_moon_aware_flybys_enabled(calc_data.moon_aware_flybys);
+	int previous_moon_assist = set_moon_assist_enabled(calc_data.moon_assist_arrival);
 	struct Itin_Calc_Results results = {
 		.best_unpowered_seed_total_dv = HUGE_VAL,
 		.best_powered_initial_total_dv = HUGE_VAL,
@@ -110,6 +112,8 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		free(profiles);
 		free(flyby_profiles);
 #endif
+		set_moon_assist_enabled(previous_moon_assist);
+		set_moon_aware_flybys_enabled(previous_moon_aware);
 		return results;
 	}
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -291,5 +295,7 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	describe_search_rejections(&results.rejections, rejection_reason, sizeof(rejection_reason));
 	if(num_itins == 0 && rejection_reason[0] != '\0') printf("%s\n", rejection_reason);
 
+	set_moon_assist_enabled(previous_moon_assist);
+	set_moon_aware_flybys_enabled(previous_moon_aware);
 	return results;
 }
