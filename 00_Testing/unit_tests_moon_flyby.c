@@ -49,6 +49,8 @@ static void init_fixture(MoonFixture *fixture) {
 void check_moon_flybys(void) {
 	MoonFixture fixture;
 	init_fixture(&fixture);
+	int previous_moon_aware = set_moon_aware_flybys_enabled(0);
+	int previous_moon_assist = set_moon_assist_enabled(0);
 	MoonFlybyEffect effect;
 	check_true("the fixture flyby periapsis is near the moon orbit",
 		fabs(fixture.flyby.periapsis_radius - MOON_ORBIT_RADIUS) < 0.05 * MOON_ORBIT_RADIUS);
@@ -91,6 +93,13 @@ void check_moon_flybys(void) {
 		&fixture.planet, minimum, TEST_JD, &with_moons));
 	check_near("a free flyby keeps its burn", with_moons.burn_delta_v, plain.burn_delta_v, 1e-9);
 	place_moon(&fixture, 0.1);
+	check_true("moon-aware flybys are opt-in", !moon_aware_flybys_is_active() &&
+		!flyby_blocked_by_moon(&fixture.planet, &plain, TEST_JD));
+	check_true("disabled moon awareness leaves the original flyby unchanged",
+		calculate_flyby_with_moons(fixture.incoming, fixture.outgoing, vec3(0, 0, 0),
+			&fixture.planet, minimum, TEST_JD, &with_moons) &&
+		fabs(with_moons.periapsis_radius - plain.periapsis_radius) < 1);
+	set_moon_aware_flybys_enabled(1);
 	check_true("the search re-plans a flyby that passes close to a moon", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v >= plain.burn_delta_v);
 	analyze_moon_flyby(&fixture.planet, &with_moons, TEST_JD, 0, &effect);
@@ -126,8 +135,7 @@ void check_moon_flybys(void) {
 	int previous_exact = set_porkchop_exact_flybys(0);
 	struct PorkchopPoint approximate = create_porkchop_point(&arrival, periapsis_altitude, periapsis_altitude);
 	double component_burn = itinerary_step_dv(&flyby, periapsis_altitude, periapsis_altitude, TF_FLYBY);
-	check_true("the moon-avoidance fixture distinguishes summary and component flyby burns",
-		component_burn > approximate.dv_flyby + 1);
+	check_near("moon-aware porkchop totals include the avoidance burn", approximate.dv_flyby, component_burn, 0.01);
 	char overview[8192];
 	itinerary_detailed_overview_to_string(&departure, DATE_ISO, periapsis_altitude, periapsis_altitude, overview);
 	const char *flyby_total = strstr(overview, "Powered flyby burns: ");
@@ -152,13 +160,25 @@ void check_moon_flybys(void) {
 	double capture_radius = fixture.planet.radius + 2e5;
 	double plain_capture = dv_capture(&fixture.planet, capture_radius, 3000);
 	MoonAssist assist;
-	int capture_assists = 0, phases = 24;
+	int capture_assists = 0, disabled_assists = 0, phases = 24;
 	for(int phase = 0; phase < phases; phase++) {
 		place_moon(&fixture, 2 * M_PI * phase / phases);
 		capture_assists += moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius, dv_capture,
 			plain_capture, TEST_JD, &assist) && assist.total_dv < plain_capture && assist.moon == &fixture.moon;
+		disabled_assists += arrival_dv_with_assist(&fixture.planet, vec3(3000, 0, 0), capture_radius, 0,
+			plain_capture, TEST_JD, NULL) < plain_capture;
 	}
 	check_true("a moon lowers the capture burn at some moon phases", capture_assists > 0 && capture_assists < phases);
+	check_true("arrival moon assists are opt-in", disabled_assists == 0);
+	set_moon_assist_enabled(1);
+	int enabled_assists = 0;
+	for(int phase = 0; phase < phases; phase++) {
+		place_moon(&fixture, 2 * M_PI * phase / phases);
+		enabled_assists += arrival_dv_with_assist(&fixture.planet, vec3(3000, 0, 0), capture_radius, 0,
+			plain_capture, TEST_JD, &assist) < plain_capture && assist.moon == &fixture.moon;
+	}
+	check_true("enabled arrival assists reduce capture cost when possible", enabled_assists > 0);
+	set_moon_assist_enabled(0);
 
 	place_moon(&fixture, 0);
 	fixture.moon.mu = 1e3;
@@ -168,4 +188,6 @@ void check_moon_flybys(void) {
 	fixture.planet.system = NULL;
 	check_true("no moons means no assist", !moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius,
 		dv_capture, plain_capture, TEST_JD, &assist));
+	set_moon_assist_enabled(previous_moon_assist);
+	set_moon_aware_flybys_enabled(previous_moon_aware);
 }

@@ -77,11 +77,9 @@ static void append_arrival_assist(char *string, struct ItinStep *arrival, double
 
 static struct PorkchopPoint create_overview_porkchop_point(struct ItinStep *arrival,
 		double dep_periapsis, double arr_periapsis) {
-	int previous_assist = set_moon_assist_enabled(1);
 	int previous_exact = set_porkchop_exact_flybys(1);
 	struct PorkchopPoint point = create_porkchop_point(arrival, dep_periapsis, arr_periapsis);
 	set_porkchop_exact_flybys(previous_exact);
-	set_moon_assist_enabled(previous_assist);
 	return point;
 }
 

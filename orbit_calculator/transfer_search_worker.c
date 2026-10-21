@@ -18,6 +18,8 @@ const int NUM_INITIAL_TRANSFERS_PER_BODY = 500;
 void *calc_itins_from_departure(void *args) {
 	Itin_Calc_Thread_Args *thread_args = (struct Itin_Calc_Thread_Args *)args;
 	Itin_Calc_Data *calc_data = thread_args->calc_data;
+	int previous_moon_aware = set_moon_aware_flybys_enabled(calc_data->moon_aware_flybys);
+	int previous_moon_assist = set_moon_assist_enabled(calc_data->moon_assist_arrival);
 
 	struct ItinStep **departures = thread_args->departures;
 	struct Dv_Filter dv_filter = calc_data->dv_filter;
@@ -240,5 +242,7 @@ void *calc_itins_from_departure(void *args) {
 		jd_dep = jd_min_dep + index;
 	}
 	begin_powered_seed_search(NULL);
+	set_moon_assist_enabled(previous_moon_assist);
+	set_moon_aware_flybys_enabled(previous_moon_aware);
 	return NULL;
 }

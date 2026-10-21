@@ -78,6 +78,12 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
 	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
 		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
+	ic_calc_data.moon_aware_flybys = cb_ic_moon_aware_flybys != NULL &&
+		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_moon_aware_flybys));
+	ic_calc_data.moon_assist_arrival = cb_ic_moon_assist_arrival != NULL &&
+		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_moon_assist_arrival));
+	set_moon_aware_flybys_enabled(ic_calc_data.moon_aware_flybys);
+	set_moon_assist_enabled(ic_calc_data.moon_assist_arrival);
 
 	ic_calc_data.dv_filter.dep_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))]->atmo_alt + ic_dep_periapsis;
 	ic_calc_data.dv_filter.arr_periapsis = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody))]->atmo_alt + ic_arr_periapsis;

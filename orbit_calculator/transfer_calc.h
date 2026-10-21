@@ -12,6 +12,8 @@ typedef struct Itin_Calc_Data {
 	double jd_max_arr;
 	double max_duration;
 	int allow_dsm;
+	int moon_aware_flybys;
+	int moon_assist_arrival;
 	double step_dep_date;
 	int num_deps_per_date;
 	int max_num_waiting_orbits;
