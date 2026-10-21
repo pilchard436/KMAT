@@ -1,0 +1,144 @@
+# Itinerary Calculator: what happens when you click Calculate
+
+This document describes the current flow of the **Calculate** button in KMAT's
+Itinerary Calculator, from input validation through route search and optional
+saving.
+
+## 1. The click is validated
+
+The button's GTK `clicked` signal calls `on_calc_ic()` in
+[`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c).
+The handler:
+
+1. Returns immediately if no celestial system is selected.
+2. Validates the departure and arrival date constraints. The latest departure
+   must not precede the earliest departure. When the maximum-arrival-date mode
+   is selected, the latest arrival must also be on or after the latest
+   departure. An invalid range prevents the search from starting.
+3. Prepares a custom starting orbit if that option is enabled. The orbit must
+   have been created for the currently selected departure body and its values
+   must be valid. Otherwise an error message is shown and the search stops.
+   When the option is disabled, any active custom orbit is cleared.
+
+The date entry fields also validate input while editing and normalize it when
+focus leaves the field. The date range validation and date-entry behavior are
+implemented in
+[`itinerary_calculator_dates.c`](../GUI/transfer_app/itinerary_calculator_dates.c).
+
+## 2. The UI choices become search data
+
+`prepare_ic_calc_data_from_widgets()` copies the form values into the
+calculator's search configuration:
+
+- **System and bodies:** the selected system/central body, departure body,
+  arrival body, and allowed intermediate flyby bodies.
+- **Departure window:** the earliest and latest departure dates are converted
+  to Julian dates. The search uses one-day increments through this range.
+- **Arrival/time limit:** the radio selection determines which limit is used:
+  - With **maximum arrival date**, that date is the arrival cutoff. The maximum
+    duration is derived from the earliest departure date to that cutoff.
+  - With **maximum duration**, the entered duration is used to determine the
+    arrival cutoff from the latest departure date. Kerbal-time durations are
+    divided by four when converted to Julian days.
+- **KSP snapshot date (optional):** when a KSP start snapshot is active for
+  the selected departure body, its date replaces the earliest departure date.
+  If the latest departure date is earlier than the snapshot, it is moved up to
+  the snapshot date. The user-selected latest departure date otherwise remains
+  in effect.
+- **Delta-v limits:** blank maximum departure or satellite delta-v fields mean
+  no limit for that category. The total delta-v cap is the sum of the two
+  limits. Departure burn is checked against the departure limit; subsequent
+  satellite costs are checked against the satellite limit.
+- **Final transfer type:** **Fly-By**, **Capture**, or **Circularize** controls
+  which arrival cost is included in the satellite delta-v and route scoring.
+- **Periapsis:** the calculator uses the configured departure and arrival
+  periapsis altitudes, offset by each body's atmospheric altitude, for burn
+  calculations.
+
+The arrival body is always added to the permitted-body list for the search.
+Other selected bodies in the flyby-body grid can be visited en route. The grid
+defaults to bodies between the departure and arrival bodies, with Ceres and
+Vesta and Dres initially excluded; the endpoints themselves are not editable
+as intermediate-body checkboxes.
+
+## 3. Optional search settings
+
+The following checkboxes alter the search or route evaluation:
+
+- **Allow resonant flybys:** considers returns to the same body after one or
+  more revolutions, such as an Earth-to-Earth leg. This expands the search and
+  can make it several times slower.
+- **Allow deep-space maneuvers:** enables an additional optimization pass to
+  search for a maneuver between bodies on selected routes. DSM delta-v counts
+  toward the satellite delta-v limit; a zero satellite limit therefore
+  excludes routes that need a DSM.
+- **Moon-aware flybys:** checks for flybys that hit a moon or pass too close to
+  one. It can reject or re-plan routes and makes searching slower.
+- **Allow moon assist on arrival:** checks whether a moon flyby can reduce the
+  arrival capture or circularization burn when one is available.
+- **Custom starting orbit:** when enabled and valid for the selected departure
+  body, it is used to calculate the departure burn instead of the usual
+  departure-orbit assumption.
+
+These flags are read from the form at the start of the calculation. If an
+optional control is unavailable, it is treated as disabled.
+
+## 4. The search runs in the background
+
+After preparing the inputs, the GUI disables the Itinerary Calculator window,
+initializes progress tracking, and starts a worker thread. A progress window
+reports search progress while the worker performs the calculation.
+
+For each departure date, the search:
+
+1. Computes the departure body's position and velocity from orbital elements
+   or ephemeris data, depending on the system.
+2. Samples initial transfer arrival times for the permitted next bodies. The
+   normal first-leg search uses 500 samples per candidate body; its transfer
+   window is based on a Hohmann-transfer duration and is constrained by the
+   selected time limits.
+3. Solves the transfer legs with Lambert calculations and estimates departure
+   and arrival costs.
+4. Discards candidates that already violate the delta-v constraints.
+5. Extends surviving candidates into multi-leg routes by searching for viable
+   flybys, continuing toward the selected arrival body within the date and
+   duration limits.
+
+Departure dates are distributed across the search thread pool. Routes are
+collected as itinerary trees for later filtering and presentation, rather
+than shown individually as each candidate is generated.
+
+## 5. Routes are optimized and filtered
+
+For the regular to-target itinerary search, surviving routes are passed
+through powered-flyby optimization unless the search has been cancelled. This
+stage checks and refines promising routes, including their flyby burns and
+timings. It can also correct relevant sphere-of-influence issues.
+
+If deep-space maneuvers are enabled, selected routes receive an additional DSM
+optimization pass. The resulting routes are then checked against the date
+limits, departure/satellite/total delta-v limits, and applicable moon and
+sphere-of-influence constraints. Routes that fail are pruned from their
+itinerary trees. The search records rejection counts so it can explain why no
+routes survived.
+
+The main search, final route filters, and powered-route optimization are in
+[`transfer_calc.c`](../orbit_calculator/transfer_calc.c),
+[`transfer_search_worker.c`](../orbit_calculator/transfer_search_worker.c),
+and [`powered_flyby_optimizer.c`](../orbit_calculator/powered_flyby_optimizer.c).
+
+## 6. Completion, saving, and cleanup
+
+When the worker returns, the GUI completion callback:
+
+1. Finishes the custom starting-orbit search state.
+2. Closes the progress window and re-enables the calculator.
+3. If routes exist, opens a save chooser for an `.itins` file. Saving is
+   optional; cancelling the chooser skips the save. The selected binary
+   itinerary format and the search configuration are written with the results.
+4. Frees the in-memory itinerary trees and temporary flyby-body list.
+5. If no departure trees remain, displays **“No itineraries found!”**, with a
+   rejection summary when available.
+
+This completion and save flow is implemented in
+[`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c).

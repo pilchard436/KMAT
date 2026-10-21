@@ -48,6 +48,8 @@ First and foremost, this tool is a fun learning experience for me, and it has be
 ## Documentation
 [Wiki](https://github.com/Zange10/ksp-ro-tools/wiki)
 
+[Itinerary Calculator workflow](docs/itinerary-calculator.md)
+
 ## Literature
 Most of the orbital mechanics calculations were inspired by and can be found in Curtis' _Orbital Mechanics for Engineering Students_ or Vallado's _Fundamentals of Astrodynamics and Applications_.
 
