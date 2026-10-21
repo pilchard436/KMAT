@@ -70,4 +70,8 @@ void run_formats_tests(void) {
     expect_near("ISO duration remains Earth days", iso_duration_limits.max_duration_days, 28, tolerance);
     expect_near("ISO duration derives arrival JD", iso_duration_limits.max_arrival_jd, 178, tolerance);
 
+    ItineraryDateLimits iso_like_duration_limits = calculate_itinerary_date_limits(0, 100, 150, 0, 28, DATE_KERBALISO);
+    expect_near("ISO-like Kerbal duration remains Earth days", iso_like_duration_limits.max_duration_days, 28, tolerance);
+    expect_near("ISO-like Kerbal duration derives arrival JD", iso_like_duration_limits.max_arrival_jd, 178, tolerance);
+
 }

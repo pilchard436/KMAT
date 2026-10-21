@@ -1009,6 +1009,34 @@ The departure burn is minimized over the orbit.</property>
                             <property name="top-attach">3</property>
                           </packing>
                         </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_moon_aware_flybys">
+                            <property name="label" translatable="yes">Moon-aware flybys</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">2</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkCheckButton" id="cb_ic_moon_assist_arrival">
+                            <property name="label" translatable="yes">Moon assist on arrival</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="halign">center</property>
+                            <property name="draw-indicator">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">3</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>
@@ -5757,7 +5785,7 @@ The departure burn is minimized over the orbit.</property>
           </packing>
         </child>
         <child>
-          <!-- n-columns=2 n-rows=5 -->
+          <!-- n-columns=2 n-rows=3 -->
           <object class="GtkGrid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
@@ -5771,75 +5799,11 @@ The departure burn is minimized over the orbit.</property>
               <object class="GtkLabel">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Datetime Type:</property>
-              </object>
-              <packing>
-                <property name="left-attach">0</property>
-                <property name="top-attach">0</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkComboBoxText" id="cb_settings_datetime_type">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="tooltip-text" translatable="yes">1. ISO time:
-	Format: YYYY-MM-DD (ISO8601)
-	1 year = 365 days (365.25 days); 1 day = 24 hours
-    	Use this one only for the real solar system
-2. Kerbal time:
-	Format: YYY-DDD
-	1 year = 426 days; 1 day = 6 hours
-3. ISO-like Kerbal time:
-	Format: YYY-DDD
-	1 year = 365 days; 1 day = 24 hours</property>
-                <property name="active">0</property>
-                <items>
-                  <item translatable="yes">ISO Time</item>
-                  <item translatable="yes">Kerbal Time</item>
-                  <item translatable="yes">ISO-like Kerbal Time</item>
-                </items>
-                <signal name="changed" handler="on_change_datetime_type" swapped="no"/>
-              </object>
-              <packing>
-                <property name="left-attach">1</property>
-                <property name="top-attach">0</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">ISO:
-Kerbal:
-ISO-like Kerbal:</property>
-              </object>
-              <packing>
-                <property name="left-attach">0</property>
-                <property name="top-attach">1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">1y = 365d | 1d = 24h
-1y = 426d | 1d = 6h
-1y = 365d | 1d = 24h</property>
-              </object>
-              <packing>
-                <property name="left-attach">1</property>
-                <property name="top-attach">1</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
                 <property name="label" translatable="yes">Default Celestial System on Startup:</property>
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">2</property>
+                <property name="top-attach">0</property>
               </packing>
             </child>
             <child>
@@ -5850,33 +5814,7 @@ ISO-like Kerbal:</property>
               </object>
               <packing>
                 <property name="left-attach">1</property>
-                <property name="top-attach">2</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkLabel">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Default Departure Date:</property>
-              </object>
-              <packing>
-                <property name="left-attach">0</property>
-                <property name="top-attach">3</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkComboBoxText" id="cb_settings_default_departure_date">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <items>
-                  <item id="1950" translatable="yes">1950-01-01</item>
-                  <item id="today" translatable="yes">Today</item>
-                </items>
-                <signal name="changed" handler="on_change_default_departure_date" swapped="no"/>
-              </object>
-              <packing>
-                <property name="left-attach">1</property>
-                <property name="top-attach">3</property>
+                <property name="top-attach">0</property>
               </packing>
             </child>
             <child>
@@ -5887,7 +5825,7 @@ ISO-like Kerbal:</property>
               </object>
               <packing>
                 <property name="left-attach">0</property>
-                <property name="top-attach">4</property>
+                <property name="top-attach">1</property>
               </packing>
             </child>
             <child>
@@ -5900,7 +5838,7 @@ ISO-like Kerbal:</property>
               </object>
               <packing>
                 <property name="left-attach">1</property>
-                <property name="top-attach">4</property>
+                <property name="top-attach">1</property>
               </packing>
             </child>
             <child>
@@ -5912,7 +5850,7 @@ ISO-like Kerbal:</property>
               </object>
               <packing>
                 <property name="left-attach">1</property>
-                <property name="top-attach">5</property>
+                <property name="top-attach">2</property>
               </packing>
             </child>
           </object>

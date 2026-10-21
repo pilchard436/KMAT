@@ -15,19 +15,16 @@
 #include <string.h>
 
 
-GObject *cb_settings_datetime_type;
 GObject *cb_settings_default_system;
-GObject *cb_settings_default_departure_date;
 GObject *bt_settings_ksp_connect, *lb_settings_ksp_status;
 
 struct GlobalSettings {
 	enum DateType date_type;
 	char default_system_name[100];
-	enum DefaultDepartureDate default_departure_date;
 	char ksp_host[128];
 	uint16_t ksp_port;
 	} global_settings = {.date_type = DATE_ISO, .default_system_name = "Solar System (Ephemeris)",
-		.default_departure_date = DEFAULT_DEPARTURE_DATE_1950, .ksp_host = "127.0.0.1", .ksp_port = 50000};
+		.ksp_host = "127.0.0.1", .ksp_port = 50000};
 
 static gchar *get_settings_file_path() {
 	return g_build_filename(g_get_user_config_dir(), "kmat", "settings.ini", NULL);
@@ -42,10 +39,6 @@ static void load_persisted_settings() {
 		if(system_name != NULL && system_name[0] != '\0')
 			g_strlcpy(global_settings.default_system_name, system_name, sizeof(global_settings.default_system_name));
 		g_free(system_name);
-		gchar *departure_date = g_key_file_get_string(key_file, "Settings", "default-departure-date", NULL);
-		if(g_strcmp0(departure_date, "today") == 0)
-			global_settings.default_departure_date = DEFAULT_DEPARTURE_DATE_TODAY;
-		g_free(departure_date);
 		gchar *ksp_host = g_key_file_get_string(key_file, "Settings", "ksp-host", NULL);
 		if(ksp_host != NULL && ksp_host[0] != 0)
 			g_strlcpy(global_settings.ksp_host, ksp_host, sizeof(global_settings.ksp_host));
@@ -69,8 +62,7 @@ static void save_settings() {
 	if(!g_key_file_load_from_file(key_file, path, G_KEY_FILE_KEEP_COMMENTS, &error))
 		g_clear_error(&error);
 	g_key_file_set_string(key_file, "Settings", "default-celestial-system", global_settings.default_system_name);
-	g_key_file_set_string(key_file, "Settings", "default-departure-date",
-		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950-01-01");
+	g_key_file_remove_key(key_file, "Settings", "default-departure-date", NULL);
 	g_key_file_set_string(key_file, "Settings", "ksp-host", global_settings.ksp_host);
 	g_key_file_set_integer(key_file, "Settings", "ksp-port", global_settings.ksp_port);
 	gchar *data = g_key_file_to_data(key_file, &data_length, NULL);
@@ -87,18 +79,12 @@ static void save_settings() {
 	g_free(path);
 }
 void init_global_settings(GtkBuilder *builder) {
-	cb_settings_datetime_type = gtk_builder_get_object(builder, "cb_settings_datetime_type");
 	cb_settings_default_system = gtk_builder_get_object(builder, "cb_settings_default_system");
-	cb_settings_default_departure_date = gtk_builder_get_object(builder, "cb_settings_default_departure_date");
 	bt_settings_ksp_connect = gtk_builder_get_object(builder, "bt_settings_ksp_connect");
 	lb_settings_ksp_status = gtk_builder_get_object(builder, "lb_settings_ksp_status");
 	load_persisted_settings();
 	gtk_button_set_label(GTK_BUTTON(bt_settings_ksp_connect), ksp_session_is_connected() ? "Disconnect from KSP" : "Connect to KSP");
 	gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), ksp_session_is_connected() ? "Connected to KSP" : "Not connected");
-	g_signal_handlers_block_by_func(cb_settings_default_departure_date, G_CALLBACK(on_change_default_departure_date), NULL);
-	gtk_combo_box_set_active_id(GTK_COMBO_BOX(cb_settings_default_departure_date),
-		global_settings.default_departure_date == DEFAULT_DEPARTURE_DATE_TODAY ? "today" : "1950");
-	g_signal_handlers_unblock_by_func(cb_settings_default_departure_date, G_CALLBACK(on_change_default_departure_date), NULL);
 	char default_system_name[sizeof(global_settings.default_system_name)];
 	strcpy(default_system_name, global_settings.default_system_name);
 	create_combobox_dropdown_text_renderer(cb_settings_default_system, GTK_ALIGN_CENTER);
@@ -120,18 +106,15 @@ void init_global_settings(GtkBuilder *builder) {
 	}
 }
 
-G_MODULE_EXPORT void on_change_datetime_type() {
-	enum DateType old_type = global_settings.date_type;
-	global_settings.date_type = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_settings_datetime_type));
-	change_gui_date_type(old_type, global_settings.date_type);
-}
-
 enum DateType get_settings_datetime_type() {
 	return global_settings.date_type;
 }
 
-enum DefaultDepartureDate get_settings_default_departure_date() {
-	return global_settings.default_departure_date;
+void set_settings_datetime_type(enum DateType date_type) {
+	if(global_settings.date_type == date_type) return;
+	enum DateType old_type = global_settings.date_type;
+	global_settings.date_type = date_type;
+	change_gui_date_type(old_type, date_type);
 }
 
 char *get_settings_default_system() {
@@ -142,14 +125,6 @@ G_MODULE_EXPORT void on_change_default_system() {
 	int active = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_settings_default_system));
 	if(active < 0 || active >= get_num_available_systems()) return;
 	strcpy(global_settings.default_system_name, get_available_systems()[active]->name);
-	save_settings();
-}
-
-G_MODULE_EXPORT void on_change_default_departure_date() {
-	const char *active_id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_settings_default_departure_date));
-	if(active_id == NULL) return;
-	global_settings.default_departure_date = g_strcmp0(active_id, "today") == 0 ?
-		DEFAULT_DEPARTURE_DATE_TODAY : DEFAULT_DEPARTURE_DATE_1950;
 	save_settings();
 }
 
@@ -175,8 +150,6 @@ static gboolean finish_ksp_settings_connect(gpointer data) {
 		set_ic_default_system(system->name);
 		sc_select_system(task->matched_index);
 		tp_select_system(task->matched_index);
-		if(strcmp(system->name, "Stock System") == 0 && global_settings.date_type != DATE_KERBAL)
-			gtk_combo_box_set_active(GTK_COMBO_BOX(cb_settings_datetime_type), DATE_KERBAL);
 		KspVesselStart vessel_start;
 		ic_set_ksp_note(NULL);
 		char vessel_error[256] = {0};
