@@ -47,17 +47,18 @@ static gboolean get_earliest_departure_jd(double *jd, enum DateType date_type) {
 	return TRUE;
 }
 
-static void enforce_latest_arrival_after_earliest() {
+static void enforce_latest_arrival_after_latest_departure() {
 	if(ic_changing_date_type) return;
 	enum DateType date_type = get_settings_datetime_type();
-	double earliest_jd;
-	if(!get_earliest_departure_jd(&earliest_jd, date_type)) return;
+	const char *departure_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdepdate));
+	if(!is_string_valid_date_format(departure_text, date_type)) return;
+	double latest_departure_jd = convert_date_JD(date_from_string((char *)departure_text, date_type));
 	const char *arrival_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxarrdate));
 	if(is_string_valid_date_format(arrival_text, date_type) &&
-		convert_date_JD(date_from_string((char *)arrival_text, date_type)) > earliest_jd)
+		convert_date_JD(date_from_string((char *)arrival_text, date_type)) > latest_departure_jd)
 		return;
 	set_entry_date_from_jd(GTK_ENTRY(tf_ic_maxarrdate),
-		jd_change_date(earliest_jd, 0, 0, 1, date_type), date_type);
+		jd_change_date(latest_departure_jd, 0, 0, 1, date_type), date_type);
 }
 
 void connect_date_adjust_buttons(GtkBuilder *builder, const char *prefix, GtkEntry *target) {
@@ -250,24 +251,23 @@ void on_ic_earliest_dep_changed(GtkEditable *editable, gpointer user_data) {
 	if(is_string_valid_date_format(date_text, get_settings_datetime_type())) {
 		ic_syncing_time_limits = TRUE;
 		gtk_entry_set_text(GTK_ENTRY(tf_ic_maxdepdate), date_text);
-		enforce_latest_arrival_after_earliest();
+		enforce_latest_arrival_after_latest_departure();
 		ic_syncing_time_limits = FALSE;
 	}
 }
 
 void on_ic_latest_arrival_changed(GtkEditable *editable, gpointer user_data) {
 	if(ic_syncing_time_limits) return;
-	enforce_latest_arrival_after_earliest();
-	const char *earliest_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_mindepdate));
+	enforce_latest_arrival_after_latest_departure();
+	const char *departure_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxdepdate));
 	const char *arrival_text = gtk_entry_get_text(GTK_ENTRY(tf_ic_maxarrdate));
 	enum DateType date_type = get_settings_datetime_type();
-	if(!is_string_valid_date_format(earliest_text, date_type) ||
+	if(!is_string_valid_date_format(departure_text, date_type) ||
 		!is_string_valid_date_format(arrival_text, date_type)) return;
-	double earliest_jd = convert_date_JD(date_from_string((char *)earliest_text, date_type));
+	double latest_departure_jd = convert_date_JD(date_from_string((char *)departure_text, date_type));
 	double arrival_jd = convert_date_JD(date_from_string((char *)arrival_text, date_type));
-	ItineraryDateLimits limits = calculate_itinerary_date_limits(
-		TRUE, earliest_jd, 0, arrival_jd, 0, date_type);
-	double user_duration = limits.max_duration_days * (date_type == DATE_KERBAL ? 4.0 : 1.0);
+	double duration_days = MAX(arrival_jd - latest_departure_jd, 0.0);
+	double user_duration = duration_days * (date_type == DATE_KERBAL ? 4.0 : 1.0);
 	char duration_text[32];
 	g_snprintf(duration_text, sizeof(duration_text), "%.0f", user_duration);
 	ic_syncing_time_limits = TRUE;
@@ -289,10 +289,9 @@ void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data) {
 	enum DateType date_type = get_settings_datetime_type();
 	if(!is_string_valid_date_format(min_dep_text, date_type) ||
 		!is_string_valid_date_format(max_dep_text, date_type)) return;
-	double min_dep_jd = convert_date_JD(date_from_string((char *)min_dep_text, date_type));
 	double max_dep_jd = convert_date_JD(date_from_string((char *)max_dep_text, date_type));
 	ItineraryDateLimits limits = calculate_itinerary_date_limits(
-		FALSE, min_dep_jd, max_dep_jd, 0, user_duration, date_type);
+		FALSE, 0, max_dep_jd, 0, user_duration, date_type);
 	ic_syncing_time_limits = TRUE;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(rb_ic_maxdur), TRUE);
 	set_entry_date_from_jd(GTK_ENTRY(tf_ic_maxarrdate), limits.max_arrival_jd, date_type);

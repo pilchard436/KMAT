@@ -9,6 +9,7 @@ int ic_select_ksp_start(CelestSystem *system, Body *departure_body, double depar
 void ic_clear_ksp_start(void);
 void ic_set_ksp_note(const char *text);
 void ic_change_date_type(enum DateType old_date_type, enum DateType new_date_type);
+void ic_initialize_date_defaults(void);
 void set_ic_default_system(char *system_name);
 void reset_ic();
 

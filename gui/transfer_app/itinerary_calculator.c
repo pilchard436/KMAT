@@ -23,6 +23,8 @@ GObject *rb_ic_maxdur;
 GObject *cb_ic_transfertype;
 GtkWidget *cb_ic_allow_dsm;
 GtkWidget *cb_ic_allow_resonant;
+GtkWidget *cb_ic_moon_aware_flybys;
+GtkWidget *cb_ic_moon_assist_arrival;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
 GObject *vp_ic_fbbodies;
@@ -39,9 +41,32 @@ double ic_ksp_start_jd;
 Body *ic_ksp_start_body;
 
 CelestSystem *ic_system;
+static gboolean ic_initialized;
 
 double ic_dep_periapsis = 50e3;
 double ic_arr_periapsis = 50e3;
+
+static void update_datetime_type_for_system(CelestSystem *system) {
+	if(system == NULL) return;
+	CelestSystem *top_level_system = get_top_level_system(system);
+	if(top_level_system == NULL || top_level_system->name == NULL) return;
+	enum DateType date_type = g_str_has_prefix(top_level_system->name, "Solar System") ?
+		DATE_ISO : DATE_KERBALISO;
+	set_settings_datetime_type(date_type);
+}
+
+void ic_initialize_date_defaults(void) {
+	if(ic_system == NULL) return;
+	update_datetime_type_for_system(ic_system);
+	enum DateType date_type = get_settings_datetime_type();
+	Datetime initial_date = date_type == DATE_ISO ?
+		(Datetime) {.y = 1950, .m = 1, .d = 1, .date_type = DATE_ISO} :
+		(Datetime) {.y = 1, .d = 1, .date_type = DATE_KERBALISO};
+	char date_text[32];
+	date_to_string(initial_date, date_text, 0);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
+	update_ic_reference_defaults();
+}
 
 
 void init_itinerary_calculator(GtkBuilder *builder) {
@@ -67,21 +92,6 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	connect_date_adjust_buttons(builder, "ic_maxdep", GTK_ENTRY(tf_ic_maxdepdate));
 	connect_date_adjust_buttons(builder, "ic_maxarr", GTK_ENTRY(tf_ic_maxarrdate));
 	update_month_adjust_button_labels(get_settings_datetime_type());
-	if(get_settings_default_departure_date() == DEFAULT_DEPARTURE_DATE_TODAY) {
-		GDateTime *now = g_date_time_new_now_local();
-		Datetime today = {
-			.y = g_date_time_get_year(now),
-			.m = g_date_time_get_month(now),
-			.d = g_date_time_get_day_of_month(now),
-			.date_type = DATE_ISO
-		};
-		g_date_time_unref(now);
-		if(get_settings_datetime_type() != DATE_ISO)
-			today = change_date_type(today, get_settings_datetime_type());
-		char date_text[32];
-		date_to_string(today, date_text, 0);
-		gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
-	}
 	cb_ic_transfertype = gtk_builder_get_object(builder, "cb_ic_transfertype");
 	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
 	if(cb_ic_allow_dsm != NULL)
@@ -89,6 +99,12 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
 	if(cb_ic_allow_resonant != NULL)
 		set_stable_tooltip(cb_ic_allow_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search several times slower.");
+	cb_ic_moon_aware_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_aware_flybys"));
+	if(cb_ic_moon_aware_flybys != NULL)
+		set_stable_tooltip(cb_ic_moon_aware_flybys, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search slower.");
+	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
+	if(cb_ic_moon_assist_arrival != NULL)
+		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture or circularization burn when one is available.");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
@@ -112,6 +128,7 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	g_signal_connect(cb_ic_arrbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	g_signal_connect(cb_ic_transfertype, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	update_ic_reference_defaults();
+	ic_initialized = TRUE;
 }
 
 void set_ic_default_system(char *system_name) {
@@ -239,6 +256,7 @@ Body ** get_bodies_from_grid(GtkWidget *grid, int num_bodies) {
 G_MODULE_EXPORT void on_ic_system_change() {
 	if(get_num_available_systems() > 0) {
 		ic_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_system))];
+		if(ic_initialized) update_datetime_type_for_system(ic_system);
 		update_central_body_dropdown(GTK_COMBO_BOX(cb_ic_central_body), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_depbody), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);

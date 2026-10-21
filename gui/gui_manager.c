@@ -124,6 +124,7 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	init_mission_db(builder);
 	// init progress window
 	init_info_windows(builder);
+	ic_initialize_date_defaults();
 	ksp_auto_connect();
 
 	if(!is_latest_version()) {
@@ -488,6 +489,4 @@ struct LV * get_all_launcher() {
 int * get_launcher_ids() {
 	return launcher_ids;
 }
-
-
 
