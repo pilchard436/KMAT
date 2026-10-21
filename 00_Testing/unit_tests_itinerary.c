@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "orbit_calculator/itin_tool.h"
 #include "orbit_calculator/search_rejections.h"
+#include "orbit_calculator/soi_encounter.h"
 #include "tools/file_io.h"
 #include "tools/file_io_internal.h"
 #include "orbitlib_fileio.h"
@@ -414,6 +415,34 @@ static void check_search_rejections(void) {
 	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
 }
 
+static void check_unmodeled_soi_detection(void) {
+	Body sun = {.mu = 1e14};
+	Body planet = {.mu = 1e10, .orbit = {.a = 1e8, .cb = &sun}};
+	Body *planets[] = {&planet};
+	CelestSystem solar = {.cb = &sun, .num_bodies = 1, .bodies = planets,
+		.prop_method = ORB_ELEMENTS, .ut0 = 0};
+	sun.system = &solar;
+	double planet_soi = planet.orbit.a * pow(planet.mu / sun.mu, 0.4);
+	OSV inside_planet_soi = {{1e8 + planet_soi / 2, 0, 0}, {0, 1e3, 0}};
+	OSV clear_of_planet = {{1e8 + 1e7, 0, 0}, {0, 1e3, 0}};
+	check_true("an unmodeled planet SOI crossing is detected",
+		coast_leg_crosses_unmodeled_soi(&solar, NULL, NULL, inside_planet_soi, 0, 1e-5));
+	check_true("a clear interplanetary coast is accepted",
+		!coast_leg_crosses_unmodeled_soi(&solar, NULL, NULL, clear_of_planet, 0, 1e-5));
+	check_true("a modeled endpoint body is exempt from SOI rejection",
+		!coast_leg_crosses_unmodeled_soi(&solar, &planet, NULL, inside_planet_soi, 0, 1e-5));
+
+	Body moon = {.mu = 1e6, .orbit = {.a = 1e6, .cb = &planet}};
+	Body *moons[] = {&moon};
+	CelestSystem planetary = {.cb = &planet, .num_bodies = 1, .bodies = moons,
+		.prop_method = ORB_ELEMENTS, .ut0 = 0};
+	planet.system = &planetary;
+	double moon_soi = moon.orbit.a * pow(moon.mu / planet.mu, 0.4);
+	OSV inside_moon_soi = {{1e8 + 1e6 + moon_soi / 2, 0, 0}, {0, 1e3, 0}};
+	check_true("nested moon SOIs are detected in central-body coordinates",
+		coast_leg_crosses_unmodeled_soi(&solar, &planet, NULL, inside_moon_soi, 0, 1e-5));
+}
+
 void check_moon_flybys(void);
 
 int run_itinerary_unit_tests(void) {
@@ -427,6 +456,7 @@ int run_itinerary_unit_tests(void) {
 	check_minimum_leg();
 	check_moons_are_saved();
 	check_moon_flybys();
+	check_unmodeled_soi_detection();
 	int failed = finish_tests("KMAT itinerary unit checks");
 	checks = failures = 0;
 	return failed;

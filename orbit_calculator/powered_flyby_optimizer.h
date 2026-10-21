@@ -60,6 +60,8 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 	Body **bodies, const double *times, size_t num_steps);
+int powered_route_has_unmodeled_soi_crossing(const Itin_Calc_Data *calc_data,
+	struct ItinStep *arrival, int *crosses);
 
 /* Re-solves a single stored route at its current dates with the powered-flyby model the search uses
  * (SOI-corrected arcs), keeping maneuver nodes at their positions, and writes the velocities back.

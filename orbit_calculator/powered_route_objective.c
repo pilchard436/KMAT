@@ -2,6 +2,7 @@
 #include "leg_variants.h"
 #include "flyby_policy.h"
 #include "search_cancel.h"
+#include "soi_encounter.h"
 #include "tools/starting_orbit.h"
 #include <stdlib.h>
 #include <string.h>
@@ -148,6 +149,35 @@ static int route_flyby(Vector3 incoming, Vector3 outgoing, Body *body, double mi
 	if(forced_radius > 0)
 		return calculate_powered_flyby_at_periapsis(incoming, outgoing, vec3(0, 0, 0), body, forced_radius, forced_side, result);
 	return calculate_powered_flyby(incoming, outgoing, vec3(0, 0, 0), body, minimum_periapsis, result);
+}
+
+static int route_crosses_unmodeled_soi(const PoweredRouteCandidate *candidate, CelestSystem *system,
+		const double *times, const PoweredFlybyResult *flybys, const Lambert3 *legs,
+		const PoweredDsmResult *dsms) {
+	for(size_t i = 0; i + 1 < candidate->num_steps; i++) {
+		double leg_start = times[i];
+		double leg_end = times[i + 1];
+		if(i > 0) leg_start += flybys[i].outgoing_soi_time / 86400;
+		if(i + 1 < candidate->num_steps - 1)
+			leg_end -= flybys[i + 1].incoming_soi_time / 86400;
+		OSV coast_start = {legs[i].r0, legs[i].v0};
+		if(i > 0) {
+			OSV body_at_exit;
+			if(!body_state_at(system, candidate->bodies[i], leg_start, &body_at_exit)) return 1;
+			coast_start.r = add_vec3(body_at_exit.r, flybys[i].outgoing_soi_state.r);
+			coast_start.v = add_vec3(body_at_exit.v, flybys[i].outgoing_soi_state.v);
+		}
+		if(dsms[i].used) {
+			if(coast_leg_crosses_unmodeled_soi(system, candidate->bodies[i], candidate->bodies[i + 1],
+				coast_start, leg_start, dsms[i].date) ||
+				coast_leg_crosses_unmodeled_soi(system, candidate->bodies[i], candidate->bodies[i + 1],
+					(OSV){dsms[i].position, dsms[i].velocity_after}, dsms[i].date, leg_end)) return 1;
+		} else if(coast_leg_crosses_unmodeled_soi(system, candidate->bodies[i], candidate->bodies[i + 1],
+			coast_start, leg_start, leg_end)) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 static double evaluate_route_variants_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
@@ -380,6 +410,13 @@ iterate:;
 		legs[i - 1].v1 = add_vec3(states[i].v, incoming_excess[i]);
 		legs[i].v0 = add_vec3(states[i].v, outgoing_excess[i]);
 	}
+	if(candidate->check_unmodeled_soi &&
+		route_crosses_unmodeled_soi(candidate, system, times, flybys, legs, dsm_local)) {
+		if(candidate->unmodeled_soi_crossing_out != NULL)
+			*candidate->unmodeled_soi_crossing_out = 1;
+		total_dv = DBL_MAX;
+		goto cleanup;
+	}
 	if(dsm_out != NULL)
 		memcpy(dsm_out, dsm_local, (candidate->num_steps - 1) * sizeof(*dsm_out));
 
@@ -395,6 +432,8 @@ cleanup:
 
 double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Calc_Data *calc_data,
 		const double *times, OSV *states, Lambert3 *legs, PoweredDsmResult *dsm_out) {
+	if(candidate->unmodeled_soi_crossing_out != NULL)
+		*candidate->unmodeled_soi_crossing_out = 0;
 	if(candidate->leg_variants != NULL)
 		return evaluate_route_variants_core(candidate, calc_data, times, states, legs, dsm_out, candidate->leg_variants);
 	size_t resonant[2];
@@ -417,6 +456,7 @@ double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Ca
 	int best_converged = 0;
 	int radix[2];
 	int combinations = 1;
+	int any_soi_crossing = 0;
 	for(int r = 0; r < num_resonant; r++) {
 		// A leg with a fixed-position maneuver picks its arc variants itself.
 		int fixed_maneuver = candidate->dsms != NULL && candidate->dsms[resonant[r]].enabled &&
@@ -432,11 +472,17 @@ double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Ca
 			remainder /= radix[r];
 		}
 		PoweredRouteCandidate trial_candidate = *candidate;
+		int trial_soi_crossing = 0;
+		trial_candidate.unmodeled_soi_crossing_out = candidate->check_unmodeled_soi ?
+			&trial_soi_crossing : NULL;
 		int trial_converged = 0;
 		trial_candidate.converged_out = &trial_converged;
 		double dv = evaluate_route_variants_core(&trial_candidate, calc_data, times, trial_states,
 			trial_legs, trial_dsm, variants);
-		if(!(dv < DBL_MAX)) continue;
+		if(!(dv < DBL_MAX)) {
+			any_soi_crossing |= trial_soi_crossing;
+			continue;
+		}
 		int better = best >= DBL_MAX || (trial_converged && !best_converged) ||
 			(trial_converged == best_converged && dv < best);
 		if(!better) continue;
@@ -447,6 +493,8 @@ double evaluate_route_core(const PoweredRouteCandidate *candidate, const Itin_Ca
 		if(dsm_out != NULL) memcpy(dsm_out, trial_dsm, num_legs * sizeof(*dsm_out));
 	}
 	if(candidate->converged_out != NULL) *candidate->converged_out = best_converged;
+	if(candidate->unmodeled_soi_crossing_out != NULL)
+		*candidate->unmodeled_soi_crossing_out = best < DBL_MAX ? 0 : any_soi_crossing;
 	free(variants);
 	free(trial_states);
 	free(trial_legs);
@@ -482,6 +530,101 @@ double evaluate_powered_flyby_route_objective_with_dsm(const Itin_Calc_Data *cal
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 		Body **bodies, const double *times, size_t num_steps) {
 	return evaluate_powered_flyby_route_objective_with_dsm(calc_data, bodies, times, num_steps, NULL);
+}
+
+int powered_route_has_unmodeled_soi_crossing(const Itin_Calc_Data *source, struct ItinStep *arrival,
+		int *crosses) {
+	if(crosses != NULL) *crosses = 0;
+	if(source == NULL || arrival == NULL || arrival->body == NULL || arrival->num_next_nodes != 0 ||
+		source->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET ||
+		source->seq_info.to_target.system == NULL) return 0;
+	struct ItinStep *first = get_first(arrival);
+	if(first == NULL || first->body == NULL) return 0;
+
+	size_t num_nodes = 0, num_steps = 0;
+	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->num_next_nodes > 1) return 0;
+		num_nodes++;
+		num_steps += node->body != NULL;
+	}
+	if(num_steps < 2) return 0;
+
+	Body **bodies = calloc(num_steps, sizeof(*bodies));
+	double *times = calloc(num_steps, sizeof(*times));
+	PoweredLegDsm *dsms = calloc(num_steps - 1, sizeof(*dsms));
+	Vector3 *seed_incoming = calloc(num_steps, sizeof(*seed_incoming));
+	Vector3 *seed_outgoing = calloc(num_steps, sizeof(*seed_outgoing));
+	OSV *states = calloc(num_steps, sizeof(*states));
+	Lambert3 *legs = calloc(num_steps - 1, sizeof(*legs));
+	if(bodies == NULL || times == NULL || dsms == NULL || seed_incoming == NULL ||
+		seed_outgoing == NULL || states == NULL || legs == NULL) {
+		free(bodies); free(times); free(dsms); free(seed_incoming); free(seed_outgoing);
+		free(states); free(legs);
+		return 0;
+	}
+
+	size_t index = 0;
+	int valid = 1;
+	for(struct ItinStep *node = first; node != NULL && valid;
+		node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body == NULL) continue;
+		bodies[index] = node->body;
+		times[index++] = node->date;
+	}
+	for(size_t i = 0; i + 1 < num_steps; i++)
+		if(!(times[i + 1] > times[i])) valid = 0;
+
+	index = 0;
+	for(struct ItinStep *node = first; node != NULL && valid;
+		node = node->next != NULL ? node->next[0] : NULL) {
+		if(node->body != NULL) {
+			if(index > 0 && index + 1 < num_steps) {
+				OSV body_state;
+				if(node->next == NULL || !body_state_at(source->seq_info.to_target.system,
+					node->body, node->date, &body_state)) {
+					valid = 0;
+					break;
+				}
+				seed_incoming[index] = subtract_vec3(node->v_arr, body_state.v);
+				seed_outgoing[index] = subtract_vec3(node->next[0]->v_dep, body_state.v);
+				if(!is_finite_vector(seed_incoming[index]) || !is_finite_vector(seed_outgoing[index]) ||
+					!(mag_vec3(seed_incoming[index]) > 0) || !(mag_vec3(seed_outgoing[index]) > 0))
+					valid = 0;
+			}
+			index++;
+			continue;
+		}
+		if(index == 0 || index >= num_steps || dsms[index - 1].enabled) {
+			valid = 0;
+			break;
+		}
+		dsms[index - 1] = (PoweredLegDsm){.enabled = 1, .use_position = 1,
+			.position = node->r, .date = node->date};
+	}
+
+	double objective = DBL_MAX;
+	int crossing = 0;
+	if(valid) {
+		Itin_Calc_Data calc_data = *source;
+		calc_data.jd_max_arr = times[num_steps - 1] + 1;
+		calc_data.max_duration = times[num_steps - 1] - times[0] + 1;
+		calc_data.dv_filter.max_totdv = 1e12;
+		calc_data.dv_filter.max_depdv = 1e12;
+		calc_data.dv_filter.max_satdv = 1e12;
+		PoweredRouteCandidate candidate = {.num_steps = num_steps, .bodies = bodies, .times = times,
+			.dsms = dsms, .seed_incoming = seed_incoming, .seed_outgoing = seed_outgoing,
+			.accept_unconverged = 1, .check_unmodeled_soi = 1,
+			.unmodeled_soi_crossing_out = &crossing};
+		int saved_budget = objective_budget;
+		objective_budget = -1;
+		objective = evaluate_route_core(&candidate, &calc_data, times, states, legs, NULL);
+		objective_budget = saved_budget;
+	}
+	if(crosses != NULL) *crosses = crossing;
+	free(bodies); free(times); free(dsms); free(seed_incoming); free(seed_outgoing);
+	free(states); free(legs);
+	(void)num_nodes;
+	return valid && (objective < DBL_MAX || crossing);
 }
 
 static int resolve_itinerary_internal(CelestSystem *system, struct ItinStep *first,
