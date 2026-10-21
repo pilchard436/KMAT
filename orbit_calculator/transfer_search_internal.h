@@ -10,10 +10,14 @@
 typedef struct Itin_Search_Profile {
 	double initial_grid_seconds;
 	double recursive_search_seconds;
+	double recursive_end_node_seconds;
+	double recursive_dv_pruning_seconds;
 	unsigned long long initial_lambert_calls;
 	unsigned long long recursive_lambert_calls;
 	ItinFlybyProfileStats *flyby_stats;
 } Itin_Search_Profile;
+
+extern _Thread_local Itin_Search_Profile *itin_search_profile_tls;
 #endif
 
 typedef struct Itin_Calc_Thread_Args {

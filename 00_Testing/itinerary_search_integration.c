@@ -17,8 +17,26 @@ int main(int argc, char **argv) {
 	if(coverage_reference || coverage_multi) argc = 1;
 	if(argc == 2 && strcmp(argv[1], "--full-profile") == 0)
 		return run_full_profile();
+	if(argc == 3 && strcmp(argv[1], "--full-profile-config") == 0) {
+		char *end;
+		unsigned long option_mask = strtoul(argv[2], &end, 10);
+		if(end == argv[2] || *end != '\0' || option_mask >= (1u << 5)) {
+			fprintf(stderr, "Profile option mask must be in the range 0..31\n");
+			return EXIT_FAILURE;
+		}
+		return run_full_profile_config((unsigned int)option_mask);
+	}
+	if(argc == 3 && strcmp(argv[1], "--full-profile-capture-config") == 0) {
+		char *end;
+		unsigned long option_mask = strtoul(argv[2], &end, 10);
+		if(end == argv[2] || *end != '\0' || option_mask >= (1u << 5)) {
+			fprintf(stderr, "Profile option mask must be in the range 0..31\n");
+			return EXIT_FAILURE;
+		}
+		return run_full_profile_capture_config((unsigned int)option_mask);
+	}
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--full-profile-config <0..31>|--full-profile-capture-config <0..31>|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 

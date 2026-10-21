@@ -142,3 +142,25 @@ When the worker returns, the GUI completion callback:
 
 This completion and save flow is implemented in
 [`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c).
+
+## 7. Search profiling
+
+Configure with `KMAT_ENABLE_SEARCH_PROFILE=ON` to enable detailed search timing.
+The integration runner accepts `--full-profile-config <0..31>` to run one
+flyby-final configuration, or `--full-profile-capture-config <0..31>` to run
+the same configuration with capture as the final transfer. The five mask bits
+represent resonant flybys, deep-space maneuvers, moon-aware flybys, moon assist
+on arrival, and custom starting orbit, respectively. Running each mask in a
+separate process avoids carrying thread-local caches between configurations.
+The output includes wall-clock time for initialization, search, powered-route
+optimization/refinement, and route filtering. Search timings are also reported
+as summed worker-seconds for the initial grid and recursive search. The
+recursive breakdown separates end-node collection, delta-v pruning, flyby
+search, and remaining route expansion work; per-body flyby timings and root
+evaluation counts are included. Summed worker-seconds are aggregate thread
+time, not wall-clock time, and should not be added to the wall-clock phase
+measurements.
+
+The completed flyby-final and capture-final 32-configuration matrices, their
+phase timings, and aggregate option effects are recorded in
+[`itinerary-profiling-results.md`](./itinerary-profiling-results.md).
