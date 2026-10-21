@@ -38,6 +38,8 @@ typedef struct PoweredRouteCandidate {
 	/* Accept the last iterate when the flyby iteration does not settle; converged_out reports which happened. */
 	int accept_unconverged;
 	int *converged_out;
+	int check_unmodeled_soi;
+	int *unmodeled_soi_crossing_out;
 } PoweredRouteCandidate;
 
 typedef struct SampleReservoir {

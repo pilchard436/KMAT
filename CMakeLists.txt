@@ -103,6 +103,7 @@ set(KMAT_ITINERARY_SOURCES
     orbit_calculator/itinerary_text.c
     orbit_calculator/flyby_policy.c
     orbit_calculator/moon_flyby.c
+    orbit_calculator/soi_encounter.c
     orbit_calculator/flyby_search.c
     orbit_calculator/leg_variants.c
     orbit_calculator/resonant_flybys.c

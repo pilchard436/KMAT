@@ -40,6 +40,9 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 		routes_blocked_by_moons++;
 		return 0;
 	}
+	int crosses_unmodeled_soi = 0;
+	if(powered_route_has_unmodeled_soi_crossing(calc_data, arrival, &crosses_unmodeled_soi) &&
+		crosses_unmodeled_soi) return 0;
 	return 1;
 }
 
@@ -290,4 +293,3 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 
 	return results;
 }
-
