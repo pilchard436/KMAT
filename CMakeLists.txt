@@ -113,6 +113,9 @@ add_executable(KMAT
     ${KMAT_FILE_IO_SOURCES}
     tools/file_io_format.c
     tools/itinerary_date_limits.c
+    tools/itinerary_date_input.c
+    tools/itinerary_date_picker_state.c
+    tools/itinerary_dv_limit.c
     tools/itinerary_reference_defaults.c
     tools/itinerary_reference_defaults.h
     tools/starting_orbit.c
@@ -222,6 +225,7 @@ add_executable(KMAT
     00_Testing/unit_tests_powered_flyby.c
     00_Testing/unit_tests_starting_orbit.c
     00_Testing/unit_tests_formats.c
+    00_Testing/unit_tests_itinerary_date_input.c
     00_Testing/unit_tests_porkchop.c
     00_Testing/unit_tests_reference_defaults.c
     00_Testing/unit_tests_itinerary.c

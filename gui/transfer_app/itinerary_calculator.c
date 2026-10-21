@@ -17,6 +17,7 @@ GObject *cb_ic_arrbody;
 GObject *tf_ic_mindepdate;
 GObject *tf_ic_maxdepdate;
 GObject *tf_ic_maxarrdate;
+GtkWidget *box_ic_maxarrdate;
 GObject *tf_ic_maxdur;
 GObject *rb_ic_maxarrdate;
 GObject *rb_ic_maxdur;
@@ -27,6 +28,8 @@ GtkWidget *cb_ic_moon_aware_flybys;
 GtkWidget *cb_ic_moon_assist_arrival;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
+GtkWidget *lb_ic_date_warning;
+GtkWidget *bt_ic_calc;
 GObject *vp_ic_fbbodies;
 GtkWidget *grid_ic_fbbodies;
 GtkWidget *ic_latest_dep_minus_month_button;
@@ -50,8 +53,7 @@ static void update_datetime_type_for_system(CelestSystem *system) {
 	if(system == NULL) return;
 	CelestSystem *top_level_system = get_top_level_system(system);
 	if(top_level_system == NULL || top_level_system->name == NULL) return;
-	enum DateType date_type = g_str_has_prefix(top_level_system->name, "Solar System") ?
-		DATE_ISO : DATE_KERBALISO;
+	enum DateType date_type = itinerary_date_type_for_system_name(top_level_system->name);
 	set_settings_datetime_type(date_type);
 }
 
@@ -59,13 +61,19 @@ void ic_initialize_date_defaults(void) {
 	if(ic_system == NULL) return;
 	update_datetime_type_for_system(ic_system);
 	enum DateType date_type = get_settings_datetime_type();
-	Datetime initial_date = date_type == DATE_ISO ?
-		(Datetime) {.y = 1950, .m = 1, .d = 1, .date_type = DATE_ISO} :
-		(Datetime) {.y = 1, .d = 1, .date_type = DATE_KERBALISO};
+	ItineraryStartupDateDefaults defaults = calculate_itinerary_startup_date_defaults(date_type);
 	char date_text[32];
-	date_to_string(initial_date, date_text, 0);
+	date_to_string(defaults.departure_date, date_text, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_ic_mindepdate), date_text);
 	update_ic_reference_defaults();
+	ic_syncing_time_limits = TRUE;
+	date_to_string(defaults.latest_arrival_date, date_text, 0);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_maxarrdate), date_text);
+	g_snprintf(date_text, sizeof(date_text), "%d", defaults.max_duration_user_days);
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_maxdur), date_text);
+	ic_syncing_time_limits = FALSE;
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_depdv), "");
+	gtk_entry_set_text(GTK_ENTRY(tf_ic_satdv), "");
 }
 
 
@@ -80,12 +88,19 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	tf_ic_mindepdate = gtk_builder_get_object(builder, "tf_ic_mindepdate");
 	tf_ic_maxdepdate = gtk_builder_get_object(builder, "tf_ic_maxdepdate");
 	tf_ic_maxarrdate = gtk_builder_get_object(builder, "tf_ic_maxarrdate");
+	box_ic_maxarrdate = GTK_WIDGET(gtk_builder_get_object(builder, "box_ic_maxarrdate"));
+	lb_ic_date_warning = GTK_WIDGET(gtk_builder_get_object(builder, "lb_ic_date_warning"));
+	bt_ic_calc = GTK_WIDGET(gtk_builder_get_object(builder, "bt_ic_calc"));
+	gtk_widget_hide(lb_ic_date_warning);
 	tf_ic_maxdur = gtk_builder_get_object(builder, "tf_ic_maxdur");
 	rb_ic_maxarrdate = gtk_builder_get_object(builder, "rb_ic_maxarrdate");
 	rb_ic_maxdur = gtk_builder_get_object(builder, "rb_ic_maxdur");
 	g_signal_connect(rb_ic_maxarrdate, "toggled", G_CALLBACK(on_ic_time_limit_toggled), NULL);
 	g_signal_connect(rb_ic_maxdur, "toggled", G_CALLBACK(on_ic_time_limit_toggled), NULL);
 	on_ic_time_limit_toggled(GTK_TOGGLE_BUTTON(rb_ic_maxarrdate), NULL);
+	connect_ic_date_entry_validation(GTK_ENTRY(tf_ic_mindepdate));
+	connect_ic_date_entry_validation(GTK_ENTRY(tf_ic_maxdepdate));
+	connect_ic_date_entry_validation(GTK_ENTRY(tf_ic_maxarrdate));
 	g_signal_connect(tf_ic_mindepdate, "changed", G_CALLBACK(on_ic_earliest_dep_changed), NULL);
 	g_signal_connect(tf_ic_maxarrdate, "changed", G_CALLBACK(on_ic_latest_arrival_changed), NULL);
 	g_signal_connect(tf_ic_maxdur, "changed", G_CALLBACK(on_ic_max_duration_changed), NULL);
@@ -113,12 +128,6 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 
 	create_combobox_dropdown_text_renderer(cb_ic_system, GTK_ALIGN_CENTER);
 	create_combobox_dropdown_text_renderer(cb_ic_central_body, GTK_ALIGN_CENTER);
-	cb_ic_moon_aware_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_aware_flybys"));
-	if(cb_ic_moon_aware_flybys != NULL)
-		set_stable_tooltip(cb_ic_moon_aware_flybys, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search slower.");
-	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
-	if(cb_ic_moon_assist_arrival != NULL)
-		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture or circularization burn when one is available.");
 	create_combobox_dropdown_text_renderer(cb_ic_depbody, GTK_ALIGN_CENTER);
 	create_combobox_dropdown_text_renderer(cb_ic_arrbody, GTK_ALIGN_CENTER);
 	update_system_dropdown(GTK_COMBO_BOX(cb_ic_system));
@@ -198,6 +207,7 @@ void ic_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 	change_text_field_date_type(tf_ic_maxarrdate, old_date_type, new_date_type);
 	ic_changing_date_type = FALSE;
 	update_month_adjust_button_labels(new_date_type);
+	validate_ic_date_range_widgets();
 }
 
 
@@ -260,6 +270,7 @@ Body ** get_bodies_from_grid(GtkWidget *grid, int num_bodies) {
 
 
 G_MODULE_EXPORT void on_ic_system_change() {
+	ic_close_date_picker();
 	if(get_num_available_systems() > 0) {
 		ic_system = get_available_systems()[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_system))];
 		if(ic_initialized) update_datetime_type_for_system(ic_system);

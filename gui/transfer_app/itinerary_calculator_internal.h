@@ -9,6 +9,8 @@
 #include "gui/settings.h"
 #include "gui/info_win_manager.h"
 #include "starting_orbit_editor.h"
+#include "tools/itinerary_date_input.h"
+#include "tools/itinerary_date_picker_state.h"
 
 #include <gtk/gtk.h>
 
@@ -21,6 +23,7 @@ extern GObject *cb_ic_arrbody;
 extern GObject *tf_ic_mindepdate;
 extern GObject *tf_ic_maxdepdate;
 extern GObject *tf_ic_maxarrdate;
+extern GtkWidget *box_ic_maxarrdate;
 extern GObject *tf_ic_maxdur;
 extern GObject *rb_ic_maxarrdate;
 extern GObject *rb_ic_maxdur;
@@ -31,6 +34,8 @@ extern GtkWidget *cb_ic_moon_aware_flybys;
 extern GtkWidget *cb_ic_moon_assist_arrival;
 extern GObject *tf_ic_depdv;
 extern GObject *tf_ic_satdv;
+extern GtkWidget *lb_ic_date_warning;
+extern GtkWidget *bt_ic_calc;
 extern GObject *vp_ic_fbbodies;
 extern GtkWidget *grid_ic_fbbodies;
 extern GtkWidget *ic_latest_dep_minus_month_button;
@@ -55,12 +60,16 @@ int get_num_selected_bodies_from_grid(GtkWidget *grid);
 Body ** get_bodies_from_grid(GtkWidget *grid, int num_bodies);
 
 // itinerary_calculator_dates.c
+void ic_close_date_picker(void);
+void connect_ic_date_entry_validation(GtkEntry *entry);
 void connect_date_adjust_buttons(GtkBuilder *builder, const char *prefix, GtkEntry *target);
 void update_month_adjust_button_labels(enum DateType date_type);
 void on_ic_earliest_dep_changed(GtkEditable *editable, gpointer user_data);
 void on_ic_latest_arrival_changed(GtkEditable *editable, gpointer user_data);
 void on_ic_max_duration_changed(GtkEditable *editable, gpointer user_data);
 gboolean update_ic_reference_defaults(void);
+gboolean validate_ic_date_range_widgets(void);
+void on_ic_date_range_changed(GtkEditable *editable, gpointer user_data);
 void on_ic_reference_input_changed(GtkWidget *widget, gpointer user_data);
 
 #endif

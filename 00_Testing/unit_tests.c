@@ -21,6 +21,7 @@ static int run_all_suites(void) {
     run_powered_flyby_tests();
     run_starting_orbit_tests();
     run_formats_tests();
+    run_itinerary_date_input_tests();
     run_porkchop_tests();
     run_reference_defaults_tests();
     run_ksp_tests();
