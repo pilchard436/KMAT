@@ -57,7 +57,7 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 
 // add itinerary departure date, duration, departure dv, deep-space maneuvre dv and arrival dv in porkchop array
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis);
-void set_porkchop_exact_flybys(int exact);
+int set_porkchop_exact_flybys(int exact);
 
 // from current step and given information, initiate calculation of next steps
 int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, Body **bodies, double jd_max_arr, struct Dv_Filter *dv_filter, int num_steps, int step);

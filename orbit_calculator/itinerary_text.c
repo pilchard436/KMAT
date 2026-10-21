@@ -75,6 +75,16 @@ static void append_arrival_assist(char *string, struct ItinStep *arrival, double
 		sprintf(string, "%s  %s assist: aim %.2f m/s, saves %.2f m/s\n", string, assist.moon->name, assist.aim_dv, plain - assisted);
 }
 
+static struct PorkchopPoint create_overview_porkchop_point(struct ItinStep *arrival,
+		double dep_periapsis, double arr_periapsis) {
+	int previous_assist = set_moon_assist_enabled(1);
+	int previous_exact = set_porkchop_exact_flybys(1);
+	struct PorkchopPoint point = create_porkchop_point(arrival, dep_periapsis, arr_periapsis);
+	set_porkchop_exact_flybys(previous_exact);
+	set_moon_assist_enabled(previous_assist);
+	return point;
+}
+
 void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string) {
 	sprintf(string, "");
 	if(step == NULL) return;
@@ -95,9 +105,7 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	if(date_type == DATE_KERBAL) dt *= 4;
 	sprintf(string, "%sArrival: %s\nDuration: %.2f days\n", string, date_string, dt);
 	
-	int previous_assist = set_moon_assist_enabled(1);
-	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
-	set_moon_assist_enabled(previous_assist);
+	struct PorkchopPoint pp = create_overview_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
@@ -170,9 +178,7 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	if(date_type == DATE_KERBAL) dt *= 4;
 	sprintf(string, "%sArrival: %s\nDuration: %.2f days\n", string, date_string, dt);
 	
-	int previous_assist = set_moon_assist_enabled(1);
-	struct PorkchopPoint pp = create_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
-	set_moon_assist_enabled(previous_assist);
+	struct PorkchopPoint pp = create_overview_porkchop_point(get_last(step), dep_periapsis, arr_periapsis);
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s\n", string, pp.dv_dep);
 	struct ItinStep *departure = get_first(step);

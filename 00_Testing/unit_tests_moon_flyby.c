@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "orbit_calculator/flyby_policy.h"
+#include "orbit_calculator/itin_tool.h"
 #include "orbit_calculator/moon_flyby.h"
 #include "orbitlib_transfer.h"
 
@@ -109,6 +110,31 @@ void check_moon_flybys(void) {
 	check_true("the planned periapsis and side are reported", plan_flyby_around_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, NULL, &planned_radius, &planned_side) &&
 		planned_radius > 0 && (planned_side == 1 || planned_side == -1));
+
+	struct ItinStep departure = {.body = &fixture.planet, .date = TEST_JD - 2,
+		.v_body = {0}, .v_dep = {1500, 0, 0}};
+	struct ItinStep flyby = {.body = &fixture.planet, .date = TEST_JD,
+		.v_body = {0}, .v_arr = fixture.incoming, .v_dep = fixture.incoming, .prev = &departure};
+	struct ItinStep arrival = {.body = &fixture.planet, .date = TEST_JD + 2,
+		.v_body = {0}, .v_arr = {100, 0, 0}, .v_dep = fixture.outgoing, .prev = &flyby};
+	struct ItinStep *departure_next[] = {&flyby}, *flyby_next[] = {&arrival};
+	departure.next = departure_next;
+	departure.num_next_nodes = 1;
+	flyby.next = flyby_next;
+	flyby.num_next_nodes = 1;
+	double periapsis_altitude = 1e4;
+	int previous_exact = set_porkchop_exact_flybys(0);
+	struct PorkchopPoint approximate = create_porkchop_point(&arrival, periapsis_altitude, periapsis_altitude);
+	double component_burn = itinerary_step_dv(&flyby, periapsis_altitude, periapsis_altitude, TF_FLYBY);
+	check_true("the moon-avoidance fixture distinguishes summary and component flyby burns",
+		component_burn > approximate.dv_flyby + 1);
+	char overview[8192];
+	itinerary_detailed_overview_to_string(&departure, DATE_ISO, periapsis_altitude, periapsis_altitude, overview);
+	const char *flyby_total = strstr(overview, "Powered flyby burns: ");
+	double displayed_burn = HUGE_VAL;
+	if(flyby_total != NULL) sscanf(flyby_total, "Powered flyby burns: %lf", &displayed_burn);
+	check_near("detailed overview total matches moon-aware flyby components", displayed_burn, component_burn, 0.01);
+	check_true("detailed overview restores the search flyby mode", set_porkchop_exact_flybys(previous_exact) == 0);
 	int previous = set_flyby_unrestricted_periapsis(1);
 	check_true("the planner keeps it to show the problem", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
 		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons));

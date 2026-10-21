@@ -31,7 +31,11 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 }
 
 static int porkchop_exact_flybys;
-void set_porkchop_exact_flybys(int exact) { porkchop_exact_flybys = exact; }
+int set_porkchop_exact_flybys(int exact) {
+	int previous = porkchop_exact_flybys;
+	porkchop_exact_flybys = !!exact;
+	return previous;
+}
 
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis) {
 	struct PorkchopPoint pp;
@@ -285,5 +289,4 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 		return flyby.burn_delta_v;
 	return HUGE_VAL;
 }
-
 
