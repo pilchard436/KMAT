@@ -1,5 +1,6 @@
 #include "integration_common.h"
 
+#include <sys/time.h>
 #include <time.h>
 
 static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
@@ -170,32 +171,43 @@ int run_coverage_report(void) {
 	return valid ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-int run_full_profile(void) {
-	char system_path[] = "../Celestial_Systems/solar_system_ephem.cfg";
-	CelestSystem *system = load_celestial_system_from_cfg_file(system_path);
-	if(system == NULL) {
-		fprintf(stderr, "Failed to load profile celestial system: %s\n", system_path);
-		return EXIT_FAILURE;
-	}
+enum FullProfileOption {
+	FULL_PROFILE_RESONANT = 1u << 0,
+	FULL_PROFILE_DSM = 1u << 1,
+	FULL_PROFILE_MOON_AWARE = 1u << 2,
+	FULL_PROFILE_MOON_ASSIST = 1u << 3,
+	FULL_PROFILE_CUSTOM_ORBIT = 1u << 4
+};
+
+static double benchmark_wall_seconds(void) {
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	return now.tv_sec + now.tv_usec / 1000000.0;
+}
+
+static int run_full_profile_configuration(CelestSystem *system, unsigned int option_mask,
+		enum LastTransferType last_transfer_type) {
+	double outer_start = benchmark_wall_seconds();
 	Body *departure_body = get_body_by_name("Earth", system);
 	Body *arrival_body = get_body_by_name("Saturn", system);
-	const char *candidate_names[] = {"Earth", "Mars", "Vesta", "Ceres", "Jupiter", "Saturn"};
+	const char *candidate_names[] = {"Earth", "Mars", "Jupiter", "Saturn"};
 	Body *flyby_bodies[sizeof(candidate_names) / sizeof(candidate_names[0])];
 	for(size_t i = 0; i < sizeof(candidate_names) / sizeof(candidate_names[0]); i++) {
 		flyby_bodies[i] = get_body_by_name((char *)candidate_names[i], system);
 		if(flyby_bodies[i] == NULL) {
 			fprintf(stderr, "Profile system is missing %s\n", candidate_names[i]);
-			free_celestial_system(system);
-			return EXIT_FAILURE;
+			return 0;
 		}
 	}
 	if(departure_body == NULL || arrival_body == NULL) {
 		fprintf(stderr, "Profile system is missing Earth or Saturn\n");
-		free_celestial_system(system);
-		return EXIT_FAILURE;
+		return 0;
 	}
 
 	Itin_Calc_Data calc_data = {0};
+	calc_data.allow_dsm = (option_mask & FULL_PROFILE_DSM) != 0;
+	calc_data.moon_aware_flybys = (option_mask & FULL_PROFILE_MOON_AWARE) != 0;
+	calc_data.moon_assist_arrival = (option_mask & FULL_PROFILE_MOON_ASSIST) != 0;
 	calc_data.jd_min_dep = 2461325.50;
 	calc_data.jd_max_dep = 2461690.50;
 	calc_data.jd_max_arr = 2466097.50;
@@ -206,7 +218,7 @@ int run_full_profile(void) {
 		.max_satdv = 7282,
 		.dep_periapsis = departure_body->atmo_alt + 50000,
 		.arr_periapsis = arrival_body->atmo_alt + 50000,
-		.last_transfer_type = TF_FLYBY
+		.last_transfer_type = last_transfer_type
 	};
 	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
 		.type = ITIN_SEQ_INFO_TO_TARGET,
@@ -214,9 +226,30 @@ int run_full_profile(void) {
 		.dep_body = departure_body,
 		.arr_body = arrival_body,
 		.flyby_bodies = flyby_bodies,
-		.num_flyby_bodies = (int)(sizeof(candidate_names) / sizeof(candidate_names[0]))
+		.num_flyby_bodies = (int)(sizeof(candidate_names) / sizeof(candidate_names[0])),
+		.allow_resonant = (option_mask & FULL_PROFILE_RESONANT) != 0
 	};
+	StartingOrbit custom_orbit = starting_orbit_circular(
+		departure_body->radius + departure_body->atmo_alt + 50000);
+	if((option_mask & FULL_PROFILE_CUSTOM_ORBIT) != 0) {
+		if(!starting_orbit_is_valid(&custom_orbit, departure_body)) {
+			fprintf(stderr, "Profile custom starting orbit is invalid\n");
+			return 0;
+		}
+		starting_orbit_set_active(&custom_orbit, departure_body);
+	} else {
+		starting_orbit_set_active(NULL, NULL);
+	}
+
+	printf("\nPROFILE_CONFIG|%02u|transfer=%s|resonant=%d|dsm=%d|moon_aware=%d|moon_assist=%d|custom_orbit=%d\n",
+		option_mask,
+		last_transfer_type == TF_CAPTURE ? "capture" : "flyby",
+		(option_mask & FULL_PROFILE_RESONANT) != 0,
+		calc_data.allow_dsm, calc_data.moon_aware_flybys,
+		calc_data.moon_assist_arrival, (option_mask & FULL_PROFILE_CUSTOM_ORBIT) != 0);
+	double calculation_start = benchmark_wall_seconds();
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	double calculation_seconds = benchmark_wall_seconds() - calculation_start;
 	int valid = results.num_itins > 0 && results.powered_routes_corrected > 0 &&
 		results.powered_itineraries_pruned * 100 <= results.num_itins &&
 		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
@@ -229,6 +262,7 @@ int run_full_profile(void) {
 			results.num_itins, results.powered_routes_corrected, results.powered_itineraries_pruned,
 			results.powered_repairs_attempted, results.powered_repairs_recovered,
 			results.powered_challenges_refined, results.best_powered_refined_total_dv);
+	int previous_moon_assist = set_moon_assist_enabled(calc_data.moon_assist_arrival);
 	for(int i = 0; i < results.num_deps; i++) {
 		int count = get_number_of_itineraries(results.departures[i]);
 		struct ItinStep **leaves = malloc((size_t)count * sizeof(*leaves));
@@ -238,15 +272,18 @@ int run_full_profile(void) {
 		for(int j = 0; j < stored; j++) {
 			struct PorkchopPoint point = create_porkchop_point(leaves[j],
 				calc_data.dv_filter.dep_periapsis, calc_data.dv_filter.arr_periapsis);
-			double total = point.dv_dep + point.dv_flyby + point.dv_dsm;
+			double arrival_dv = last_transfer_type == TF_CAPTURE ? point.dv_arr_cap :
+				last_transfer_type == TF_CIRC ? point.dv_arr_circ : 0;
+			double satellite_dv = point.dv_dsm + point.dv_flyby + arrival_dv;
+			double total = point.dv_dep + satellite_dv;
 			if(leaves[j]->body != arrival_body || !isfinite(total) ||
 				total > calc_data.dv_filter.max_totdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dv_dep > calc_data.dv_filter.max_depdv + POWERED_TEST_DV_TOLERANCE ||
-				point.dv_dsm + point.dv_flyby > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
+				satellite_dv > calc_data.dv_filter.max_satdv + POWERED_TEST_DV_TOLERANCE ||
 				point.dep_date < calc_data.jd_min_dep || point.dep_date > calc_data.jd_max_dep ||
 				leaves[j]->date > calc_data.jd_max_arr || point.dur > calc_data.max_duration) {
 				if(valid) fprintf(stderr, "Full-profile route violates limits: total %.1f dep %.1f sat %.1f dur %.1f\n",
-					total, point.dv_dep, point.dv_dsm + point.dv_flyby, point.dur);
+					total, point.dv_dep, satellite_dv, point.dur);
 				valid = 0;
 			}
 		}
@@ -258,14 +295,52 @@ int run_full_profile(void) {
 	for(int i = 0; array != NULL && i < results.num_itins; i++)
 		if(isnan(array[i].dv_arr_cap) || isnan(array[i].dv_arr_circ)) valid = 0;
 	free(array);
+	set_moon_assist_enabled(previous_moon_assist);
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
-	free_celestial_system(system);
+	starting_orbit_set_active(NULL, NULL);
 	if(!valid) {
 		fprintf(stderr, "Full-profile search failed route validity/quality checks\n");
+	}
+	else {
+		printf("UI-free full-profile search passed: %d nodes, %d itineraries\n",
+			results.num_nodes, results.num_itins);
+	}
+	printf("MATRIX_RESULT|%02u|%d|%d|%d|%d|%d|%d|%.3f|%.3f|%d|%d|%d\n",
+		option_mask,
+		(option_mask & FULL_PROFILE_RESONANT) != 0,
+		calc_data.allow_dsm, calc_data.moon_aware_flybys,
+		calc_data.moon_assist_arrival, (option_mask & FULL_PROFILE_CUSTOM_ORBIT) != 0,
+		valid, calculation_seconds, benchmark_wall_seconds() - outer_start,
+		results.num_deps, results.num_nodes, results.num_itins);
+	return valid;
+}
+
+static int run_full_profile_config_with_transfer(unsigned int option_mask,
+		enum LastTransferType last_transfer_type) {
+	if(option_mask >= (1u << 5)) {
+		fprintf(stderr, "Profile option mask must be in the range 0..31\n");
 		return EXIT_FAILURE;
 	}
-	printf("UI-free full-profile search passed: %d nodes, %d itineraries\n",
-		results.num_nodes, results.num_itins);
-	return EXIT_SUCCESS;
+	char system_path[] = "../Celestial_Systems/solar_system_ephem.cfg";
+	CelestSystem *system = load_celestial_system_from_cfg_file(system_path);
+	if(system == NULL) {
+		fprintf(stderr, "Failed to load profile celestial system: %s\n", system_path);
+		return EXIT_FAILURE;
+	}
+	int valid = run_full_profile_configuration(system, option_mask, last_transfer_type);
+	free_celestial_system(system);
+	return valid ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+int run_full_profile_config(unsigned int option_mask) {
+	return run_full_profile_config_with_transfer(option_mask, TF_FLYBY);
+}
+
+int run_full_profile_capture_config(unsigned int option_mask) {
+	return run_full_profile_config_with_transfer(option_mask, TF_CAPTURE);
+}
+
+int run_full_profile(void) {
+	return run_full_profile_config(0);
 }

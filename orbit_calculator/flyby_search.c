@@ -4,6 +4,7 @@
 #include "resonant_flybys.h"
 #include "search_cancel.h"
 #include "powered_seed_selection.h"
+#include "transfer_search_internal.h"
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -139,14 +140,18 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
 	if(itinerary_search_cancelled(NULL)) return;
-	if(next_body == tf->body) {
-		find_resonant_flybys(tf, system, min_dt, max_dt);
-		return;
-	}
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	ItinFlybyProfileStats *profile_stats = get_flyby_profile_stats(next_body);
+	double profile_start = progress_clock();
 	if(profile_stats != NULL) profile_stats->searches++;
 #endif
+	if(next_body == tf->body) {
+		find_resonant_flybys(tf, system, min_dt, max_dt);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		if(profile_stats != NULL) profile_stats->search_seconds += progress_clock() - profile_start;
+#endif
+		return;
+	}
 	OSV osv_dep = {tf->r, tf->v_body};
 	OSV osv_arr0 = system->prop_method == ORB_ELEMENTS ?
 				   osv_from_elements(next_body->orbit, tf->date) :
@@ -336,6 +341,9 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 			struct ItinStep ** new_next = realloc(tf->next, (counter+tf->num_next_nodes) * sizeof(struct ItinStep *));
 			if(new_next == NULL) {
 				printf("\nERROR WHILE REALLOCATING ITINERARIES DURING TRANSFER CALCULATION!!!\n");
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+				if(profile_stats != NULL) profile_stats->search_seconds += progress_clock() - profile_start;
+#endif
 				return;
 			}
 			tf->next = new_next;
@@ -344,4 +352,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 
 		tf->num_next_nodes += counter;
 	}
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	if(profile_stats != NULL) profile_stats->search_seconds += progress_clock() - profile_start;
+#endif
 }

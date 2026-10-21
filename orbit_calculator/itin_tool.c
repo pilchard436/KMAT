@@ -2,6 +2,7 @@
 #include "powered_seed_selection.h"
 #include "search_cancel.h"
 #include "search_rejections.h"
+#include "transfer_search_internal.h"
 #include "tools/starting_orbit.h"
 #include <math.h>
 #include <stdlib.h>
@@ -198,6 +199,9 @@ int continue_to_next_steps_and_check_for_valid_itins(struct ItinStep *curr_step,
 }
 
 int find_copy_and_store_end_nodes(struct ItinStep *curr_step, struct Body *arr_body) {
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	double profile_start = itin_search_profile_tls != NULL ? progress_clock() : 0;
+#endif
 	int num_of_end_nodes = 0;
 	for(int i = 0; i < curr_step->num_next_nodes; i++) {
 		if(curr_step->next[i]->body == arr_body) num_of_end_nodes++;
@@ -207,6 +211,10 @@ int find_copy_and_store_end_nodes(struct ItinStep *curr_step, struct Body *arr_b
 		struct ItinStep ** new_next = realloc(curr_step->next, (num_of_end_nodes+curr_step->num_next_nodes) * sizeof(struct ItinStep *));
 		if(new_next == NULL) {
 			printf("\nERROR WHILE REALLOCATING ITINERARIES DURING END NODE COPYING!!!\n");
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+			if(itin_search_profile_tls != NULL)
+				itin_search_profile_tls->recursive_end_node_seconds += progress_clock() - profile_start;
+#endif
 			return 0;
 		}
 		curr_step->next = new_next;
@@ -233,10 +241,17 @@ int find_copy_and_store_end_nodes(struct ItinStep *curr_step, struct Body *arr_b
 	}
 
 	curr_step->num_next_nodes += num_of_end_nodes;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	if(itin_search_profile_tls != NULL)
+		itin_search_profile_tls->recursive_end_node_seconds += progress_clock() - profile_start;
+#endif
 	return num_of_end_nodes;
 }
 
 int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_step, int num_of_end_nodes, struct Dv_Filter *dv_filter) {
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	double profile_start = itin_search_profile_tls != NULL ? progress_clock() : 0;
+#endif
 	for(int i = curr_step->num_next_nodes-num_of_end_nodes; i < curr_step->num_next_nodes; i++) {
 		struct ItinStep *next = curr_step->next[i];
 		struct PorkchopPoint porkchop_point = create_porkchop_point(next, dv_filter->dep_periapsis, dv_filter->arr_periapsis);
@@ -256,6 +271,10 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 			num_of_end_nodes--;
 		}
 	}
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	if(itin_search_profile_tls != NULL)
+		itin_search_profile_tls->recursive_dv_pruning_seconds += progress_clock() - profile_start;
+#endif
 	return num_of_end_nodes;
 }
 

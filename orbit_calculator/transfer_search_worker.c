@@ -15,6 +15,10 @@ void set_first_leg_window_scale(double scale) {
 
 const int NUM_INITIAL_TRANSFERS_PER_BODY = 500;
 
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+_Thread_local Itin_Search_Profile *itin_search_profile_tls;
+#endif
+
 void *calc_itins_from_departure(void *args) {
 	Itin_Calc_Thread_Args *thread_args = (struct Itin_Calc_Thread_Args *)args;
 	Itin_Calc_Data *calc_data = thread_args->calc_data;
@@ -70,6 +74,7 @@ void *calc_itins_from_departure(void *args) {
 		show_departure_progress(jd_diff);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 		Itin_Search_Profile *profile = &thread_args->profiles[index];
+		itin_search_profile_tls = profile;
 		struct timeval phase_start, phase_end;
 		gettimeofday(&phase_start, NULL);
 #endif
@@ -232,6 +237,7 @@ void *calc_itins_from_departure(void *args) {
 		profile->recursive_search_seconds += (phase_end.tv_sec - phase_start.tv_sec) +
 			(phase_end.tv_usec - phase_start.tv_usec) / 1000000.0;
 		set_itin_search_flyby_profile(NULL, 0, NULL);
+		itin_search_profile_tls = NULL;
 #endif
 
 		incr_thread_counter_by_amount(2, get_number_of_itineraries(get_first(curr_step)));

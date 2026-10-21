@@ -8,6 +8,7 @@ typedef struct ItinFlybyProfileStats {
 	unsigned long long searches;
 	unsigned long long left_evaluations;
 	unsigned long long right_evaluations;
+	double search_seconds;
 } ItinFlybyProfileStats;
 #endif
 

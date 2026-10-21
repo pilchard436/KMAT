@@ -78,6 +78,13 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	struct timeval start, end;
 	double elapsed_time;
 	gettimeofday(&start, NULL);  // Record the ending time
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	double phase_start = progress_clock();
+	double initialization_seconds = 0;
+	double search_seconds = 0;
+	double optimization_seconds = 0;
+	double filtering_seconds = 0;
+#endif
 
 	int num_deps = (int) (calc_data.jd_max_dep-calc_data.jd_min_dep+1);
 
@@ -153,8 +160,15 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 
 	show_progress("Transfer Calculation progress", 0, 1);
 	struct Thread_Pool thread_pool;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	initialization_seconds = progress_clock() - phase_start;
+	phase_start = progress_clock();
+#endif
 	thread_pool = use_thread_pool32(calc_itins_from_departure, &thread_args);
 	join_thread_pool(thread_pool);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	search_seconds = progress_clock() - phase_start;
+#endif
 	PoweredSeedSearchStats seed_stats = {0};
 	for(int i = 0; i < num_deps; i++) {
 		seed_stats.evaluations += thread_args.seed_stats[i].evaluations;
@@ -177,11 +191,16 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	#ifdef KMAT_ENABLE_SEARCH_PROFILE
 	double initial_grid_seconds = 0;
 	double recursive_search_seconds = 0;
+	double recursive_end_node_seconds = 0;
+	double recursive_dv_pruning_seconds = 0;
+	double flyby_search_seconds = 0;
 	unsigned long long initial_lambert_calls = 0;
 	unsigned long long recursive_lambert_calls = 0;
 	for(int i = 0; i < num_deps; i++) {
 		initial_grid_seconds += profiles[i].initial_grid_seconds;
 		recursive_search_seconds += profiles[i].recursive_search_seconds;
+		recursive_end_node_seconds += profiles[i].recursive_end_node_seconds;
+		recursive_dv_pruning_seconds += profiles[i].recursive_dv_pruning_seconds;
 		initial_lambert_calls += profiles[i].initial_lambert_calls;
 		recursive_lambert_calls += profiles[i].recursive_lambert_calls;
 	}
@@ -189,25 +208,39 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		initial_grid_seconds, initial_lambert_calls);
 	printf("Recursive search: %.3f summed worker-seconds, %llu Lambert solves\n",
 		recursive_search_seconds, recursive_lambert_calls);
+	for(int body_index = 0; body_index < num_profile_bodies; body_index++)
+		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++)
+			flyby_search_seconds += profiles[departure_index].flyby_stats[body_index].search_seconds;
+	double recursive_route_expansion_seconds = recursive_search_seconds -
+		recursive_end_node_seconds - recursive_dv_pruning_seconds - flyby_search_seconds;
+	printf("Recursive breakdown (summed worker-seconds): end-node collection %.3f, delta-v pruning %.3f, flyby search %.3f, route expansion/other %.3f\n",
+		recursive_end_node_seconds, recursive_dv_pruning_seconds, flyby_search_seconds,
+		recursive_route_expansion_seconds);
 	for(int body_index = 0; body_index < num_profile_bodies; body_index++) {
 		unsigned long long searches = 0;
 		unsigned long long left_evaluations = 0;
 		unsigned long long right_evaluations = 0;
+		double search_seconds = 0;
 		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++) {
 			ItinFlybyProfileStats stats = profiles[departure_index].flyby_stats[body_index];
 			searches += stats.searches;
 			left_evaluations += stats.left_evaluations;
 			right_evaluations += stats.right_evaluations;
+			search_seconds += stats.search_seconds;
 		}
 		if(searches > 0)
-			printf("Flyby %s: %llu searches, %llu left / %llu right root evaluations\n",
-				profile_bodies[body_index]->name, searches, left_evaluations, right_evaluations);
+			printf("Flyby %s: %.3f summed worker-seconds, %llu searches, %llu left / %llu right root evaluations\n",
+				profile_bodies[body_index]->name, search_seconds, searches,
+				left_evaluations, right_evaluations);
 	}
 	free(profiles);
 	free(flyby_profiles);
 	#endif
 
 	// Remove empty departure trees and compact the results in one pass.
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	phase_start = progress_clock();
+#endif
 	int valid_departures = 0;
 	for(int i = 0; i < num_deps; i++) {
 		if(departures[i] == NULL || departures[i]->num_next_nodes == 0) {
@@ -217,11 +250,20 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		departures[valid_departures++] = departures[i];
 	}
 	num_deps = valid_departures;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	filtering_seconds += progress_clock() - phase_start;
+#endif
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 		if(get_thread_counter(3) == 0) {
 			PoweredFlybyOptimizationStats powered_stats;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+			phase_start = progress_clock();
+#endif
 			optimize_powered_flyby_routes(departures, num_deps, &calc_data,
 				POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+			optimization_seconds = progress_clock() - phase_start;
+#endif
 			results.powered_routes_valid = powered_stats.routes_valid;
 			results.powered_routes_corrected = powered_stats.routes_corrected;
 			results.powered_initial_rejections = powered_stats.initial_rejections;
@@ -257,6 +299,9 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		int itineraries_before_prune = 0;
 		for(int i = 0; i < num_deps; i++)
 			itineraries_before_prune += get_number_of_itineraries(departures[i]);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		phase_start = progress_clock();
+#endif
 		valid_departures = 0;
 		routes_blocked_by_moons = 0;
 		for(int i = 0; i < num_deps; i++) {
@@ -271,6 +316,9 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 		for(int i = 0; i < num_deps; i++)
 			itineraries_after_prune += get_number_of_itineraries(departures[i]);
 		results.powered_itineraries_pruned = itineraries_before_prune - itineraries_after_prune;
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+		filtering_seconds += progress_clock() - phase_start;
+#endif
 		if(routes_blocked_by_moons > 0)
 			printf("Moon check removed %d of %d routes (hit a moon or passed inside a moon's sphere of influence)\n",
 				routes_blocked_by_moons, itineraries_before_prune);
@@ -279,6 +327,10 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	gettimeofday(&end, NULL);  // Record the ending time
 	elapsed_time = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
 	printf("----- | Total elapsed time: %.3f s | ---------\n", elapsed_time);
+#ifdef KMAT_ENABLE_SEARCH_PROFILE
+	printf("Phase wall times: initialization %.3f s, search %.3f s, optimization/refinement %.3f s, filtering %.3f s\n",
+		initialization_seconds, search_seconds, optimization_seconds, filtering_seconds);
+#endif
 
 	int num_itins = 0, num_nodes = 0;
 	for(int i = 0; i < num_deps; i++) num_itins += get_number_of_itineraries(departures[i]);
