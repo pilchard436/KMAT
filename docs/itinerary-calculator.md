@@ -49,11 +49,10 @@ calculator's search configuration:
   no limit for that category. The total delta-v cap is the sum of the two
   limits. Departure burn is checked against the departure limit; subsequent
   satellite costs are checked against the satellite limit.
-- **Result modes:** the Itinerary and Sequence Calculators compute both
-  **Fly-By** and **Capture** results in one search. The shared route search uses the looser
-  Fly-By arrival filter, then Capture routes are separately optimized and
-  filtered with their capture cost. Porkchop Analyzer can switch between the
-  two saved result sets without rerunning the search.
+- **Fly-By and Capture results:** both are computed in one search. The shared
+  route search uses the looser Fly-By arrival filter, then Capture routes are
+  separately optimized and filtered with their capture cost. Porkchop Analyzer
+  can switch between the two saved result sets without rerunning the search.
 - **Periapsis:** the calculator uses the configured departure and arrival
   periapsis altitudes, offset by each body's atmospheric altitude, for burn
   calculations.

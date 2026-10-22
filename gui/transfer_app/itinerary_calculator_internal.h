@@ -27,7 +27,6 @@ extern GtkWidget *box_ic_maxarrdate;
 extern GObject *tf_ic_maxdur;
 extern GObject *rb_ic_maxarrdate;
 extern GObject *rb_ic_maxdur;
-extern GObject *cb_ic_transfertype;
 extern GtkWidget *cb_ic_allow_dsm;
 extern GtkWidget *cb_ic_allow_resonant;
 extern GtkWidget *cb_ic_moon_aware_flybys;

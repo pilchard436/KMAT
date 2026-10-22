@@ -21,7 +21,6 @@ GtkWidget *box_ic_maxarrdate;
 GObject *tf_ic_maxdur;
 GObject *rb_ic_maxarrdate;
 GObject *rb_ic_maxdur;
-GObject *cb_ic_transfertype;
 GtkWidget *cb_ic_allow_dsm;
 GtkWidget *cb_ic_allow_resonant;
 GtkWidget *cb_ic_moon_aware_flybys;
@@ -48,6 +47,26 @@ static gboolean ic_initialized;
 
 double ic_dep_periapsis = 50e3;
 double ic_arr_periapsis = 50e3;
+
+static gboolean on_ic_info_icon_enter(GtkWidget *widget, GdkEventCrossing *event, gpointer user_data) {
+	(void)event;
+	(void)user_data;
+	gtk_style_context_add_class(gtk_widget_get_style_context(widget), "ic-info-icon-hover");
+	return FALSE;
+}
+
+static gboolean on_ic_info_icon_leave(GtkWidget *widget, GdkEventCrossing *event, gpointer user_data) {
+	(void)event;
+	(void)user_data;
+	gtk_style_context_remove_class(gtk_widget_get_style_context(widget), "ic-info-icon-hover");
+	return FALSE;
+}
+
+static void setup_ic_info_icon_hover(GtkWidget *widget) {
+	set_css_class_for_widget(widget, "ic-info-icon");
+	g_signal_connect(widget, "enter-notify-event", G_CALLBACK(on_ic_info_icon_enter), NULL);
+	g_signal_connect(widget, "leave-notify-event", G_CALLBACK(on_ic_info_icon_leave), NULL);
+}
 
 static void update_datetime_type_for_system(CelestSystem *system) {
 	if(system == NULL) return;
@@ -107,19 +126,46 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	connect_date_adjust_buttons(builder, "ic_maxdep", GTK_ENTRY(tf_ic_maxdepdate));
 	connect_date_adjust_buttons(builder, "ic_maxarr", GTK_ENTRY(tf_ic_maxarrdate));
 	update_month_adjust_button_labels(get_settings_datetime_type());
-	cb_ic_transfertype = gtk_builder_get_object(builder, "cb_ic_transfertype");
 	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
-	if(cb_ic_allow_dsm != NULL)
-		set_stable_tooltip(cb_ic_allow_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear.");
+	if(cb_ic_allow_dsm != NULL) {
+		gtk_widget_set_tooltip_text(cb_ic_allow_dsm, NULL);
+		gtk_widget_set_has_tooltip(cb_ic_allow_dsm, FALSE);
+	}
+	GtkWidget *eb_ic_info_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_dsm"));
+	if(eb_ic_info_dsm != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_dsm);
+		set_stable_tooltip(eb_ic_info_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear. Makes the search about 10% slower.");
+	}
 	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
-	if(cb_ic_allow_resonant != NULL)
-		set_stable_tooltip(cb_ic_allow_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search several times slower.");
+	if(cb_ic_allow_resonant != NULL) {
+		gtk_widget_set_tooltip_text(cb_ic_allow_resonant, NULL);
+		gtk_widget_set_has_tooltip(cb_ic_allow_resonant, FALSE);
+	}
+	GtkWidget *eb_ic_info_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_resonant"));
+	if(eb_ic_info_resonant != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_resonant);
+		set_stable_tooltip_markup(eb_ic_info_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search <span foreground=\"red\"><b>4.5 times</b></span> slower.");
+	}
 	cb_ic_moon_aware_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_aware_flybys"));
-	if(cb_ic_moon_aware_flybys != NULL)
-		set_stable_tooltip(cb_ic_moon_aware_flybys, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search slower.");
+	if(cb_ic_moon_aware_flybys != NULL) {
+		gtk_widget_set_tooltip_text(cb_ic_moon_aware_flybys, NULL);
+		gtk_widget_set_has_tooltip(cb_ic_moon_aware_flybys, FALSE);
+	}
+	GtkWidget *eb_ic_info_moon_aware = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_moon_aware"));
+	if(eb_ic_info_moon_aware != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_moon_aware);
+		set_stable_tooltip(eb_ic_info_moon_aware, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search about 2% slower.");
+	}
 	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
-	if(cb_ic_moon_assist_arrival != NULL)
-		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture burn when one is available.");
+	if(cb_ic_moon_assist_arrival != NULL) {
+		gtk_widget_set_tooltip_text(cb_ic_moon_assist_arrival, NULL);
+		gtk_widget_set_has_tooltip(cb_ic_moon_assist_arrival, FALSE);
+	}
+	GtkWidget *eb_ic_info_moon_assist = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_moon_assist"));
+	if(eb_ic_info_moon_assist != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_moon_assist);
+		set_stable_tooltip(eb_ic_info_moon_assist, "Uses a moon flyby to reduce the capture burn when one is available. Makes the search about 30% slower.");
+	}
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
@@ -141,7 +187,6 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	}
 	g_signal_connect(cb_ic_depbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	g_signal_connect(cb_ic_arrbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
-	g_signal_connect(cb_ic_transfertype, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	update_ic_reference_defaults();
 	ic_initialized = TRUE;
 }

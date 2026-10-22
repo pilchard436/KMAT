@@ -283,7 +283,7 @@ static void on_stable_tooltip_widget_destroy(GtkWidget *widget, gpointer data) {
 	g_free(tip);
 }
 
-void set_stable_tooltip(GtkWidget *widget, const char *text) {
+static void set_stable_tooltip_content(GtkWidget *widget, const char *text, gboolean use_markup) {
 	StableTooltip *tip = g_object_get_data(G_OBJECT(widget), "stable-tooltip");
 	gtk_widget_set_tooltip_text(widget, NULL);
 	if(tip == NULL) {
@@ -293,6 +293,10 @@ void set_stable_tooltip(GtkWidget *widget, const char *text) {
 		gtk_popover_set_position(GTK_POPOVER(tip->popover), GTK_POS_BOTTOM);
 		gtk_container_set_border_width(GTK_CONTAINER(tip->popover), 6);
 		tip->label = gtk_label_new(NULL);
+		gtk_label_set_line_wrap(GTK_LABEL(tip->label), TRUE);
+		gtk_label_set_line_wrap_mode(GTK_LABEL(tip->label), PANGO_WRAP_WORD_CHAR);
+		gtk_label_set_max_width_chars(GTK_LABEL(tip->label), 50);
+		gtk_label_set_xalign(GTK_LABEL(tip->label), 0.0f);
 		gtk_container_add(GTK_CONTAINER(tip->popover), tip->label);
 		gtk_widget_add_events(widget, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK);
 		g_signal_connect(widget, "enter-notify-event", G_CALLBACK(on_stable_tooltip_enter), tip);
@@ -302,7 +306,18 @@ void set_stable_tooltip(GtkWidget *widget, const char *text) {
 		g_signal_connect(widget, "destroy", G_CALLBACK(on_stable_tooltip_widget_destroy), tip);
 		g_object_set_data(G_OBJECT(widget), "stable-tooltip", tip);
 	}
-	gtk_label_set_text(GTK_LABEL(tip->label), text);
+	if(use_markup)
+		gtk_label_set_markup(GTK_LABEL(tip->label), text);
+	else
+		gtk_label_set_text(GTK_LABEL(tip->label), text);
+}
+
+void set_stable_tooltip(GtkWidget *widget, const char *text) {
+	set_stable_tooltip_content(widget, text, FALSE);
+}
+
+void set_stable_tooltip_markup(GtkWidget *widget, const char *markup) {
+	set_stable_tooltip_content(widget, markup, TRUE);
 }
 
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry) {
@@ -489,4 +504,3 @@ struct LV * get_all_launcher() {
 int * get_launcher_ids() {
 	return launcher_ids;
 }
-

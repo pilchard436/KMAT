@@ -67,11 +67,6 @@ void pa_set_last_transfer_type(enum LastTransferType type, int locked) {
 		if(i == type)
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pa_transfer_type_buttons[i]), TRUE);
 		gtk_widget_set_sensitive(pa_transfer_type_buttons[i], !locked || i == type);
-		gtk_widget_set_tooltip_text(pa_transfer_type_buttons[i],
-			pa_has_both_modes ?
-			"Both Fly-By and Capture results are available from this calculation." :
-			locked ? "Final-transfer mode used by this calculation. Run a new calculation to change it." :
-			"The source file does not record its search mode; changing this only re-sorts and filters saved routes.");
 	}
 	pa_setting_transfer_type = 0;
 }

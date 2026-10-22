@@ -120,9 +120,6 @@ void tp_set_last_transfer_type(enum LastTransferType type, int locked) {
 		if(i == type)
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tp_transfer_type_buttons[i]), TRUE);
 		gtk_widget_set_sensitive(tp_transfer_type_buttons[i], !locked || i == type);
-		gtk_widget_set_tooltip_text(tp_transfer_type_buttons[i],
-			locked ? "Final-transfer mode used by this calculation. Load a calculation in another mode to change it." :
-			"No source mode is stored; selecting a mode updates this route's arrival objective.");
 	}
 	tp_setting_last_transfer_type = 0;
 }
