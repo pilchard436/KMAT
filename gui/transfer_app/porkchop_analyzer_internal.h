@@ -19,7 +19,10 @@ enum PaYAxisType {PA_YAXIS_DUR, PA_YAXIS_ARRDATE};
 
 extern int pa_num_deps, pa_num_itins;
 extern struct ItinStep **pa_departures;
+extern struct ItinStep **pa_dual_flyby_departures, **pa_dual_capture_departures;
+extern int pa_dual_flyby_num_deps, pa_dual_capture_num_deps, pa_has_both_modes;
 extern enum LastTransferType pa_last_transfer_type;
+extern int pa_last_transfer_type_locked;
 extern GObject *da_pa_porkchop, *da_pa_preview;
 extern struct ItinStep *curr_transfer_pa;
 extern double current_date_pa;
@@ -50,12 +53,14 @@ void update_pa();
 void update_pa_porkchop_diagram();
 void update_pa_itinerary_preview();
 void pa_update_body_show_status();
+void pa_set_last_transfer_type(enum LastTransferType type, int locked);
 double calc_step_dv_pa(struct ItinStep *step);
 double calc_total_dv_pa(void);
 double calc_periapsis_height_pa(void);
 
 // porkchop_analyzer_groups.c
 void free_all_porkchop_analyzer_itins();
+void clear_porkchop_analyzer_analysis();
 void update_group_overview();
 void initialize_itinerary_groups();
 

@@ -130,9 +130,8 @@ static int tp_moon_visible(Body *moon) {
 }
 
 void update_tp_system_view() {
-	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	clear_camera_screen(tp_system_camera);
-	if(tp_system == NULL) { set_flyby_unrestricted_periapsis(previous_restriction); return; }
+	if(tp_system == NULL) return;
 	tp_follow_focus_body();
 	register_body_occluders(tp_system, current_date_tp);
 
@@ -169,7 +168,6 @@ void update_tp_system_view() {
 	draw_itinerary_legend(tp_system_camera, tp_system, curr_transfer_tp, current_date_tp);
 
 	draw_camera_image(tp_system_camera);
-	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void on_tp_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr) {

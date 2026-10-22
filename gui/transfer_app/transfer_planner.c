@@ -44,6 +44,10 @@ gboolean *body_show_status_tp, fix_tfbody;
 double current_date_tp;
 
 enum LastTransferType tp_last_transfer_type;
+int tp_last_transfer_type_locked;
+int tp_setting_last_transfer_type;
+GtkWidget *tp_transfer_type_buttons[2];
+ItinSearchOptions tp_search_options;
 
 double tp_dep_periapsis = 50e3;
 double tp_arr_periapsis = 50e3;
@@ -75,8 +79,11 @@ void init_transfer_planner(GtkBuilder *builder) {
 	lb_tp_date = gtk_builder_get_object(builder, "lb_tp_date");
 	da_tp = gtk_builder_get_object(builder, "da_tp");
 	vp_tp_bodies = gtk_builder_get_object(builder, "vp_tp_bodies");
+	tp_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_tp_fb"));
+	tp_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_tp_cap"));
 	tb_tp_animate = GTK_WIDGET(gtk_builder_get_object(builder, "tb_tp_animate"));
 	cb_tp_anim_speed = GTK_WIDGET(gtk_builder_get_object(builder, "cb_tp_anim_speed"));
+	tp_set_last_transfer_type(TF_FLYBY, 0);
 
 	tp_system_camera = new_camera(GTK_WIDGET(da_tp), &on_tp_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_tp_screen_mouse_move, &on_tp_screen_scroll);
 	g_signal_connect(da_tp, "button-press-event", G_CALLBACK(on_tp_screen_button_press), NULL);
@@ -100,6 +107,24 @@ void init_transfer_planner(GtkBuilder *builder) {
 
 	update_date_label();
 	update_transfer_panel();
+}
+
+void tp_set_last_transfer_type(enum LastTransferType type, int locked) {
+	if(type == TF_CIRC) type = TF_CAPTURE;
+	if(type < TF_FLYBY || type > TF_CAPTURE) return;
+	tp_last_transfer_type = type;
+	tp_last_transfer_type_locked = !!locked;
+	tp_setting_last_transfer_type = 1;
+	for(int i = 0; i < 2; i++) {
+		if(tp_transfer_type_buttons[i] == NULL) continue;
+		if(i == type)
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tp_transfer_type_buttons[i]), TRUE);
+		gtk_widget_set_sensitive(tp_transfer_type_buttons[i], !locked || i == type);
+		gtk_widget_set_tooltip_text(tp_transfer_type_buttons[i],
+			locked ? "Final-transfer mode used by this calculation. Load a calculation in another mode to change it." :
+			"No source mode is stored; selecting a mode updates this route's arrival objective.");
+	}
+	tp_setting_last_transfer_type = 0;
 }
 
 
@@ -138,10 +163,7 @@ int tp_route_unconverged;
 char tp_details_owner;
 
 double calc_step_dv(struct ItinStep *step) {
-	int previous = set_flyby_unrestricted_periapsis(1);
-	double dv = itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
-	set_flyby_unrestricted_periapsis(previous);
-	return dv;
+	return itinerary_step_dv(step, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type);
 }
 
 double calc_total_dv() {
@@ -158,13 +180,18 @@ double calc_total_dv() {
 double calc_periapsis_height_tp() {
 	if(curr_transfer_tp->body == NULL) return -1e20;
 	if(curr_transfer_tp->next == NULL || curr_transfer_tp->prev == NULL) return -1e20;
+	PoweredFlybyResult flyby;
+	if(calculate_flyby_with_moons(curr_transfer_tp->v_arr, curr_transfer_tp->next[0]->v_dep,
+		curr_transfer_tp->v_body, curr_transfer_tp->body, flyby_minimum_periapsis(curr_transfer_tp->body),
+		curr_transfer_tp->date, &flyby))
+		return (flyby.periapsis_radius - curr_transfer_tp->body->radius) * 1e-3;
 	double rp = get_flyby_periapsis(curr_transfer_tp->v_arr, curr_transfer_tp->next[0]->v_dep, curr_transfer_tp->v_body, curr_transfer_tp->body);
 	return (rp-curr_transfer_tp->body->radius)*1e-3;
 }
 
 // Direct routes have no flyby, so plain Lambert arcs are exact; routes with flybys keep their stored velocities
 // if even the approximate powered-flyby re-solve fails, because patched-conic arcs would misstate the flyby burns.
-static int tp_resolve_route_unrestricted(void) {
+int tp_resolve_route(void) {
 	struct ItinStep *first = get_first(curr_transfer_tp);
 	update_itin_body_osvs(first, tp_system);
 	int encounters = 0;
@@ -177,14 +204,6 @@ static int tp_resolve_route_unrestricted(void) {
 	int converged = 1;
 	int resolved = resolve_itinerary_with_powered_flybys_approximate(tp_system, first, tp_dep_periapsis, tp_arr_periapsis, tp_last_transfer_type, &converged);
 	if(resolved) tp_route_unconverged = !converged;
-	return resolved;
-}
-
-// The planner lets a flyby dip below the safe periapsis (even into the planet) and warns instead of refusing.
-int tp_resolve_route(void) {
-	int previous = set_flyby_unrestricted_periapsis(1);
-	int resolved = tp_resolve_route_unrestricted();
-	set_flyby_unrestricted_periapsis(previous);
 	return resolved;
 }
 
@@ -207,9 +226,15 @@ void sort_transfer_dates(struct ItinStep *tf) {
 }
 
 void remove_all_transfers() {
-	if(curr_transfer_tp == NULL) return;
-	free_itinerary(get_first(curr_transfer_tp));
-	curr_transfer_tp = NULL;
+	if(curr_transfer_tp != NULL) {
+		free_itinerary(get_first(curr_transfer_tp));
+		curr_transfer_tp = NULL;
+	}
+	tp_search_options = (ItinSearchOptions) {.starting_orbit_body_id = -1, .last_transfer_type = -1};
+	set_moon_assist_enabled(0);
+	set_moon_aware_flybys_enabled(0);
+	starting_orbit_set_active(NULL, NULL);
+	tp_set_last_transfer_type(TF_FLYBY, 0);
 }
 
 void update() {
@@ -219,9 +244,7 @@ void update() {
 	// Keep an open itinerary details window in step with the route.
 	if(curr_transfer_tp != NULL && msg_window_shows_owner(&tp_details_owner)) {
 		char text[10000];
-		int previous = set_flyby_unrestricted_periapsis(1);
 		itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
-		set_flyby_unrestricted_periapsis(previous);
 		update_msg_window_if_owned(text, &tp_details_owner);
 	}
 }

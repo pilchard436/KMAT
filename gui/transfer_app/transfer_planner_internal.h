@@ -42,6 +42,10 @@ extern GtkWidget *tb_tp_animate, *cb_tp_anim_speed;
 extern gboolean *body_show_status_tp, fix_tfbody;
 extern double current_date_tp;
 extern enum LastTransferType tp_last_transfer_type;
+extern int tp_last_transfer_type_locked;
+extern int tp_setting_last_transfer_type;
+extern GtkWidget *tp_transfer_type_buttons[2];
+extern ItinSearchOptions tp_search_options;
 extern double tp_dep_periapsis, tp_arr_periapsis;
 
 // The body the view is centered on (NULL: central body), and whether it follows the spacecraft instead.
@@ -58,6 +62,7 @@ double calc_total_dv();
 double calc_periapsis_height_tp();
 int tp_resolve_route(void);
 void update_itinerary();
+void tp_set_last_transfer_type(enum LastTransferType type, int locked);
 void sort_transfer_dates(struct ItinStep *tf);
 void remove_all_transfers();
 

@@ -3,7 +3,14 @@
 #include <string.h>
 
 void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system, char *filepath) {
-	if(itin == NULL) return;
+	ItinSearchOptions search_options = {.starting_orbit_body_id = -1, .last_transfer_type = -1};
+	store_single_itinerary_in_bfile_with_options(itin, system, filepath, search_options);
+}
+
+void store_single_itinerary_in_bfile_with_options(struct ItinStep *itin, CelestSystem *system,
+		char *filepath, ItinSearchOptions search_options) {
+	if(itin == NULL || system == NULL) return;
+	BinTypes bin_types = *current_itin_file_types;
 
 	int num_nodes = get_num_of_itin_layers(itin);
 
@@ -18,15 +25,20 @@ void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system
 
 	FILE *file;
 	file = fopen(filepath,"wb");
+	if(file == NULL) {
+		fprintf(stderr, "Failed to open itinerary file for writing: %s\n", filepath);
+		return;
+	}
 	
 	int file_start = -1;	// num_nodes cannot get negative, therefore (to keep backwards-compatible) set -1 at start to show that next number will be version
+	int file_type = bin_types.file_type;
 	fwrite(&file_start, sizeof(int), 1, file);
-	int file_type = current_itin_file_types->file_type;
 	fwrite(&file_type, sizeof(int), 1, file);
 
 	fwrite(&num_nodes, sizeof(int), 1, file);
+	if(file_type == 3) store_itin_search_options(file, &search_options);
 
-	store_celestial_system_in_bfile(system, file, *current_itin_file_types);
+	store_celestial_system_in_bfile(system, file, bin_types);
 
 	struct ItinStep *ptr = itin;
 
@@ -43,13 +55,17 @@ void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system
 
 	ptr = itin;
 	while(ptr != NULL) {
-		union ItinStepBin bin_step = convert_ItinStep_bin(ptr, system, current_itin_file_types->itin_step_type);
+		union ItinStepBin bin_step = convert_ItinStep_bin(ptr, system, bin_types.itin_step_type);
 		fwrite(&bin_step.t0, sizeof(struct ItinStepBinT0), 1, file);
 		if(ptr->next != NULL) ptr = ptr->next[0];
 		else break;
 	}
 
-	fclose(file);
+	int failed = ferror(file);
+	if(fclose(file) != 0) failed = 1;
+	if(failed) {
+		fprintf(stderr, "Failed to write itinerary file: %s\n", filepath);
+	}
 }
 
 struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
@@ -60,6 +76,10 @@ struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
 
 	FILE *file;
 	file = fopen(filepath,"rb");
+	if(file == NULL) {
+		fprintf(stderr, "Failed to open itinerary file: %s\n", filepath);
+		return (struct ItinLoadFileResults) {.itin = NULL, .system = NULL};
+	}
 	
 	int buf;
 	fread(&buf, sizeof(int), 1, file);
@@ -69,10 +89,26 @@ struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
 		fread(&file_type, sizeof(int), 1, file);
 		fread(&num_nodes, sizeof(int), 1, file);
 	} else num_nodes = buf;
+
+	ItinSearchOptions search_options = {.starting_orbit_body_id = -1, .last_transfer_type = -1};
+	if(file_type == 3 && !load_itin_search_options(file, &search_options)) {
+		fprintf(stderr, "Itinerary file has incomplete search options: %s\n", filepath);
+		fclose(file);
+		return (struct ItinLoadFileResults) {.itin = NULL, .system = NULL};
+	}
 	
 	BinTypes bin_types = get_itin_file_bin_types_from_file_type(file_type);
+	if(bin_types.file_type < 0 || num_nodes <= 0) {
+		fprintf(stderr, "Itinerary file has an unsupported format: %s\n", filepath);
+		fclose(file);
+		return (struct ItinLoadFileResults) {.itin = NULL, .system = NULL};
+	}
 	
 	system = load_celestial_system_from_bfile(file, bin_types);
+	if(system == NULL) {
+		fclose(file);
+		return (struct ItinLoadFileResults) {.itin = NULL, .system = NULL};
+	}
 
 	int *bodies_id = (int*) malloc(num_nodes * sizeof(int));
 	fread(bodies_id, sizeof(int), num_nodes, file);
@@ -82,6 +118,8 @@ struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
 	if(buf != -1) {
 		printf("Problems reading itinerary file (Body list or header wrong)\n");
 		fclose(file);
+		free(bodies_id);
+		free_celestial_system(system);
 		return (struct ItinLoadFileResults) {.itin = NULL, .system = NULL};
 	}
 
@@ -105,5 +143,9 @@ struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath) {
 
 	fclose(file);
 	free(bodies_id);
-	return (struct ItinLoadFileResults) {.itin = itin, .system = system};
+	return (struct ItinLoadFileResults) {
+		.itin = itin,
+		.system = system,
+		.search_options = search_options
+	};
 }

@@ -10,23 +10,43 @@ static void update_pa_after_group_visibility_change(void);
 static guint group_overview_source_id;
 static gpointer group_overview_build_data;
 
-void free_all_porkchop_analyzer_itins() {
+void clear_porkchop_analyzer_analysis() {
 	if(group_overview_source_id != 0) {
 		g_source_remove(group_overview_source_id);
 		group_overview_source_id = 0;
 	}
 	g_clear_pointer(&group_overview_build_data, g_free);
-	if(pa_departures != NULL) {
-		for(int i = 0; i < pa_num_deps; i++) free(pa_departures[i]);
-		free(pa_departures);
-		pa_departures = NULL;
-	}
 	if(pa_porkchop_points != NULL) free(pa_porkchop_points);
 	pa_porkchop_points = NULL;
 	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
 	curr_transfer_pa = NULL;
 	free(pa_groups);
 	pa_groups = NULL;
+	pa_num_groups = 0;
+	pa_num_itins = 0;
+}
+
+void free_all_porkchop_analyzer_itins() {
+	clear_porkchop_analyzer_analysis();
+	if(pa_has_both_modes) {
+		struct ItinStep ***departure_sets[] = {&pa_dual_flyby_departures, &pa_dual_capture_departures};
+		int departure_counts[] = {pa_dual_flyby_num_deps, pa_dual_capture_num_deps};
+		for(int set = 0; set < 2; set++) {
+			if(*departure_sets[set] == NULL) continue;
+			for(int i = 0; i < departure_counts[set]; i++)
+				free_itinerary((*departure_sets[set])[i]);
+			free(*departure_sets[set]);
+			*departure_sets[set] = NULL;
+		}
+		pa_departures = NULL;
+		pa_dual_flyby_num_deps = 0;
+		pa_dual_capture_num_deps = 0;
+		pa_has_both_modes = 0;
+	} else if(pa_departures != NULL) {
+		for(int i = 0; i < pa_num_deps; i++) free_itinerary(pa_departures[i]);
+		free(pa_departures);
+		pa_departures = NULL;
+	}
 	if(!is_available_system(pa_system)) free_celestial_system(pa_system);
 	pa_system = NULL;
 	

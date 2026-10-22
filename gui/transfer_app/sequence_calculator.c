@@ -156,22 +156,29 @@ void update_sc_preview() {
 Itin_Calc_Data sc_calc_data;
 struct Itin_Calc_Results sc_results;
 
-void save_itineraries_sc(struct ItinStep **departures, int num_deps, int num_nodes, int num_itins) {
-	if(departures == NULL || num_deps == 0) return;
+void save_itineraries_sc() {
+	if((sc_results.departures == NULL || sc_results.num_deps == 0) &&
+		(sc_results.capture_departures == NULL || sc_results.capture_num_deps == 0)) return;
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath,  ".itins", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_itineraries_in_bfile(departures, num_nodes, num_deps, num_itins, sc_calc_data, sc_system, filepath, get_current_bin_file_type());
+	store_itineraries_in_bfile_both_modes(sc_results, sc_calc_data, sc_system, filepath);
 }
 
 gboolean end_sc_calc_thread() {
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_sc_window), 1);
 
-	save_itineraries_sc(sc_results.departures, sc_results.num_deps, sc_results.num_nodes, sc_results.num_itins);
+	if(sc_results.capture_calculation_failed)
+		show_msg_window("Capture results could not be generated. The Fly-By results are available, but were not saved as a dual-mode file.");
+	else
+		save_itineraries_sc();
 	for(int i = 0; i < sc_results.num_deps; i++) free_itinerary(sc_results.departures[i]);
 	free(sc_results.departures);
+	for(int i = 0; i < sc_results.capture_num_deps; i++) free_itinerary(sc_results.capture_departures[i]);
+	free(sc_results.capture_departures);
 	free(sc_calc_data.seq_info.spec_seq.bodies);
-	if(sc_results.num_deps == 0) show_msg_window("No itineraries found!");
+	if(sc_results.num_itins == 0 && sc_results.capture_num_itins == 0)
+		show_msg_window("No itineraries found!");
 	return G_SOURCE_REMOVE;
 }
 
@@ -194,8 +201,7 @@ void sc_calc_thread() {
 	sc_calc_data.dv_filter.max_depdv = strtod(string, NULL);
 	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_sc_satdv));
 	sc_calc_data.dv_filter.max_satdv = strtod(string, NULL);
-	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_sc_transfertype));
-	sc_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
+	sc_calc_data.dv_filter.last_transfer_type = TF_BOTH;
 
 	sc_calc_data.dv_filter.dep_periapsis = get_first_sc(sc_step)->body->atmo_alt + sc_dep_periapsis;
 	sc_calc_data.dv_filter.arr_periapsis = get_last_sc(sc_step)->body->atmo_alt + sc_arr_periapsis;
@@ -218,8 +224,17 @@ void sc_calc_thread() {
 	}
 	seq_info.system = sc_system;
 	sc_calc_data.seq_info.spec_seq = seq_info;
+	sc_calc_data.search_options = (ItinSearchOptions) {
+		.known = 1,
+		.allow_dsm = sc_calc_data.allow_dsm,
+		.moon_aware_flybys = sc_calc_data.moon_aware_flybys,
+		.moon_assist_arrival = sc_calc_data.moon_assist_arrival,
+		.allow_resonant = 0,
+		.last_transfer_type = TF_BOTH,
+		.starting_orbit_body_id = -1
+	};
 
-	sc_results = search_for_itineraries(sc_calc_data);
+	sc_results = search_for_itineraries_both_modes(sc_calc_data);
 
 	// GUI stuff needs to happen in main thread
 	g_idle_add((GSourceFunc)end_sc_calc_thread, NULL);
@@ -255,7 +270,7 @@ void sc_select_system(int index) {
 
 G_MODULE_EXPORT void on_get_sc_ref_values() {
 	if(sc_system == NULL || get_num_sc_steps(sc_step) < 2) return;
-	double dv_dep, dv_arr_cap, dv_arr_circ, dur;
+	double dv_dep, dv_arr_cap, dur;
 	struct Body *dep_body = get_first_sc(sc_step)->body;
 	struct Body *arr_body = get_last_sc(sc_step)->body;
 
@@ -265,7 +280,6 @@ G_MODULE_EXPORT void on_get_sc_ref_values() {
 	
 	dur = hohmann.dur;
 	dv_dep = dv_circ(dep_body, altatmo2radius(dep_body,sc_dep_periapsis), hohmann.dv_dep);
-	dv_arr_circ = dv_circ(arr_body, altatmo2radius(arr_body,sc_arr_periapsis), hohmann.dv_arr);
 	dv_arr_cap = dv_capture(arr_body, altatmo2radius(arr_body,sc_arr_periapsis), hohmann.dv_arr);
 	
 	dur /= get_settings_datetime_type() != DATE_KERBAL ? (24*60*60) : (6*60*60);
@@ -274,9 +288,8 @@ G_MODULE_EXPORT void on_get_sc_ref_values() {
 	sprintf(msg, "Hohmann Transfer from %s to %s \n(from %.3E km to %.3E km circular orbit):\n\n"
 				 "Departure dv: %.0f m/s\n"
 				 "Arrival Capture dv: %.0f m/s\n"
-				 "Arrival Circularization: %.0f m/s\n"
 				 "Duration: %.0f days",
-			dep_body->name, arr_body->name, dep_body->orbit.a/1e3, arr_body->orbit.a/1e3, dv_dep, dv_arr_cap, dv_arr_circ, dur);
+			dep_body->name, arr_body->name, dep_body->orbit.a/1e3, arr_body->orbit.a/1e3, dv_dep, dv_arr_cap, dur);
 	show_msg_window(msg);
 }
 

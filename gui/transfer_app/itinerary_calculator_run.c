@@ -9,11 +9,12 @@
 struct Itin_Calc_Data ic_calc_data;
 struct Itin_Calc_Results ic_results;
 
-void save_itineraries_ic(struct ItinStep **departures, int num_deps, int num_nodes, int num_itins) {
-	if(departures == NULL || num_deps == 0) return;
+void save_itineraries_ic() {
+	if((ic_results.departures == NULL || ic_results.num_deps == 0) &&
+		(ic_results.capture_departures == NULL || ic_results.capture_num_deps == 0)) return;
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath,  ".itins", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_itineraries_in_bfile(departures, num_nodes, num_deps, num_itins, ic_calc_data, ic_system, filepath, get_current_bin_file_type());
+	store_itineraries_in_bfile_both_modes(ic_results, ic_calc_data, ic_system, filepath);
 }
 
 static gboolean end_ic_calc_thread(gpointer user_data) {
@@ -22,11 +23,16 @@ static gboolean end_ic_calc_thread(gpointer user_data) {
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 1);
 
-	save_itineraries_ic(ic_results.departures, ic_results.num_deps, ic_results.num_nodes, ic_results.num_itins);
+	if(ic_results.capture_calculation_failed)
+		show_msg_window("Capture results could not be generated. The Fly-By results are available, but were not saved as a dual-mode file.");
+	else
+		save_itineraries_ic();
 	for(int i = 0; i < ic_results.num_deps; i++) free_itinerary(ic_results.departures[i]);
 	free(ic_results.departures);
+	for(int i = 0; i < ic_results.capture_num_deps; i++) free_itinerary(ic_results.capture_departures[i]);
+	free(ic_results.capture_departures);
 	free(ic_calc_data.seq_info.to_target.flyby_bodies);
-	if(ic_results.num_deps == 0) {
+	if(ic_results.num_itins == 0 && ic_results.capture_num_itins == 0) {
 		char reason[200], message[256];
 		describe_search_rejections(&ic_results.rejections, reason, sizeof(reason));
 		g_snprintf(message, sizeof(message), "No itineraries found!%s%s", reason[0] ? "\n" : "", reason);
@@ -73,8 +79,7 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.dv_filter.max_satdv = parse_itinerary_dv_limit(gtk_entry_get_text(GTK_ENTRY(tf_ic_satdv)));
 	// Departure burn is capped by its own limit and every later burn by the satellite limit.
 	ic_calc_data.dv_filter.max_totdv = ic_calc_data.dv_filter.max_depdv + ic_calc_data.dv_filter.max_satdv;
-	string = (char*) gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
-	ic_calc_data.dv_filter.last_transfer_type = (int) strtol(string, NULL, 10);
+	ic_calc_data.dv_filter.last_transfer_type = TF_BOTH;
 	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
 		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
 	ic_calc_data.moon_aware_flybys = cb_ic_moon_aware_flybys != NULL &&
@@ -108,12 +113,27 @@ static void prepare_ic_calc_data_from_widgets() {
 	};
 	seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
 	ic_calc_data.seq_info.to_target = seq_info;
+	StartingOrbit custom_orbit = {0};
+	Body *custom_orbit_body = NULL;
+	int has_custom_orbit = starting_orbit_get_active(&custom_orbit, &custom_orbit_body) &&
+		custom_orbit_body == seq_info.dep_body;
+	ic_calc_data.search_options = (ItinSearchOptions) {
+		.known = 1,
+		.allow_dsm = ic_calc_data.allow_dsm,
+		.moon_aware_flybys = ic_calc_data.moon_aware_flybys,
+		.moon_assist_arrival = ic_calc_data.moon_assist_arrival,
+		.allow_resonant = seq_info.allow_resonant,
+		.last_transfer_type = TF_BOTH,
+		.use_custom_starting_orbit = has_custom_orbit,
+		.starting_orbit_body_id = has_custom_orbit ? get_body_system_id(custom_orbit_body, ic_system) : -1,
+		.starting_orbit = custom_orbit
+	};
 
 }
 
 static gpointer ic_calc_thread(gpointer user_data) {
 	(void)user_data;
-	ic_results = search_for_itineraries(ic_calc_data);
+	ic_results = search_for_itineraries_both_modes(ic_calc_data);
 	g_idle_add(end_ic_calc_thread, NULL);
 	return NULL;
 }

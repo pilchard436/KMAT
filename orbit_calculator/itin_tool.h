@@ -50,7 +50,13 @@ struct PorkchopPoint {
 	double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
 };
 
-enum LastTransferType {TF_FLYBY, TF_CAPTURE, TF_CIRC};
+enum LastTransferType {
+	TF_FLYBY,
+	TF_CAPTURE,
+	// Retained for existing calculation files; new circularization selection is deferred to custom final orbits.
+	TF_CIRC,
+	TF_BOTH
+};
 
 // returns an array of porkchop points analyzed from the given departures (allocates porkchop array memory --> needs to be freed)
 struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **departures, int num_deps, double dep_periapsis, double arr_periapsis);

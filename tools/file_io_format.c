@@ -53,12 +53,24 @@ void print_header_data_to_string(ItinStepBinHeaderData header, char *string, siz
 		}
 		append_header_text(string, string_size, "Departure Periapsis: %.0fkm\n", header.calc_data.dv_filter.dep_periapsis / 1e3);
 		append_header_text(string, string_size, "Arrival Periapsis: %.0fkm\n", header.calc_data.dv_filter.arr_periapsis / 1e3);
-		if(header.calc_data.dv_filter.last_transfer_type == TF_FLYBY)
+		if(header.calc_data.dv_filter.last_transfer_type == TF_BOTH)
+			append_header_text(string, string_size, "Last transfer type: Fly-By and Capture\n");
+		else if(header.calc_data.dv_filter.last_transfer_type == TF_FLYBY)
 			append_header_text(string, string_size, "Last transfer type: Fly-By\n");
-		if(header.calc_data.dv_filter.last_transfer_type == TF_CAPTURE)
+		else if(header.calc_data.dv_filter.last_transfer_type == TF_CAPTURE ||
+			header.calc_data.dv_filter.last_transfer_type == TF_CIRC)
 			append_header_text(string, string_size, "Last transfer type: Capture\n");
-		if(header.calc_data.dv_filter.last_transfer_type == TF_CIRC)
-			append_header_text(string, string_size, "Last transfer type: Circularization\n");
+		if(header.calc_data.search_options.known) {
+			ItinSearchOptions options = header.calc_data.search_options;
+			append_header_text(string, string_size, "Search options: DSM %s, moon-aware flybys %s, arrival moon assist %s, resonant flybys %s, custom starting orbit %s\n",
+				options.allow_dsm ? "on" : "off",
+				options.moon_aware_flybys ? "on" : "off",
+				options.moon_assist_arrival ? "on" : "off",
+				options.allow_resonant ? "on" : "off",
+				options.use_custom_starting_orbit ? "on" : "off");
+		} else if(header.file_type == 8) {
+			append_header_text(string, string_size, "Search options: unavailable\n");
+		}
 
 		if(header.calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 			append_header_text(string, string_size, "Departure body: %s\n", header.calc_data.seq_info.to_target.dep_body->name);

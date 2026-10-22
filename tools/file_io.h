@@ -40,15 +40,20 @@ typedef struct {
 struct ItinsLoadFileResults {
 	ItinStepBinHeaderData header;
 	struct ItinStep **departures;
+	struct ItinStep **capture_departures;
+	int capture_num_deps, capture_num_nodes, capture_num_itins;
 };
 
 struct ItinLoadFileResults {
 	struct ItinStep *itin;
 	CelestSystem *system;
+	ItinSearchOptions search_options;
 };
 
 // store itineraries in binary file from multiple departures (pre-order storing)
 void store_itineraries_in_bfile(struct ItinStep **departures, int num_nodes, int num_deps, int num_itins, Itin_Calc_Data calc_data, CelestSystem *system, char *filepath, int file_type);
+void store_itineraries_in_bfile_both_modes(Itin_Calc_Results results, Itin_Calc_Data calc_data,
+	CelestSystem *system, char *filepath);
 
 void print_header_data_to_string(ItinStepBinHeaderData header, char *string, size_t string_size, enum DateType date_format);
 
@@ -57,6 +62,8 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath);
 
 // stores single itinerary (first branches in tree) (departure first)
 void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system, char *filepath);
+void store_single_itinerary_in_bfile_with_options(struct ItinStep *itin, CelestSystem *system,
+	char *filepath, ItinSearchOptions search_options);
 
 // loads single itinerary (first branches in tree) (departure first)
 struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath);

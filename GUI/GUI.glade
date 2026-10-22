@@ -971,7 +971,7 @@ The departure burn is minimized over the orbit.</property>
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
                             <property name="margin-top">50</property>
-                            <property name="label" translatable="yes">Final Transfer Type:</property>
+                            <property name="label" translatable="yes">Result Modes:</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -984,10 +984,9 @@ The departure burn is minimized over the orbit.</property>
                             <property name="can-focus">False</property>
                             <property name="active">0</property>
                             <items>
-                              <item id="0" translatable="yes">Fly-By</item>
-                              <item id="1" translatable="yes">Capture</item>
-                              <item id="2" translatable="yes">Circularize</item>
+                              <item id="3" translatable="yes">Fly-By + Capture</item>
                             </items>
+                            <property name="tooltip-text" translatable="yes">Both Fly-By and Capture results are calculated together and can be switched in Porkchop Analyzer.</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -1268,10 +1267,9 @@ The departure burn is minimized over the orbit.</property>
                             <property name="can-focus">False</property>
                             <property name="active">0</property>
                             <items>
-                              <item id="0" translatable="yes">Fly-By</item>
-                              <item id="1" translatable="yes">Capture</item>
-                              <item id="2" translatable="yes">Circularize</item>
+                              <item id="3" translatable="yes">Fly-By + Capture</item>
                             </items>
+                            <property name="tooltip-text" translatable="yes">Both Fly-By and Capture results are calculated together and can be switched in Porkchop Analyzer.</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -1663,23 +1661,6 @@ The departure burn is minimized over the orbit.</property>
                                         <property name="expand">True</property>
                                         <property name="fill">True</property>
                                         <property name="position">1</property>
-                                      </packing>
-                                    </child>
-                                    <child>
-                                      <object class="GtkRadioButton" id="rb_pa_circ">
-                                        <property name="label" translatable="yes">Circularize</property>
-                                        <property name="name">circ</property>
-                                        <property name="visible">True</property>
-                                        <property name="can-focus">True</property>
-                                        <property name="receives-default">False</property>
-                                        <property name="draw-indicator">True</property>
-                                        <property name="group">rb_pa_fb</property>
-                                        <signal name="toggled" handler="on_last_transfer_type_changed_pa" swapped="no"/>
-                                      </object>
-                                      <packing>
-                                        <property name="expand">True</property>
-                                        <property name="fill">True</property>
-                                        <property name="position">2</property>
                                       </packing>
                                     </child>
                                   </object>
@@ -2538,23 +2519,6 @@ The departure burn is minimized over the orbit.</property>
                                     <property name="expand">True</property>
                                     <property name="fill">True</property>
                                     <property name="position">1</property>
-                                  </packing>
-                                </child>
-                                <child>
-                                  <object class="GtkRadioButton" id="rb_tp_circ">
-                                    <property name="label" translatable="yes">Circularize</property>
-                                    <property name="name">circ</property>
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="receives-default">False</property>
-                                    <property name="draw-indicator">True</property>
-                                    <property name="group">rb_tp_fb</property>
-                                    <signal name="toggled" handler="on_last_transfer_type_changed_tp" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">True</property>
-                                    <property name="fill">True</property>
-                                    <property name="position">2</property>
                                   </packing>
                                 </child>
                               </object>

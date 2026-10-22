@@ -58,6 +58,18 @@ union ItinStepBinHeader {
 	} t4;
 };
 
+typedef struct ItinSearchOptionsBin {
+	int known;
+	int allow_dsm;
+	int moon_aware_flybys;
+	int moon_assist_arrival;
+	int allow_resonant;
+	int last_transfer_type;
+	int use_custom_starting_orbit;
+	int starting_orbit_body_id;
+	StartingOrbit starting_orbit;
+} ItinSearchOptionsBin;
+
 union ItinStepBin {
 	struct ItinStepBinValid {
 		int *ptr;
@@ -78,6 +90,9 @@ union ItinStepBin {
 		int num_next_nodes;
 	} t2;
 };
+
+void store_itin_search_options(FILE *file, const ItinSearchOptions *options);
+int load_itin_search_options(FILE *file, ItinSearchOptions *options);
 
 extern const BinTypes *current_itins_file_types;
 extern const BinTypes *current_itin_file_types;

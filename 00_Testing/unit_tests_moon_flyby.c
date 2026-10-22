@@ -101,18 +101,28 @@ void check_moon_flybys(void) {
 		fabs(with_moons.periapsis_radius - plain.periapsis_radius) < 1);
 	set_moon_aware_flybys_enabled(1);
 	check_true("the search re-plans a flyby that passes close to a moon", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v >= plain.burn_delta_v);
+		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) &&
+		with_moons.burn_delta_v >= plain.burn_delta_v);
 	analyze_moon_flyby(&fixture.planet, &with_moons, TEST_JD, 0, &effect);
 	check_true("the re-planned flyby clears the moon", !effect.hits_moon && effect.perturbing_moon == NULL);
-	int relaxed = set_flyby_unrestricted_periapsis(1);
-	check_true("a close pass adds the correction to the burn in the planner", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v > plain.burn_delta_v);
-	set_flyby_unrestricted_periapsis(relaxed);
+	check_true("the flyby remains above the safe periapsis after moon replanning",
+		with_moons.periapsis_radius >= minimum - 1);
+	int previous_awareness = set_moon_aware_flybys_enabled(0);
+	double planner_minimum = flyby_minimum_periapsis(&fixture.planet);
+	PoweredFlybyResult constrained, displayed;
+	calculate_powered_flyby(fixture.incoming, fixture.outgoing, vec3(0, 0, 0),
+		&fixture.planet, planner_minimum, &constrained);
+	calculate_flyby_with_moons(fixture.incoming, fixture.outgoing, vec3(0, 0, 0),
+		&fixture.planet, planner_minimum, TEST_JD, &displayed);
+	check_near("planner display honors disabled moon-aware flybys",
+		displayed.burn_delta_v, constrained.burn_delta_v, 1e-9);
+	set_moon_aware_flybys_enabled(previous_awareness);
 	place_moon(&fixture, 0);
 	double planned_radius;
 	int planned_side;
 	check_true("a flyby that hits a moon is re-planned around it", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) && with_moons.burn_delta_v >= plain.burn_delta_v &&
+		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons) &&
+		with_moons.burn_delta_v >= plain.burn_delta_v &&
 		fabs(with_moons.periapsis_radius - plain.periapsis_radius) > 1e6);
 	analyze_moon_flyby(&fixture.planet, &with_moons, TEST_JD, 0, &effect);
 	check_true("the re-planned flyby does not hit the moon", !effect.hits_moon && effect.perturbing_moon == NULL);
@@ -143,19 +153,28 @@ void check_moon_flybys(void) {
 	if(flyby_total != NULL) sscanf(flyby_total, "Powered flyby burns: %lf", &displayed_burn);
 	check_near("detailed overview total matches moon-aware flyby components", displayed_burn, component_burn, 0.01);
 	check_true("detailed overview restores the search flyby mode", set_porkchop_exact_flybys(previous_exact) == 0);
-	int previous = set_flyby_unrestricted_periapsis(1);
-	check_true("the planner keeps it to show the problem", calculate_flyby_with_moons(fixture.incoming, fixture.outgoing,
-		vec3(0, 0, 0), &fixture.planet, minimum, TEST_JD, &with_moons));
-	set_flyby_unrestricted_periapsis(previous);
+	place_moon(&fixture, 0.1);
+	double planner_step_cost = itinerary_step_dv(&flyby, periapsis_altitude, periapsis_altitude, TF_FLYBY);
+	itinerary_detailed_overview_to_string(&departure, DATE_ISO, periapsis_altitude, periapsis_altitude, overview);
+	const char *maneuver_line = strstr(overview, "Powered burn: ");
+	double maneuver_burn = HUGE_VAL, radial = 0, tangential = 0, normal = 0;
+	if(maneuver_line != NULL)
+		sscanf(maneuver_line, "Powered burn: %lf m/s (radial %lf, tangential %lf, normal %lf)",
+			&maneuver_burn, &radial, &tangential, &normal);
+	check_near("powered flyby components match the impulsive maneuver",
+		sqrt(radial * radial + tangential * tangential + normal * normal), maneuver_burn, 0.02);
+	const char *total_flyby_line = strstr(overview, "Powered flyby burns: ");
+	double total_flyby_burn = HUGE_VAL;
+	if(total_flyby_line != NULL) sscanf(total_flyby_line, "Powered flyby burns: %lf", &total_flyby_burn);
+	check_near("search-consistent flyby maneuver matches the route cost",
+		maneuver_burn, total_flyby_burn, 0.03);
+	check_near("itinerary step and overview use the same constrained flyby cost",
+		planner_step_cost, total_flyby_burn, 0.03);
 
 	place_moon(&fixture, 0.1);
 	check_true("a pass inside a moon's sphere of influence blocks the flyby", flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
 	place_moon(&fixture, M_PI);
 	check_true("a distant moon does not block the flyby", !flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
-	place_moon(&fixture, 0.1);
-	int relaxed_blocking = set_flyby_unrestricted_periapsis(1);
-	check_true("the planner is not blocked", !flyby_blocked_by_moon(&fixture.planet, &fixture.flyby, TEST_JD));
-	set_flyby_unrestricted_periapsis(relaxed_blocking);
 
 	double capture_radius = fixture.planet.radius + 2e5;
 	double plain_capture = dv_capture(&fixture.planet, capture_radius, 3000);
@@ -170,6 +189,12 @@ void check_moon_flybys(void) {
 	}
 	check_true("a moon lowers the capture burn at some moon phases", capture_assists > 0 && capture_assists < phases);
 	check_true("arrival moon assists are opt-in", disabled_assists == 0);
+	int previous_awareness_for_assist = set_moon_aware_flybys_enabled(1);
+	check_true("moon-aware flybys do not enable arrival moon assists", !moon_assist_is_active());
+	check_near("flyby awareness keeps arrival burn unassisted",
+		arrival_dv_with_assist(&fixture.planet, vec3(3000, 0, 0), capture_radius, 0,
+			plain_capture, TEST_JD, &assist), plain_capture, 0);
+	set_moon_aware_flybys_enabled(previous_awareness_for_assist);
 	set_moon_assist_enabled(1);
 	int enabled_assists = 0;
 	for(int phase = 0; phase < phases; phase++) {

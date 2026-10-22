@@ -9,20 +9,11 @@
 #define MINIMUM_LEG_PERIOD_FRACTION 0.125
 #define MINIMUM_LEG_FLOOR_DAYS 0.05
 
-// Per thread, so the planner can relax the limit without touching search workers.
-static _Thread_local int unrestricted_flyby_periapsis;
-
-int set_flyby_unrestricted_periapsis(int enable) {
-	int previous = unrestricted_flyby_periapsis;
-	unrestricted_flyby_periapsis = enable;
-	return previous;
-}
-
 double flyby_minimum_periapsis(Body *body) {
-	return unrestricted_flyby_periapsis ? body->radius * 0.1 : body->radius + body->atmo_alt + 1e4;
+	return body->radius + body->atmo_alt + 1e4;
 }
 
-// Moon assists are opt-in for arrival costs; unrestricted planner mode also enables them.
+// Moon assists are opt-in for arrival costs and independent of planner flyby constraints.
 static _Thread_local int moon_assist_enabled;
 static _Thread_local int moon_aware_flybys_enabled;
 
@@ -33,7 +24,7 @@ int set_moon_assist_enabled(int enable) {
 }
 
 int moon_assist_is_active(void) {
-	return moon_assist_enabled || unrestricted_flyby_periapsis;
+	return moon_assist_enabled;
 }
 
 int set_moon_aware_flybys_enabled(int enable) {
@@ -43,7 +34,7 @@ int set_moon_aware_flybys_enabled(int enable) {
 }
 
 int moon_aware_flybys_is_active(void) {
-	return moon_aware_flybys_enabled && !unrestricted_flyby_periapsis;
+	return moon_aware_flybys_enabled;
 }
 
 double arrival_dv_with_assist(Body *body, Vector3 incoming_excess, double arrival_radius, int circularize, double plain_dv,
@@ -129,15 +120,13 @@ int plan_flyby_around_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *
 int calculate_flyby_with_moons(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body,
 		double minimum_periapsis, double flyby_jd, PoweredFlybyResult *result) {
 	if(!calculate_powered_flyby(v_arr, v_dep, v_body, body, minimum_periapsis, result)) return 0;
-	if(!moon_aware_flybys_is_active() && !unrestricted_flyby_periapsis) return 1;
+	if(!moon_aware_flybys_enabled) return 1;
 	MoonFlybyEffect effect;
-	if(!analyze_moon_flyby(body, result, flyby_jd, unrestricted_flyby_periapsis, &effect)) return 1;
-	// The planner relaxes the limits to show what is wrong, so it keeps flybys that hit a moon.
-	if(!unrestricted_flyby_periapsis && (effect.hits_moon || effect.perturbing_moon != NULL)) {
+	if(!analyze_moon_flyby(body, result, flyby_jd, 0, &effect)) return 1;
+	if(effect.hits_moon || effect.perturbing_moon != NULL) {
 		if(plan_flyby_around_moons(v_arr, v_dep, v_body, body, minimum_periapsis, flyby_jd, result, NULL, NULL)) return 1;
 		if(effect.hits_moon) return 0;
 	}
-	if(effect.integrated) result->burn_delta_v += mag_vec3(effect.velocity_error);
 	return 1;
 }
 
@@ -164,7 +153,7 @@ typedef struct {
 	Vector3 v_arr, v_dep, v_body;
 	Body *body;
 	double jd;
-	int unrestricted, moon_aware, feasible;
+	int moon_aware, feasible;
 	double periapsis;
 } FlybyCacheEntry;
 static _Thread_local FlybyCacheEntry flyby_cache[32];
@@ -175,8 +164,7 @@ static int same_vec(Vector3 a, Vector3 b) { return a.x == b.x && a.y == b.y && a
 static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Body *body, double jd, double *periapsis) {
 	for(int i = 0; i < 32; i++) {
 		FlybyCacheEntry *entry = &flyby_cache[i];
-		if(entry->body == body && entry->jd == jd && entry->unrestricted == unrestricted_flyby_periapsis &&
-				entry->moon_aware == moon_aware_flybys_enabled &&
+		if(entry->body == body && entry->jd == jd && entry->moon_aware == moon_aware_flybys_enabled &&
 				same_vec(entry->v_arr, v_arr) && same_vec(entry->v_dep, v_dep) && same_vec(entry->v_body, v_body)) {
 			if(periapsis != NULL) *periapsis = entry->periapsis;
 			return entry->feasible;
@@ -184,8 +172,7 @@ static int cached_powered_flyby(Vector3 v_arr, Vector3 v_dep, Vector3 v_body, Bo
 	}
 	PoweredFlybyResult flyby;
 	int feasible = calculate_flyby_with_moons(v_arr, v_dep, v_body, body, flyby_minimum_periapsis(body), jd, &flyby);
-	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, jd, unrestricted_flyby_periapsis,
-		moon_aware_flybys_enabled,
+	flyby_cache[flyby_cache_next] = (FlybyCacheEntry){v_arr, v_dep, v_body, body, jd, moon_aware_flybys_enabled,
 		feasible, feasible ? flyby.periapsis_radius : 0};
 	flyby_cache_next = (flyby_cache_next + 1) % 32;
 	if(periapsis != NULL) *periapsis = feasible ? flyby.periapsis_radius : 0;

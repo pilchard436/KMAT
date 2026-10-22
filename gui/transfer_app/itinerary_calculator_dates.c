@@ -423,7 +423,8 @@ gboolean update_ic_reference_defaults(void) {
 	const char *transfer_type_id = gtk_combo_box_get_active_id(GTK_COMBO_BOX(cb_ic_transfertype));
 	if(transfer_type_id == NULL) return FALSE;
 	enum LastTransferType transfer_type = (enum LastTransferType)strtol(transfer_type_id, NULL, 10);
-	if(transfer_type != TF_FLYBY && transfer_type != TF_CAPTURE && transfer_type != TF_CIRC) return FALSE;
+	if(transfer_type == TF_BOTH) transfer_type = TF_CAPTURE;
+	if(transfer_type != TF_FLYBY && transfer_type != TF_CAPTURE) return FALSE;
 
 	ItineraryHohmannReference reference;
 	if(!calculate_itinerary_hohmann_reference(departure_body, arrival_body, ic_system->cb,

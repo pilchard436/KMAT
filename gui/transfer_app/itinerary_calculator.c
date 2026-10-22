@@ -119,7 +119,7 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		set_stable_tooltip(cb_ic_moon_aware_flybys, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search slower.");
 	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
 	if(cb_ic_moon_assist_arrival != NULL)
-		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture or circularization burn when one is available.");
+		set_stable_tooltip(cb_ic_moon_assist_arrival, "Uses a moon flyby to reduce the capture burn when one is available.");
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");
 	vp_ic_fbbodies = gtk_builder_get_object(builder, "vp_ic_fbbodies");
@@ -315,10 +315,9 @@ G_MODULE_EXPORT void on_get_ic_ref_values() {
 	sprintf(msg, "Hohmann Transfer from %s to %s \n(from %.3E km to %.3E km circular orbit):\n\n"
 				 "Departure dv: %.0f m/s\n"
 				 "Arrival Capture dv: %.0f m/s\n"
-				 "Arrival Circularization: %.0f m/s\n"
 				 "Duration: %.0f days",
 			dep_body->name, arr_body->name, dep_body->orbit.a/1e3, arr_body->orbit.a/1e3,
-			reference.departure_dv, reference.arrival_capture_dv, reference.arrival_circularization_dv, duration);
+			reference.departure_dv, reference.arrival_capture_dv, duration);
 	show_msg_window(msg);
 }
 

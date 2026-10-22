@@ -49,8 +49,11 @@ calculator's search configuration:
   no limit for that category. The total delta-v cap is the sum of the two
   limits. Departure burn is checked against the departure limit; subsequent
   satellite costs are checked against the satellite limit.
-- **Final transfer type:** **Fly-By**, **Capture**, or **Circularize** controls
-  which arrival cost is included in the satellite delta-v and route scoring.
+- **Result modes:** the Itinerary and Sequence Calculators compute both
+  **Fly-By** and **Capture** results in one search. The shared route search uses the looser
+  Fly-By arrival filter, then Capture routes are separately optimized and
+  filtered with their capture cost. Porkchop Analyzer can switch between the
+  two saved result sets without rerunning the search.
 - **Periapsis:** the calculator uses the configured departure and arrival
   periapsis altitudes, offset by each body's atmospheric altitude, for burn
   calculations.
@@ -75,13 +78,18 @@ The following checkboxes alter the search or route evaluation:
 - **Moon-aware flybys:** checks for flybys that hit a moon or pass too close to
   one. It can reject or re-plan routes and makes searching slower.
 - **Allow moon assist on arrival:** checks whether a moon flyby can reduce the
-  arrival capture or circularization burn when one is available.
+  arrival capture burn when one is available.
 - **Custom starting orbit:** when enabled and valid for the selected departure
   body, it is used to calculate the departure burn instead of the usual
   departure-orbit assumption.
 
 These flags are read from the form at the start of the calculation. If an
 optional control is unavailable, it is treated as disabled.
+
+New `.itins` search files and `.itin` route files store the search options
+alongside their results. When a saved route is reopened, those settings are
+restored for option-dependent calculations and displays. Older files do not
+contain this provenance, so those settings cannot be recovered from them.
 
 ## 4. The search runs in the background
 
@@ -115,6 +123,19 @@ through powered-flyby optimization unless the search has been cancelled. This
 stage checks and refines promising routes, including their flyby burns and
 timings. It can also correct relevant sphere-of-influence issues.
 
+Moon-aware search checks for moon hits and close passes, rejecting or re-planning
+flybys that violate its clearance policy. The Transfer Planner uses the same
+minimum periapsis clearance as search. Powered-flyby optimization may increase
+the flyby burn to keep the actual periapsis above that minimum, even when the
+unpowered turn would pass closer to the body. The Transfer Planner displays the
+powered periapsis when a safe powered solution exists; if not, it falls back to
+the unpowered turn estimate, which may be below the body's surface. Moving a
+maneuver date is allowed when the route can still be resolved with safe powered
+flybys; otherwise the edit is rejected and the previous route and date are
+restored. This edit-time re-solve does not apply the search's user-defined
+maximum satellite delta-v. During search, that limit applies to the aggregate
+of arrival, powered-flyby, and DSM burns, rather than to each transfer step.
+
 If deep-space maneuvers are enabled, selected routes receive an additional DSM
 optimization pass. The resulting routes are then checked against the date
 limits, departure/satellite/total delta-v limits, and applicable moon and
@@ -127,6 +148,34 @@ The main search, final route filters, and powered-route optimization are in
 [`transfer_search_worker.c`](../orbit_calculator/transfer_search_worker.c),
 and [`powered_flyby_optimizer.c`](../orbit_calculator/powered_flyby_optimizer.c).
 
+### Cancellation and incremental refinement
+
+Search workers check the cancellation state while searching departure dates and
+building routes. Currently, powered-route optimization is started only when the
+search has not been cancelled. The optimizer also checks cancellation while
+processing its candidate routes, so cancellation can skip the entire
+optimization phase or stop it before all candidates are refined. The final
+route-pruning/filtering pass still runs on the routes that remain.
+
+It is possible to refine and filter completed departure-date results
+incrementally, but simply moving the optimizer into each date worker would
+change its behavior. Departure dates are searched in parallel, while the
+current optimizer ranks candidates across the complete result set and applies
+shared refinement, repair, and challenge limits. Per-date optimization could
+therefore change which routes receive refinement, increase the total work, and
+require synchronization around shared search and optimizer state. Filtering
+also needs to follow refinement for routes whose optimized burns or feasibility
+may change.
+
+A lower-risk design is to distinguish **stop searching** from **cancel
+refinement**: on a search cancellation, stop producing new routes, wait for
+workers to finish, then refine and filter the routes found so far using the
+existing global ranking and limits. This can make cancellation take longer to
+complete, especially when DSM optimization is enabled; the progress UI should
+indicate that it is finishing routes already found. Incremental refinement as
+dates complete is another option, but it needs a coordinator and a deliberate
+policy for preserving or changing the current global candidate limits.
+
 ## 6. Completion, saving, and cleanup
 
 When the worker returns, the GUI completion callback:
@@ -134,11 +183,11 @@ When the worker returns, the GUI completion callback:
 1. Finishes the custom starting-orbit search state.
 2. Closes the progress window and re-enables the calculator.
 3. If routes exist, opens a save chooser for an `.itins` file. Saving is
-   optional; cancelling the chooser skips the save. The selected binary
-   itinerary format and the search configuration are written with the results.
-4. Frees the in-memory itinerary trees and temporary flyby-body list.
-5. If no departure trees remain, displays **“No itineraries found!”**, with a
-   rejection summary when available.
+   optional; cancelling the chooser skips the save. Both route sets and the
+   search configuration are written in the dual-mode file format.
+4. Frees both in-memory itinerary trees and the temporary flyby-body list.
+5. If neither mode has itineraries, displays **“No itineraries found!”**, with
+   a rejection summary when available.
 
 This completion and save flow is implemented in
 [`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c).
@@ -164,3 +213,11 @@ measurements.
 The completed flyby-final and capture-final 32-configuration matrices, their
 phase timings, and aggregate option effects are recorded in
 [`itinerary-profiling-results.md`](./itinerary-profiling-results.md).
+
+Porkchop Analyzer reads both result sets from new dual-mode `.itins` files and
+switches between their independently optimized routes. Legacy calculation
+files marked for a single mode remain readable and keep that mode fixed.
+The existing single-itinerary `.itin` format remains unchanged and does not
+record the mode. A route loaded directly into Transfer Planner therefore has
+no known source mode and remains selectable; changing that mode updates the
+route's displayed arrival objective without rerunning the itinerary search.

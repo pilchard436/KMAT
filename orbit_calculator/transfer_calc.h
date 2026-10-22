@@ -3,7 +3,20 @@
 
 #include "itin_tool.h"
 #include "tools/celestial_systems.h"
+#include "tools/starting_orbit.h"
 #include "search_rejections.h"
+
+typedef struct ItinSearchOptions {
+	int known;
+	int allow_dsm;
+	int moon_aware_flybys;
+	int moon_assist_arrival;
+	int allow_resonant;
+	int last_transfer_type;
+	int use_custom_starting_orbit;
+	int starting_orbit_body_id;
+	StartingOrbit starting_orbit;
+} ItinSearchOptions;
 
 
 typedef struct Itin_Calc_Data {
@@ -20,11 +33,15 @@ typedef struct Itin_Calc_Data {
 	struct Dv_Filter dv_filter;
 	struct Calc_Acc calc_acc;
 	ItinSequenceInfo seq_info;
+	ItinSearchOptions search_options;
 } Itin_Calc_Data;
 
 typedef struct Itin_Calc_Results {
 	struct ItinStep **departures;
 	int num_deps, num_nodes, num_itins;
+	struct ItinStep **capture_departures;
+	int capture_num_deps, capture_num_nodes, capture_num_itins;
+	int capture_calculation_failed;
 	int powered_routes_valid, powered_routes_corrected;
 	int powered_itineraries_pruned;
 	unsigned long long powered_initial_rejections;
@@ -50,6 +67,7 @@ typedef struct Transfer_Calc_Status {
 } Transfer_Calc_Status;
 
 Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data);
+Itin_Calc_Results search_for_itineraries_both_modes(Itin_Calc_Data calc_data);
 
 Transfer_Calc_Status get_current_transfer_calc_status();
 

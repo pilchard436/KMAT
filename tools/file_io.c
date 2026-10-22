@@ -8,13 +8,50 @@
 #include "file_io_internal.h"
 
 
-BinTypes all_itins_file_types[] = {{6, 4, 5, 3, 2}, {5, 4, 4, 2, 2}, {4, 3, 3, 2, 2}, {3, 3, 2, 2, 2}, {2, 2, 2, 2, 2}};
-const int num_all_itins_file_types = 5;
-const BinTypes *current_itins_file_types = &(all_itins_file_types[0]);
+BinTypes all_itins_file_types[] = {{8, 4, 5, 3, 2}, {7, 4, 5, 3, 2}, {6, 4, 5, 3, 2}, {5, 4, 4, 2, 2}, {4, 3, 3, 2, 2}, {3, 3, 2, 2, 2}, {2, 2, 2, 2, 2}};
+const int num_all_itins_file_types = 7;
+const BinTypes *current_itins_file_types = &(all_itins_file_types[2]);
 
-BinTypes all_itin_file_types[] = {{2, 0, 5, 3, 0}, {1, 0, 3, 2, 0}, {0, 0, 2, 2, 0}};
-const int num_all_itin_file_types = 3;
+BinTypes all_itin_file_types[] = {{3, 0, 5, 3, 0}, {2, 0, 5, 3, 0}, {1, 0, 3, 2, 0}, {0, 0, 2, 2, 0}};
+const int num_all_itin_file_types = 4;
 const BinTypes *current_itin_file_types = &(all_itin_file_types[0]);
+
+void store_itin_search_options(FILE *file, const ItinSearchOptions *options) {
+	ItinSearchOptionsBin bin = {0};
+	if(options != NULL) {
+		bin = (ItinSearchOptionsBin) {
+			.known = !!options->known,
+			.allow_dsm = !!options->allow_dsm,
+			.moon_aware_flybys = !!options->moon_aware_flybys,
+			.moon_assist_arrival = !!options->moon_assist_arrival,
+			.allow_resonant = !!options->allow_resonant,
+			.last_transfer_type = options->last_transfer_type,
+			.use_custom_starting_orbit = !!options->use_custom_starting_orbit,
+			.starting_orbit_body_id = options->starting_orbit_body_id,
+			.starting_orbit = options->starting_orbit
+		};
+	}
+	fwrite(&bin, sizeof(bin), 1, file);
+}
+
+int load_itin_search_options(FILE *file, ItinSearchOptions *options) {
+	ItinSearchOptionsBin bin;
+	if(fread(&bin, sizeof(bin), 1, file) != 1) return 0;
+	if(options != NULL) {
+		*options = (ItinSearchOptions) {
+			.known = !!bin.known,
+			.allow_dsm = !!bin.allow_dsm,
+			.moon_aware_flybys = !!bin.moon_aware_flybys,
+			.moon_assist_arrival = !!bin.moon_assist_arrival,
+			.allow_resonant = !!bin.allow_resonant,
+			.last_transfer_type = bin.last_transfer_type,
+			.use_custom_starting_orbit = !!bin.use_custom_starting_orbit,
+			.starting_orbit_body_id = bin.starting_orbit_body_id,
+			.starting_orbit = bin.starting_orbit
+		};
+	}
+	return 1;
+}
 
 int get_current_bin_file_type() {
 	return current_itins_file_types->file_type;

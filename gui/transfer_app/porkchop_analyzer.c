@@ -7,7 +7,10 @@
 
 int pa_num_deps, pa_num_itins;
 struct ItinStep **pa_departures;
+struct ItinStep **pa_dual_flyby_departures, **pa_dual_capture_departures;
+int pa_dual_flyby_num_deps, pa_dual_capture_num_deps, pa_has_both_modes;
 enum LastTransferType pa_last_transfer_type;
+int pa_last_transfer_type_locked;
 GObject *da_pa_porkchop, *da_pa_preview;
 struct ItinStep *curr_transfer_pa;
 double current_date_pa;
@@ -21,6 +24,8 @@ CelestSystem *pa_system;
 
 double pa_min_vals[6], pa_max_vals[6];
 
+static GtkWidget *pa_transfer_type_buttons[2];
+static int pa_setting_transfer_type;
 
 enum PaYAxisType pa_yaxis_type = PA_YAXIS_DUR;
 double pa_dep_periapsis = 50e3;
@@ -51,15 +56,42 @@ void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
 void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
 void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
 
+void pa_set_last_transfer_type(enum LastTransferType type, int locked) {
+	if(type == TF_CIRC) type = TF_CAPTURE;
+	if(type < TF_FLYBY || type > TF_CAPTURE) return;
+	pa_last_transfer_type = type;
+	pa_last_transfer_type_locked = !!locked;
+	pa_setting_transfer_type = 1;
+	for(int i = 0; i < 2; i++) {
+		if(pa_transfer_type_buttons[i] == NULL) continue;
+		if(i == type)
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pa_transfer_type_buttons[i]), TRUE);
+		gtk_widget_set_sensitive(pa_transfer_type_buttons[i], !locked || i == type);
+		gtk_widget_set_tooltip_text(pa_transfer_type_buttons[i],
+			pa_has_both_modes ?
+			"Both Fly-By and Capture results are available from this calculation." :
+			locked ? "Final-transfer mode used by this calculation. Run a new calculation to change it." :
+			"The source file does not record its search mode; changing this only re-sorts and filters saved routes.");
+	}
+	pa_setting_transfer_type = 0;
+}
+
 
 void init_porkchop_analyzer(GtkBuilder *builder) {
 	pa_analysis_params.num_deps = 0;
 	pa_num_deps = 0;
 	pa_num_itins = 0;
 	pa_departures = NULL;
+	pa_dual_flyby_departures = NULL;
+	pa_dual_capture_departures = NULL;
+	pa_dual_flyby_num_deps = 0;
+	pa_dual_capture_num_deps = 0;
+	pa_has_both_modes = 0;
 	pa_porkchop_points = NULL;
 	curr_transfer_pa = NULL;
-	pa_last_transfer_type = TF_FLYBY;
+	pa_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_fb"));
+	pa_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_cap"));
+	pa_set_last_transfer_type(TF_FLYBY, 0);
 	da_pa_porkchop = gtk_builder_get_object(builder, "da_pa_porkchop");
 	da_pa_preview = gtk_builder_get_object(builder, "da_pa_preview");
 	tf_pa_min_feedback[PA_DEP] = gtk_builder_get_object(builder, "tf_pa_min_depdate");
@@ -289,12 +321,33 @@ G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) 
 
 
 G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointer data) {
-	if(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) return;
+	if(pa_setting_transfer_type || !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) return;
 	const char *name = gtk_widget_get_name(widget);
-	if		(strcmp(name, "fb") == 0) pa_last_transfer_type = TF_FLYBY;
-	else if	(strcmp(name, "capture") == 0) pa_last_transfer_type = TF_CAPTURE;
-	else if	(strcmp(name, "circ") == 0) pa_last_transfer_type = TF_CIRC;
+	enum LastTransferType selected_type;
+	if		(strcmp(name, "fb") == 0) selected_type = TF_FLYBY;
+	else if	(strcmp(name, "capture") == 0) selected_type = TF_CAPTURE;
+	else return;
+	if(pa_last_transfer_type_locked && selected_type != pa_last_transfer_type) {
+		pa_set_last_transfer_type(pa_last_transfer_type, 1);
+		return;
+	}
+	if(pa_has_both_modes && selected_type != pa_last_transfer_type) {
+		pa_last_transfer_type = selected_type;
+		clear_porkchop_analyzer_analysis();
+		if(selected_type == TF_CAPTURE) {
+			pa_departures = pa_dual_capture_departures;
+			pa_num_deps = pa_dual_capture_num_deps;
+		} else {
+			pa_departures = pa_dual_flyby_departures;
+			pa_num_deps = pa_dual_flyby_num_deps;
+		}
+		analyze_departure_itins();
+		update_pa_porkchop_diagram();
+		update_pa_itinerary_preview();
+		return;
+	}
 
+	pa_last_transfer_type = selected_type;
 	if(pa_porkchop_points == NULL) return;
 
 	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);

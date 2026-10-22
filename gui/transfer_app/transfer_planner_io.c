@@ -5,6 +5,7 @@
 #include "tools/file_io.h"
 #include "orbit_calculator/itinerary_tree.h"
 #include "orbit_calculator/flyby_policy.h"
+#include "tools/starting_orbit.h"
 #include "ksp/ksp_session.h"
 #include <orbitlib_fileio.h>
 
@@ -15,9 +16,7 @@
 G_MODULE_EXPORT void on_show_itin_overview() {
 	if(curr_transfer_tp == NULL) return;
 	char text[10000];
-	int previous = set_flyby_unrestricted_periapsis(1);
 	itinerary_detailed_overview_to_string(curr_transfer_tp, get_settings_datetime_type(), tp_dep_periapsis, tp_arr_periapsis, text);
-	set_flyby_unrestricted_periapsis(previous);
 	show_msg_window_owned(text, &tp_details_owner);
 }
 
@@ -114,7 +113,20 @@ G_MODULE_EXPORT void on_save_itinerary(GtkWidget* widget, gpointer data) {
 
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_single_itinerary_in_bfile(first, tp_system, filepath);
+	ItinSearchOptions options = tp_search_options;
+	if(options.known) options.last_transfer_type = tp_last_transfer_type;
+	store_single_itinerary_in_bfile_with_options(first, tp_system, filepath, options);
+}
+
+static void apply_tp_search_options(ItinSearchOptions options, CelestSystem *system) {
+	tp_search_options = options;
+	set_moon_assist_enabled(options.known && options.moon_assist_arrival);
+	set_moon_aware_flybys_enabled(options.known && options.moon_aware_flybys);
+	if(options.known && options.use_custom_starting_orbit && system != NULL &&
+		options.starting_orbit_body_id >= 0 && options.starting_orbit_body_id < system->num_bodies)
+		starting_orbit_set_active(&options.starting_orbit, system->bodies[options.starting_orbit_body_id]);
+	else
+		starting_orbit_set_active(NULL, NULL);
 }
 
 static int same_value(double a, double b) {
@@ -152,6 +164,8 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(!is_available_system(tp_system) && tp_system != NULL) free_celestial_system(tp_system);
 	curr_transfer_tp = NULL;
 	tp_system = NULL;
+	apply_tp_search_options((ItinSearchOptions){.starting_orbit_body_id = -1, .last_transfer_type = -1}, NULL);
+	tp_set_last_transfer_type(TF_FLYBY, 0);
 	// The focused body belonged to the system that was just freed.
 	tp_focus_body = NULL; tp_focus_spacecraft = 0;
 	if(tp_loaded_system_entry) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
@@ -159,6 +173,10 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 
 	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
 	if(load_results.itin == NULL) return;
+	enum LastTransferType loaded_type = load_results.search_options.last_transfer_type == TF_CIRC ?
+		TF_CAPTURE : (enum LastTransferType)load_results.search_options.last_transfer_type;
+	tp_set_last_transfer_type(load_results.search_options.known &&
+		loaded_type >= TF_FLYBY && loaded_type <= TF_CAPTURE ? loaded_type : TF_FLYBY, 0);
 	int matching_system = find_identical_available_system(load_results.system);
 	if(matching_system >= 0) {
 		CelestSystem *available = get_available_systems()[matching_system];
@@ -169,6 +187,7 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	}
 	curr_transfer_tp = get_first(load_results.itin);
 	tp_system = load_results.system;
+	apply_tp_search_options(load_results.search_options, tp_system);
 	tp_route_unconverged = 0;
 	current_date_tp = curr_transfer_tp->date;
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
@@ -274,4 +293,3 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 		   step2pr->body->name, dt_in_days, step2pr->date, hyp_params.rp/1000, hyp_params.c3_energy/1e6,
 		   rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl));
 }
-

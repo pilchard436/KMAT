@@ -19,7 +19,6 @@ void update_date_label() {
 }
 
 void update_transfer_panel() {
-	int previous_restriction = set_flyby_unrestricted_periapsis(1);
 	if(curr_transfer_tp == NULL) {
 		gtk_button_set_label(GTK_BUTTON(tb_tp_tfdate), get_settings_datetime_type() == DATE_ISO ? "0000-00-00" : "0000-000");
 		update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), NULL);
@@ -59,7 +58,6 @@ void update_transfer_panel() {
 			gtk_label_set_label(GTK_LABEL(lb_tp_param_values), "");
 		}
 	}
-	set_flyby_unrestricted_periapsis(previous_restriction);
 }
 
 void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_type) {
@@ -76,32 +74,44 @@ void tp_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 	update();
 }
 
+typedef struct {
+	double date;
+	Vector3 r, v_arr, v_dep, v_body;
+} TpStepState;
+
 // A maneuver node slides along its incoming arc when its date changes.
 static void tp_set_current_step_date(double date) {
 	struct ItinStep *first = get_first(curr_transfer_tp);
 	int count = 0;
 	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL) count++;
-	double *dates = malloc(count * sizeof(*dates));
-	Vector3 *positions = malloc(count * sizeof(*positions));
-	if(dates == NULL || positions == NULL) { free(dates); free(positions); return; }
+	TpStepState *state = malloc(count * sizeof(*state));
+	if(state == NULL) {
+		current_date_tp = curr_transfer_tp->date;
+		show_msg_window("Could not preserve the route before editing; the date was not changed.");
+		update();
+		return;
+	}
 	int index = 0;
 	for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
-		dates[index] = node->date;
-		positions[index] = node->r;
+		state[index] = (TpStepState){node->date, node->r, node->v_arr, node->v_dep, node->v_body};
 	}
+	int previous_unconverged = tp_route_unconverged;
 
 	set_itinerary_step_date(curr_transfer_tp, tp_system, date);
 	if(!tp_resolve_route()) {
 		index = 0;
 		for(struct ItinStep *node = first; node != NULL; node = node->next != NULL ? node->next[0] : NULL, index++) {
-			node->date = dates[index];
-			node->r = positions[index];
+			node->date = state[index].date;
+			node->r = state[index].r;
+			node->v_arr = state[index].v_arr;
+			node->v_dep = state[index].v_dep;
+			node->v_body = state[index].v_body;
 		}
-		update_itin_body_osvs(first, tp_system);
-		show_msg_window("This route cannot be re-solved at that date, so the edit was ignored.");
+		tp_route_unconverged = previous_unconverged;
+		current_date_tp = curr_transfer_tp->date;
+		show_msg_window("This date cannot be resolved while keeping the route's flyby periapses safe; the edit was ignored.");
 	}
-	free(dates);
-	free(positions);
+	free(state);
 	update();
 }
 
@@ -130,7 +140,10 @@ G_MODULE_EXPORT void on_change_date(GtkWidget* widget, gpointer data) {
 
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate))) {
 		if(curr_transfer_tp->prev != NULL && current_date_tp <= curr_transfer_tp->prev->date) {
+			current_date_tp = curr_transfer_tp->date;
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
+			show_msg_window("A step cannot be moved to or before the previous itinerary event.");
+			update();
 			return;
 		}
 		tp_set_current_step_date(current_date_tp);
@@ -146,7 +159,10 @@ G_MODULE_EXPORT void on_tp_reset_clocktime(GtkWidget* widget, gpointer data) {
 	current_date_tp = convert_date_JD((Datetime){datetime.y, datetime.m, datetime.d});
 	if(curr_transfer_tp != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate))) {
 		if(curr_transfer_tp->prev != NULL && current_date_tp <= curr_transfer_tp->prev->date) {
+			current_date_tp = curr_transfer_tp->date;
 			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
+			show_msg_window("A step cannot be moved to or before the previous itinerary event.");
+			update();
 			return;
 		}
 		tp_set_current_step_date(current_date_tp);
@@ -220,12 +236,19 @@ G_MODULE_EXPORT void on_transfer_body_change(GtkWidget* widget, gpointer data) {
 }
 
 G_MODULE_EXPORT void on_last_transfer_type_changed_tp(GtkWidget* widget, gpointer data) {
-	if(!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) return;
+	if(tp_setting_last_transfer_type || !gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) return;
 	const char *name = gtk_widget_get_name(widget);
-	if		(strcmp(name, "fb") == 0) tp_last_transfer_type = TF_FLYBY;
-	else if	(strcmp(name, "capture") == 0) tp_last_transfer_type = TF_CAPTURE;
-	else if	(strcmp(name, "circ") == 0) tp_last_transfer_type = TF_CIRC;
-	update_transfer_panel();
+	enum LastTransferType selected_type;
+	if		(strcmp(name, "fb") == 0) selected_type = TF_FLYBY;
+	else if	(strcmp(name, "capture") == 0) selected_type = TF_CAPTURE;
+	else return;
+	if(tp_last_transfer_type_locked && selected_type != tp_last_transfer_type) {
+		tp_set_last_transfer_type(tp_last_transfer_type, 1);
+		return;
+	}
+	tp_last_transfer_type = selected_type;
+	if(curr_transfer_tp != NULL) update_itinerary();
+	else update_transfer_panel();
 }
 
 G_MODULE_EXPORT void on_toggle_transfer_date_lock(GtkWidget* widget, gpointer data) {

@@ -64,8 +64,33 @@ static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Dat
 	return step->num_next_nodes > 0;
 }
 
+static struct ItinStep *copy_itinerary_tree_checked(const struct ItinStep *source) {
+	if(source == NULL) return NULL;
+	struct ItinStep *copy = calloc(1, sizeof(*copy));
+	if(copy == NULL) return NULL;
+	copy_step_body_vectors_and_date((struct ItinStep *)source, copy);
+	copy->num_next_nodes = source->num_next_nodes;
+	if(copy->num_next_nodes > 0) {
+		copy->next = calloc((size_t)copy->num_next_nodes, sizeof(*copy->next));
+		if(copy->next == NULL) {
+			free(copy);
+			return NULL;
+		}
+		for(int i = 0; i < copy->num_next_nodes; i++) {
+			copy->next[i] = copy_itinerary_tree_checked(source->next[i]);
+			if(copy->next[i] == NULL) {
+				copy->num_next_nodes = i;
+				free_itinerary(copy);
+				return NULL;
+			}
+			copy->next[i]->prev = copy;
+		}
+	}
+	return copy;
+}
 
-struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
+static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data calc_data, int calculate_both_modes) {
+	if(calculate_both_modes) calc_data.dv_filter.last_transfer_type = TF_FLYBY;
 	int previous_moon_aware = set_moon_aware_flybys_enabled(calc_data.moon_aware_flybys);
 	int previous_moon_assist = set_moon_assist_enabled(calc_data.moon_assist_arrival);
 	struct Itin_Calc_Results results = {
@@ -253,6 +278,25 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	filtering_seconds += progress_clock() - phase_start;
 #endif
+	int shared_num_deps = num_deps;
+	struct ItinStep **capture_departures = NULL;
+	if(calculate_both_modes && shared_num_deps > 0) {
+		capture_departures = calloc((size_t)shared_num_deps, sizeof(*capture_departures));
+		if(capture_departures == NULL) {
+			results.capture_calculation_failed = 1;
+		} else {
+			for(int i = 0; i < shared_num_deps; i++) {
+				capture_departures[i] = copy_itinerary_tree_checked(departures[i]);
+				if(capture_departures[i] == NULL) {
+					for(int j = 0; j < i; j++) free_itinerary(capture_departures[j]);
+					free(capture_departures);
+					capture_departures = NULL;
+					results.capture_calculation_failed = 1;
+					break;
+				}
+			}
+		}
+	}
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 		if(get_thread_counter(3) == 0) {
 			PoweredFlybyOptimizationStats powered_stats;
@@ -324,6 +368,33 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 				routes_blocked_by_moons, itineraries_before_prune);
 	}
 
+	if(calculate_both_modes && capture_departures != NULL) {
+		Itin_Calc_Data capture_calc_data = calc_data;
+		capture_calc_data.dv_filter.last_transfer_type = TF_CAPTURE;
+		if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET && get_thread_counter(3) == 0) {
+			PoweredFlybyOptimizationStats capture_stats;
+			optimize_powered_flyby_routes(capture_departures, shared_num_deps, &capture_calc_data,
+				POWERED_ROUTE_REFINEMENT_LIMIT, &capture_stats);
+			printf("Capture powered-route optimization: %d/%d improved, %d valid\n",
+				capture_stats.routes_improved, capture_stats.routes_considered, capture_stats.routes_valid);
+		}
+
+		routes_blocked_by_moons = 0;
+		int capture_valid_departures = 0;
+		for(int i = 0; i < shared_num_deps; i++) {
+			if(!prune_invalid_route_leaves(capture_departures[i], &capture_calc_data)) {
+				free_itinerary(capture_departures[i]);
+				continue;
+			}
+			capture_departures[capture_valid_departures++] = capture_departures[i];
+		}
+		shared_num_deps = capture_valid_departures;
+		if(shared_num_deps == 0) {
+			free(capture_departures);
+			capture_departures = NULL;
+		}
+	}
+
 	gettimeofday(&end, NULL);  // Record the ending time
 	elapsed_time = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
 	printf("----- | Total elapsed time: %.3f s | ---------\n", elapsed_time);
@@ -342,6 +413,14 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	results.num_deps = num_deps;
 	results.num_nodes = num_nodes;
 	results.num_itins = num_itins;
+	results.capture_departures = capture_departures;
+	results.capture_num_deps = capture_departures == NULL ? 0 : shared_num_deps;
+	if(capture_departures != NULL) {
+		for(int i = 0; i < shared_num_deps; i++) {
+			results.capture_num_itins += get_number_of_itineraries(capture_departures[i]);
+			results.capture_num_nodes += get_total_number_of_stored_steps(capture_departures[i]);
+		}
+	}
 	results.rejections = get_search_rejections();
 	char rejection_reason[200];
 	describe_search_rejections(&results.rejections, rejection_reason, sizeof(rejection_reason));
@@ -350,4 +429,12 @@ struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
 	set_moon_assist_enabled(previous_moon_assist);
 	set_moon_aware_flybys_enabled(previous_moon_aware);
 	return results;
+}
+
+struct Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data) {
+	return search_for_itineraries_internal(calc_data, 0);
+}
+
+struct Itin_Calc_Results search_for_itineraries_both_modes(Itin_Calc_Data calc_data) {
+	return search_for_itineraries_internal(calc_data, 1);
 }

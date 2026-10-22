@@ -63,14 +63,14 @@ static Vector3 dsm_burn_rtn(const struct ItinStep *step) {
 	return vec3(dot_vec3(burn, radial), dot_vec3(burn, tangential), dot_vec3(burn, normal));
 }
 
-// Names the moon that lowers the arrival burn, if one does.
-static void append_arrival_assist(char *string, struct ItinStep *arrival, double arr_periapsis, int circularize) {
+// Names the moon that lowers the capture burn, if one does.
+static void append_arrival_assist(char *string, struct ItinStep *arrival, double arr_periapsis) {
 	if(arrival->body == NULL) return;
 	Vector3 excess = subtract_vec3(arrival->v_arr, arrival->v_body);
 	double radius = alt2radius(arrival->body, arr_periapsis);
-	double plain = circularize ? dv_circ(arrival->body, radius, mag_vec3(excess)) : dv_capture(arrival->body, radius, mag_vec3(excess));
+	double plain = dv_capture(arrival->body, radius, mag_vec3(excess));
 	MoonAssist assist;
-	double assisted = arrival_dv_with_assist(arrival->body, excess, radius, circularize, plain, arrival->date, &assist);
+	double assisted = arrival_dv_with_assist(arrival->body, excess, radius, 0, plain, arrival->date, &assist);
 	if(assist.moon != NULL)
 		sprintf(string, "%s  %s assist: aim %.2f m/s, saves %.2f m/s\n", string, assist.moon->name, assist.aim_dv, plain - assisted);
 }
@@ -81,6 +81,27 @@ static struct PorkchopPoint create_overview_porkchop_point(struct ItinStep *arri
 	struct PorkchopPoint point = create_porkchop_point(arrival, dep_periapsis, arr_periapsis);
 	set_porkchop_exact_flybys(previous_exact);
 	return point;
+}
+
+static int custom_starting_orbit_burn(Body *body, Vector3 v_inf, double *magnitude, Vector3 *rtn) {
+	StartingOrbit orbit;
+	Body *orbit_body = NULL;
+	if(!starting_orbit_get_active(&orbit, &orbit_body) || orbit_body != body) return 0;
+
+	double anomaly, burn_magnitude;
+	Vector3 burn_vector;
+	OSV starting_state;
+	if(!starting_orbit_best_departure_burn(&orbit, body, v_inf, &burn_magnitude, &anomaly) ||
+		!starting_orbit_departure_burn_at(&orbit, body, anomaly, v_inf, &burn_magnitude, &burn_vector) ||
+		!starting_orbit_state_at(&orbit, body, anomaly, &starting_state)) return -1;
+
+	Vector3 radial = norm_vec3(starting_state.r);
+	Vector3 normal = norm_vec3(cross_vec3(starting_state.r, starting_state.v));
+	Vector3 tangential = cross_vec3(normal, radial);
+	*magnitude = burn_magnitude;
+	*rtn = vec3(dot_vec3(burn_vector, radial), dot_vec3(burn_vector, tangential),
+		dot_vec3(burn_vector, normal));
+	return 1;
 }
 
 void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType date_type, double dep_periapsis, double arr_periapsis, char *string) {
@@ -107,14 +128,12 @@ void itinerary_short_overview_to_string(struct ItinStep *step, enum DateType dat
 	
 	sprintf(string, "%s\nDeparture dv: %.2f m/s (Periapsis: %.2fkm)\n", string, pp.dv_dep, dep_periapsis/1e3);
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture; Periapsis: %.2fkm)\n", string, pp.dv_arr_cap, arr_periapsis/1e3);
-	append_arrival_assist(string, get_last(step), arr_periapsis, 0);
-	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization; Periapsis: %.2fkm)\n", string, pp.dv_arr_circ, arr_periapsis/1e3);
-	append_arrival_assist(string, get_last(step), arr_periapsis, 1);
+	append_arrival_assist(string, get_last(step), arr_periapsis);
 	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
 	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
-	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
+	sprintf(string, "%s\n--\n", string);
 	
 	step = get_first(step);
 	int step_id = 0;
@@ -182,7 +201,17 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 	struct ItinStep *departure = get_first(step);
 	DepartureBurn3D departure_burn;
 	Vector3 departure_vinf = subtract_vec3(departure->next[0]->v_dep, departure->v_body);
-	if(calculate_free_plane_departure_burn(departure_vinf, departure->body,
+	double custom_burn_magnitude;
+	Vector3 custom_burn_rtn;
+	int custom_burn = custom_starting_orbit_burn(departure->body, departure_vinf,
+		&custom_burn_magnitude, &custom_burn_rtn);
+	if(custom_burn > 0) {
+		sprintf(string, "%sInitial burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f) "
+			"[custom starting-orbit RTN]\n", string, custom_burn_magnitude,
+			custom_burn_rtn.x, custom_burn_rtn.y, custom_burn_rtn.z);
+	} else if(custom_burn < 0) {
+		sprintf(string, "%sInitial burn: unavailable for the saved custom starting orbit\n", string);
+	} else if(calculate_free_plane_departure_burn(departure_vinf, departure->body,
 		alt2radius(departure->body, dep_periapsis), &departure_burn)) {
 		Vector3 radial = departure_burn.periapsis_direction;
 		Vector3 tangential = departure_burn.tangential_direction;
@@ -191,18 +220,16 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 		double burn_tangential = dot_vec3(departure_burn.burn_delta_v, tangential);
 		double burn_normal = dot_vec3(departure_burn.burn_delta_v, normal);
 		sprintf(string, "%sInitial burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f) "
-			"[starting-orbit RTN]\n", string, departure_burn.burn_magnitude,
+			"[free-plane RTN]\n", string, departure_burn.burn_magnitude,
 			burn_radial, burn_tangential, burn_normal);
 	}
 	sprintf(string, "%sArrival dv: %.2f m/s  (Capture)\n", string, pp.dv_arr_cap);
-	append_arrival_assist(string, get_last(step), arr_periapsis, 0);
-	sprintf(string, "%sArrival dv: %.2f m/s  (Circularization)\n", string, pp.dv_arr_circ);
-	append_arrival_assist(string, get_last(step), arr_periapsis, 1);
+	append_arrival_assist(string, get_last(step), arr_periapsis);
 	sprintf(string, "%sPowered flyby burns: %.2f m/s\n", string, pp.dv_flyby);
 	sprintf(string, "%sDSM burns: %.2f m/s\n", string, pp.dv_dsm);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Fly-By)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby);
 	sprintf(string, "%sTotal dv: %.2f m/s  (Capture)\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_cap);
-	sprintf(string, "%sTotal dv: %.2f m/s  (Circularization)\n\n--\n", string, pp.dv_dep + pp.dv_dsm + pp.dv_flyby + pp.dv_arr_circ);
+	sprintf(string, "%s\n--\n", string);
 	
 	step = get_first(step);
 	int step_id = 0;
@@ -235,14 +262,17 @@ void itinerary_detailed_overview_to_string(struct ItinStep *step, enum DateType 
 			int valid_flyby = calculate_flyby_with_moons(v_arr, v_dep, v_body, step->body, min_periapsis, step->date, &flyby);
 			double periapsis = valid_flyby ? flyby.periapsis_radius : get_flyby_periapsis(v_arr, v_dep, v_body, step->body);
 			double burn = valid_flyby ? flyby.burn_delta_v : 0;
+			double maneuver_burn = valid_flyby ? flyby.burn_delta_v : 0;
+			Vector3 burn_radial_direction = valid_flyby ? norm_vec3(flyby.periapsis_direction) : vec3(0, 0, 0);
+			Vector3 burn_tangential_direction = valid_flyby ? norm_vec3(flyby.incoming_tangent_direction) : vec3(0, 0, 0);
 			Vector3 burn_normal = valid_flyby ?
-				cross_vec3(flyby.periapsis_direction, flyby.incoming_tangent_direction) : vec3(0, 0, 0);
-			double burn_radial = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, flyby.periapsis_direction) : 0;
-			double burn_tangential = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, flyby.incoming_tangent_direction) : 0;
+				norm_vec3(cross_vec3(burn_radial_direction, burn_tangential_direction)) : vec3(0, 0, 0);
+			double burn_radial = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, burn_radial_direction) : 0;
+			double burn_tangential = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, burn_tangential_direction) : 0;
 			double burn_normal_component = valid_flyby ? dot_vec3(flyby.burn_delta_v_vector, burn_normal) : 0;
 			sprintf(string, "%sPeriapsis: %.2fkm\nInclination: %.2f°\n"
 				"Powered burn: %.2f m/s (radial %.2f, tangential %.2f, normal %.2f)\n",
-				string, (periapsis-step->body->radius)/1e3, rad2deg(incl), burn,
+				string, (periapsis-step->body->radius)/1e3, rad2deg(incl), maneuver_burn,
 				burn_radial, burn_tangential, burn_normal_component);
 		}
 		if(step->next != NULL) step = step->next[0];

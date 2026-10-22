@@ -100,11 +100,6 @@ static void check_flyby_policy(void) {
 	venus.orbit.cb = &sun;
 	double safe = venus.radius + venus.atmo_alt + 1e4;
 	check_near("minimum periapsis keeps the surface clearance", flyby_minimum_periapsis(&venus), safe, 1e-6);
-	int previous = set_flyby_unrestricted_periapsis(1);
-	check_true("unrestricted mode starts disabled", previous == 0);
-	check_near("unrestricted periapsis is a tenth of the radius", flyby_minimum_periapsis(&venus), venus.radius * 0.1, 1e-6);
-	check_true("setting the mode returns the previous one", set_flyby_unrestricted_periapsis(0) == 1);
-	check_near("restricted periapsis is restored", flyby_minimum_periapsis(&venus), safe, 1e-6);
 
 	Vector3 body_velocity = vec3(35000, 0, 0);
 	struct ItinStep *departure = make_step(&venus, 0, NULL);
@@ -128,14 +123,13 @@ static void check_flyby_policy(void) {
 	check_near("the largest shortfall is reported", largest, expected_shortfall, 1e-3);
 	check_true("the largest shortfall is optional", count_flybys_needing_burn(arrival, NULL) == 1);
 
-	PoweredFlybyResult unrestricted;
-	int flown = calculate_powered_flyby(flyby->v_arr, arrival->v_dep, body_velocity, &venus, venus.radius * 0.1, &unrestricted);
-	int dips = flown && unrestricted.periapsis_radius < safe - 1;
-	set_flyby_unrestricted_periapsis(1);
-	check_true("an unrestricted flyby is judged by the periapsis it flies", flyby_below_min_safe(flyby) == dips);
-	check_true("the dip is counted", count_flybys_below_min_safe(arrival) == dips);
-	set_flyby_unrestricted_periapsis(0);
-	check_true("restricted mode is cached separately", !flyby_below_min_safe(flyby));
+	PoweredFlybyResult safe_flyby;
+	check_true("a powered burn keeps periapsis safe when the unpowered turn would not",
+		calculate_powered_flyby(flyby->v_arr, arrival->v_dep, body_velocity, &venus,
+			flyby_minimum_periapsis(&venus), &safe_flyby) && safe_flyby.periapsis_radius >= safe - 1 &&
+			safe_flyby.burn_delta_v > 0);
+	check_true("safe periapsis is the only flyby policy", !flyby_below_min_safe(flyby));
+	check_true("no flyby of the route is below the safe radius", count_flybys_below_min_safe(arrival) == 0);
 
 	arrival->v_dep = add_vec3(body_velocity, vec3(3000 * cos(1.7e-4), 3000 * sin(1.7e-4), 0));
 	check_near("a nearly straight flyby has no shortfall", flyby_periapsis_shortfall(flyby), 0, 0);
@@ -286,13 +280,40 @@ static void check_itinerary_files(void) {
 	check_true("the field counter counts separators", amt_of_fields("a,b,c") == 3 && amt_of_fields("a") == 1);
 	check_true("the newest binary file type is the default", get_current_bin_file_type() == 6);
 
+	ItinSearchOptions search_options = {
+		.known = 1,
+		.allow_dsm = 1,
+		.moon_aware_flybys = 1,
+		.moon_assist_arrival = 1,
+		.allow_resonant = 1,
+		.last_transfer_type = TF_CAPTURE,
+		.use_custom_starting_orbit = 1,
+		.starting_orbit_body_id = get_body_system_id(route->body, system),
+		.starting_orbit = {
+			.semi_major_axis = route->body->radius + route->body->atmo_alt + 200e3,
+			.eccentricity = 0.1,
+			.inclination = 0.2,
+			.raan = 0.3,
+			.arg_periapsis = 0.4,
+			.true_anomaly = 0.5
+		}
+	};
 	char single_path[] = "unit_test_route.itin";
-	store_single_itinerary_in_bfile(route, system, single_path);
+	store_single_itinerary_in_bfile_with_options(route, system, single_path, search_options);
 	struct ItinLoadFileResults loaded = load_single_itinerary_from_bfile(single_path);
 	check_true("a stored route is loaded again", loaded.itin != NULL && loaded.system != NULL);
+	check_true("single-route files preserve search options",
+		loaded.search_options.known && loaded.search_options.allow_dsm &&
+		loaded.search_options.moon_aware_flybys && loaded.search_options.moon_assist_arrival &&
+		loaded.search_options.allow_resonant && loaded.search_options.last_transfer_type == TF_CAPTURE &&
+		loaded.search_options.use_custom_starting_orbit &&
+		loaded.search_options.starting_orbit_body_id == search_options.starting_orbit_body_id);
+	check_near("single-route files preserve the custom starting orbit",
+		loaded.search_options.starting_orbit.semi_major_axis, search_options.starting_orbit.semi_major_axis, 0);
 	if(loaded.itin != NULL) {
 		check_routes_equal("the loaded route equals the stored one", route, get_first(loaded.itin));
 		free_itinerary(get_first(loaded.itin));
+		free_celestial_system(loaded.system);
 	}
 	remove(single_path);
 
@@ -307,6 +328,8 @@ static void check_itinerary_files(void) {
 	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {.type = ITIN_SEQ_INFO_TO_TARGET, .system = system,
 		.dep_body = get_body_by_name("EARTH", system), .arr_body = get_body_by_name("MARS", system),
 		.flyby_bodies = flyby_bodies, .num_flyby_bodies = 1};
+	calc_data.search_options = search_options;
+	calc_data.search_options.last_transfer_type = TF_BOTH;
 	char multi_path[] = "unit_test_routes.itins";
 	store_itineraries_in_bfile(departures, 3, 1, 1, calc_data, system, multi_path, get_current_bin_file_type());
 
@@ -327,6 +350,41 @@ static void check_itinerary_files(void) {
 		free(results.departures);
 	}
 	remove(multi_path);
+
+	struct ItinStep *capture_departures[1] = {route};
+	Itin_Calc_Results both_results = {
+		.departures = departures,
+		.num_deps = 1,
+		.num_nodes = 3,
+		.num_itins = 1,
+		.capture_departures = capture_departures,
+		.capture_num_deps = 1,
+		.capture_num_nodes = 3,
+		.capture_num_itins = 1
+	};
+	char dual_path[] = "unit_test_routes_both.itins";
+	store_itineraries_in_bfile_both_modes(both_results, calc_data, system, dual_path);
+	struct ItinsLoadFileResults both_loaded = load_itineraries_from_bfile(dual_path);
+	check_true("dual-mode itinerary results are loaded",
+		both_loaded.header.file_type == 8 && both_loaded.header.calc_data.dv_filter.last_transfer_type == TF_BOTH &&
+		both_loaded.header.calc_data.search_options.known &&
+		both_loaded.header.calc_data.search_options.allow_dsm &&
+		both_loaded.header.calc_data.search_options.moon_aware_flybys &&
+		both_loaded.header.calc_data.search_options.moon_assist_arrival &&
+		both_loaded.header.calc_data.search_options.allow_resonant &&
+		both_loaded.departures != NULL && both_loaded.capture_departures != NULL &&
+		both_loaded.capture_num_deps == 1 && both_loaded.capture_num_itins == 1);
+	if(both_loaded.departures != NULL) {
+		check_routes_equal("dual-mode Fly-By routes round-trip", route, both_loaded.departures[0]);
+		free_itinerary(both_loaded.departures[0]);
+		free(both_loaded.departures);
+	}
+	if(both_loaded.capture_departures != NULL) {
+		check_routes_equal("dual-mode Capture routes round-trip", route, both_loaded.capture_departures[0]);
+		free_itinerary(both_loaded.capture_departures[0]);
+		free(both_loaded.capture_departures);
+	}
+	remove(dual_path);
 	free_itinerary(route);
 	free_celestial_system(system);
 }
