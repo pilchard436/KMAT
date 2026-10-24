@@ -70,6 +70,12 @@ typedef struct ItinSearchOptionsBin {
 	StartingOrbit starting_orbit;
 } ItinSearchOptionsBin;
 
+typedef struct ItinArrivalDvHeaderBin {
+	double dep_periapsis;
+	double arr_periapsis;
+	int moon_assist_enabled;
+} ItinArrivalDvHeaderBin;
+
 union ItinStepBin {
 	struct ItinStepBinValid {
 		int *ptr;
@@ -89,6 +95,11 @@ union ItinStepBin {
 		int body_id;
 		int num_next_nodes;
 	} t2;
+
+	struct ItinStepBinT3 {
+		struct ItinStepBinT2 node;
+		double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+	} t3;
 };
 
 void store_itin_search_options(FILE *file, const ItinSearchOptions *options);

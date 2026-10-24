@@ -1,5 +1,6 @@
 #include "test_support.h"
 #include "orbit_calculator/itin_tool.h"
+#include "orbit_calculator/flyby_policy.h"
 #include "orbit_calculator/search_rejections.h"
 #include "orbit_calculator/soi_encounter.h"
 #include "tools/file_io.h"
@@ -288,7 +289,7 @@ static void check_itinerary_files(void) {
 	free(maneuver);
 
 	check_true("the field counter counts separators", amt_of_fields("a,b,c") == 3 && amt_of_fields("a") == 1);
-	check_true("the newest binary file type is the default", get_current_bin_file_type() == 6);
+	check_true("dual-mode itineraries are the default", get_current_bin_file_type() == 8);
 
 	ItinSearchOptions search_options = {
 		.known = 1,
@@ -309,9 +310,48 @@ static void check_itinerary_files(void) {
 		}
 	};
 	char single_path[] = "unit_test_route.itin";
-	store_single_itinerary_in_bfile_with_options(route, system, single_path, search_options);
+	struct ItinStep *single_arrival = get_last(route);
+	double single_dep_periapsis = route->body->atmo_alt + 50e3;
+	double single_arr_periapsis = single_arrival->body->atmo_alt + 50e3;
+	int previous_moon_assist = set_moon_assist_enabled(1);
+	single_arrival->arrival_dv_cache = (struct ItinArrivalDvCache) {
+		.dv_arr_cap = 321,
+		.dv_arr_circ = 654,
+		.incoming_excess = subtract_vec3(single_arrival->v_arr, single_arrival->v_body),
+		.date = single_arrival->date,
+		.arr_periapsis = single_arr_periapsis,
+		.moon_assist_enabled = 1,
+		.valid = 1
+	};
+	struct PorkchopPoint single_saved_values = create_porkchop_point(single_arrival,
+		single_dep_periapsis, single_arr_periapsis);
+	store_single_itinerary_in_bfile_with_options(route, system, single_path, search_options,
+		single_dep_periapsis, single_arr_periapsis);
 	struct ItinLoadFileResults loaded = load_single_itinerary_from_bfile(single_path);
 	check_true("a stored route is loaded again", loaded.itin != NULL && loaded.system != NULL);
+	check_true("single-route files preserve delta-v results",
+		loaded.arrival_dv_cache_stored && get_last(loaded.itin)->arrival_dv_cache.valid &&
+		get_last(loaded.itin)->arrival_dv_cache.moon_assist_enabled);
+	if(loaded.itin != NULL) {
+		struct ItinStep *loaded_arrival = get_last(loaded.itin);
+		check_near("single-route files preserve departure delta-v",
+			loaded_arrival->arrival_dv_cache.dv_dep, single_saved_values.dv_dep, 1e-9);
+		check_near("single-route files preserve DSM delta-v",
+			loaded_arrival->arrival_dv_cache.dv_dsm, single_saved_values.dv_dsm, 1e-9);
+		check_near("single-route files preserve flyby delta-v",
+			loaded_arrival->arrival_dv_cache.dv_flyby, single_saved_values.dv_flyby, 1e-9);
+		check_near("single-route files preserve assisted capture delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, single_saved_values.dv_arr_cap, 1e-9);
+		check_near("single-route files preserve assisted circularization delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_circ, single_saved_values.dv_arr_circ, 1e-9);
+		check_near("single-route files preserve departure periapsis",
+			loaded.departure_periapsis, single_dep_periapsis, 0);
+		check_near("single-route files preserve arrival periapsis",
+			loaded.arrival_periapsis, single_arr_periapsis, 0);
+		cache_itinerary_arrival_dvs(loaded_arrival, single_arr_periapsis);
+		check_near("loaded single-route arrival delta-v cache is reused",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, 321, 0);
+	}
 	check_true("single-route files preserve search options",
 		loaded.search_options.known && loaded.search_options.allow_dsm &&
 		loaded.search_options.moon_aware_flybys && loaded.search_options.moon_assist_arrival &&
@@ -326,6 +366,7 @@ static void check_itinerary_files(void) {
 		free_celestial_system(loaded.system);
 	}
 	remove(single_path);
+	set_moon_assist_enabled(previous_moon_assist);
 
 	struct ItinStep *departures[1] = {route};
 	Body *flyby_bodies[1] = {get_body_by_name("VENUS", system)};
@@ -340,26 +381,8 @@ static void check_itinerary_files(void) {
 		.flyby_bodies = flyby_bodies, .num_flyby_bodies = 1};
 	calc_data.search_options = search_options;
 	calc_data.search_options.last_transfer_type = TF_BOTH;
-	char multi_path[] = "unit_test_routes.itins";
-	store_itineraries_in_bfile(departures, 3, 1, 1, calc_data, system, multi_path, get_current_bin_file_type());
-
-	FILE *file = fopen(multi_path, "rb");
-	check_true("the itineraries file is written", file != NULL);
-	if(file != NULL) {
-		ItinStepBinHeaderData header = get_itins_bfile_header(file);
-		check_true("the header keeps the counts", header.num_deps == 1 && header.num_nodes == 3 && header.num_itins == 1);
-		check_near("the header keeps the departure window", header.calc_data.jd_min_dep, departure_jd, 0);
-		check_true("the header keeps the route bodies", header.calc_data.seq_info.to_target.num_flyby_bodies == 1);
-		fclose(file);
-	}
-	struct ItinsLoadFileResults results = load_itineraries_from_bfile(multi_path);
-	check_true("the itineraries are loaded again", results.departures != NULL && results.header.num_deps == 1);
-	if(results.departures != NULL) {
-		check_routes_equal("the loaded itinerary equals the stored one", route, results.departures[0]);
-		free_itinerary(results.departures[0]);
-		free(results.departures);
-	}
-	remove(multi_path);
+	calc_data.dv_filter.dep_periapsis = single_dep_periapsis;
+	calc_data.dv_filter.arr_periapsis = get_last(route)->body->atmo_alt + 50e3;
 
 	struct ItinStep *capture_departures[1] = {route};
 	Itin_Calc_Results both_results = {
@@ -372,6 +395,10 @@ static void check_itinerary_files(void) {
 		.capture_num_nodes = 3,
 		.capture_num_itins = 1
 	};
+	struct ItinStep *arrival = get_last(route);
+	int previous_itins_moon_assist = set_moon_assist_enabled(1);
+	struct PorkchopPoint itins_saved_values = create_porkchop_point(arrival,
+		calc_data.dv_filter.dep_periapsis, calc_data.dv_filter.arr_periapsis);
 	char dual_path[] = "unit_test_routes_both.itins";
 	store_itineraries_in_bfile_both_modes(both_results, calc_data, system, dual_path);
 	struct ItinsLoadFileResults both_loaded = load_itineraries_from_bfile(dual_path);
@@ -386,9 +413,29 @@ static void check_itinerary_files(void) {
 		both_loaded.capture_num_deps == 1 && both_loaded.capture_num_itins == 1);
 	if(both_loaded.departures != NULL) {
 		check_routes_equal("dual-mode Fly-By routes round-trip", route, both_loaded.departures[0]);
+		struct ItinStep *loaded_arrival = get_last(both_loaded.departures[0]);
+		check_true("dual-mode files preserve route delta-v results",
+			loaded_arrival->arrival_dv_cache.valid &&
+			loaded_arrival->arrival_dv_cache.moon_assist_enabled);
+		check_near("dual-mode files preserve departure delta-v",
+			loaded_arrival->arrival_dv_cache.dv_dep, itins_saved_values.dv_dep, 1e-9);
+		check_near("dual-mode files preserve DSM delta-v",
+			loaded_arrival->arrival_dv_cache.dv_dsm, itins_saved_values.dv_dsm, 1e-9);
+		check_near("dual-mode files preserve flyby delta-v",
+			loaded_arrival->arrival_dv_cache.dv_flyby, itins_saved_values.dv_flyby, 1e-9);
+		check_near("dual-mode files preserve assisted capture delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, itins_saved_values.dv_arr_cap, 1e-9);
+		check_near("dual-mode files preserve assisted circularization delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_circ, itins_saved_values.dv_arr_circ, 1e-9);
+		int previous_moon_assist = set_moon_assist_enabled(1);
+		cache_itinerary_arrival_dvs(loaded_arrival, calc_data.dv_filter.arr_periapsis);
+		set_moon_assist_enabled(previous_moon_assist);
+		check_near("loaded arrival delta-v cache matches route inputs and is reused",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, 321, 0);
 		free_itinerary(both_loaded.departures[0]);
 		free(both_loaded.departures);
 	}
+	set_moon_assist_enabled(previous_itins_moon_assist);
 	if(both_loaded.capture_departures != NULL) {
 		check_routes_equal("dual-mode Capture routes round-trip", route, both_loaded.capture_departures[0]);
 		free_itinerary(both_loaded.capture_departures[0]);

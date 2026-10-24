@@ -2,6 +2,7 @@
 #include "tools/file_io.h"
 #include "orbit_calculator/flyby_policy.h"
 #include "tools/starting_orbit.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,24 +37,25 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	}
 	pa_analysis_params = load_results.header;
 	apply_pa_search_options(pa_analysis_params.calc_data.search_options, load_results.header.system);
-	enum LastTransferType loaded_type = (enum LastTransferType)load_results.header.calc_data.dv_filter.last_transfer_type;
-	pa_has_both_modes = load_results.header.file_type == 7 || load_results.header.file_type == 8;
-	if(pa_has_both_modes) {
-		pa_dual_flyby_departures = load_results.departures;
-		pa_dual_flyby_num_deps = load_results.header.num_deps;
-		pa_dual_capture_departures = load_results.capture_departures;
-		pa_dual_capture_num_deps = load_results.capture_num_deps;
-		pa_departures = pa_dual_flyby_departures;
-		pa_num_deps = pa_dual_flyby_num_deps;
-		pa_set_last_transfer_type(TF_FLYBY, 0);
-	} else {
-		pa_departures = load_results.departures;
-		pa_num_deps = load_results.header.num_deps;
-		int has_calculation_mode = load_results.header.file_type > 2 &&
-		loaded_type >= TF_FLYBY && loaded_type <= TF_CIRC;
-		pa_set_last_transfer_type(has_calculation_mode ? loaded_type : TF_FLYBY, has_calculation_mode);
-	}
+	pa_has_both_modes = 1;
+	pa_dual_flyby_departures = load_results.departures;
+	pa_dual_flyby_num_deps = load_results.header.num_deps;
+	pa_dual_capture_departures = load_results.capture_departures;
+	pa_dual_capture_num_deps = load_results.capture_num_deps;
+	pa_departures = pa_dual_flyby_departures;
+	pa_num_deps = pa_dual_flyby_num_deps;
+	pa_set_last_transfer_type(TF_FLYBY, 0);
 	pa_system = load_results.header.system;
+	if(pa_analysis_params.calc_data.search_options.known && pa_num_deps > 0 &&
+		pa_departures != NULL && pa_departures[0] != NULL) {
+		struct ItinStep *arrival = get_last(pa_departures[0]);
+		if(arrival != NULL && arrival->body != NULL) {
+			double saved_arrival_periapsis = pa_analysis_params.calc_data.dv_filter.arr_periapsis;
+			double arrival_periapsis_altitude = saved_arrival_periapsis - arrival->body->atmo_alt;
+			if(isfinite(arrival_periapsis_altitude) && arrival_periapsis_altitude >= 0)
+				pa_arr_periapsis = arrival_periapsis_altitude;
+		}
+	}
 	update_camera_to_celestial_system(pa_itin_preview_camera, pa_system, deg2rad(90), 0);
 	pa_itin_preview_camera->min_pos_dist = 1e6;
 	if(body_show_status_pa != NULL) free(body_show_status_pa);
@@ -78,7 +80,8 @@ G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
 	ItinSearchOptions options = pa_analysis_params.calc_data.search_options;
 	if(options.known) options.last_transfer_type = pa_last_transfer_type;
-	store_single_itinerary_in_bfile_with_options(first, pa_system, filepath, options);
+	store_single_itinerary_in_bfile_with_options(first, pa_system, filepath, options,
+		pa_dep_periapsis, pa_arr_periapsis);
 }
 
 G_MODULE_EXPORT void show_pa_analysis_parameters() {

@@ -115,7 +115,8 @@ G_MODULE_EXPORT void on_save_itinerary(GtkWidget* widget, gpointer data) {
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
 	ItinSearchOptions options = tp_search_options;
 	if(options.known) options.last_transfer_type = tp_last_transfer_type;
-	store_single_itinerary_in_bfile_with_options(first, tp_system, filepath, options);
+	store_single_itinerary_in_bfile_with_options(first, tp_system, filepath, options,
+		tp_dep_periapsis, tp_arr_periapsis);
 }
 
 static void apply_tp_search_options(ItinSearchOptions options, CelestSystem *system) {
@@ -193,8 +194,10 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(tb_tp_tfdate), 0);
 	tp_update_bodies();
 	// Keep the saved velocities: re-solving from body centers would change a powered-flyby route's delta-v.
-	tp_dep_periapsis = get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
-	tp_arr_periapsis = get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
+	tp_dep_periapsis = load_results.arrival_dv_cache_stored ? load_results.departure_periapsis :
+		get_first(curr_transfer_tp)->body->atmo_alt + 50e3;
+	tp_arr_periapsis = load_results.arrival_dv_cache_stored ? load_results.arrival_periapsis :
+		get_last(curr_transfer_tp)->body->atmo_alt + 50e3;
 	update_itin_body_osvs(get_first(curr_transfer_tp), tp_system);
 	update();
 	update_camera_to_celestial_system(tp_system_camera, tp_system, deg2rad(90), 0); tp_focus_body = NULL; tp_focus_spacecraft = 0;

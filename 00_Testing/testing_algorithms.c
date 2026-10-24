@@ -334,7 +334,7 @@ int create_file_test_fixtures(const char *directory) {
 		.max_duration = 250,
 		.dv_filter = {.max_depdv = 1500, .max_satdv = 1e9, .max_totdv = 1e9,
 			.dep_periapsis = departure_body->atmo_alt + 50e3, .arr_periapsis = arrival_body->atmo_alt + 50e3,
-			.last_transfer_type = TF_FLYBY}
+			.last_transfer_type = TF_BOTH}
 	};
 	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
 		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body, .arr_body = arrival_body,
@@ -347,14 +347,15 @@ int create_file_test_fixtures(const char *directory) {
 		char itins_path[260], itin_path[260];
 		snprintf(itins_path, sizeof(itins_path), "%sfixture.itins", directory);
 		snprintf(itin_path, sizeof(itin_path), "%sfixture.itin", directory);
-		store_itineraries_in_bfile(results.departures, results.num_nodes, results.num_deps, results.num_itins,
-			calc_data, system, itins_path, get_current_bin_file_type());
+		store_itineraries_in_bfile_both_modes(results, calc_data, system, itins_path);
 		store_single_itinerary_in_bfile(results.departures[0], system, itin_path);
 		created = 1;
 	} else printf("The file test fixture search found no itineraries\n");
 
 	for(int i = 0; i < results.num_deps; i++) free_itinerary(results.departures[i]);
 	free(results.departures);
+	for(int i = 0; i < results.capture_num_deps; i++) free_itinerary(results.capture_departures[i]);
+	free(results.capture_departures);
 	return created;
 }
 

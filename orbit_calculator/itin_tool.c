@@ -37,20 +37,62 @@ int set_porkchop_exact_flybys(int exact) {
 	return previous;
 }
 
+static int arrival_dv_cache_matches(const struct ItinStep *arrival, Vector3 incoming_excess,
+		double arr_periapsis, int moon_assist_enabled) {
+	const struct ItinArrivalDvCache *cache = &arrival->arrival_dv_cache;
+	return cache->valid &&
+		cache->incoming_excess.x == incoming_excess.x &&
+		cache->incoming_excess.y == incoming_excess.y &&
+		cache->incoming_excess.z == incoming_excess.z &&
+		cache->date == arrival->date &&
+		fabs(cache->arr_periapsis - arr_periapsis) <= 1e-6 &&
+		cache->moon_assist_enabled == moon_assist_enabled;
+}
+
+int cache_itinerary_arrival_dvs(struct ItinStep *arrival, double arr_periapsis) {
+	if(arrival == NULL || arrival->body == NULL) return 0;
+
+	Vector3 incoming_excess = subtract_vec3(arrival->v_arr, arrival->v_body);
+	int moon_assist_enabled = moon_assist_is_active();
+	if(arrival_dv_cache_matches(arrival, incoming_excess, arr_periapsis, moon_assist_enabled)) return 1;
+
+	double arrival_radius = alt2radius(arrival->body, arr_periapsis);
+	double vinf = mag_vec3(incoming_excess);
+	double dv_arr_cap = dv_capture(arrival->body, arrival_radius, vinf);
+	double dv_arr_circ = dv_circ(arrival->body, arrival_radius, vinf);
+	if(moon_assist_enabled) {
+		dv_arr_cap = arrival_dv_with_assist(arrival->body, incoming_excess, arrival_radius, 0,
+				dv_arr_cap, arrival->date, NULL);
+		dv_arr_circ = arrival_dv_with_assist(arrival->body, incoming_excess, arrival_radius, 1,
+				dv_arr_circ, arrival->date, NULL);
+	}
+
+	arrival->arrival_dv_cache = (struct ItinArrivalDvCache) {
+		.dv_arr_cap = dv_arr_cap,
+		.dv_arr_circ = dv_arr_circ,
+		.incoming_excess = incoming_excess,
+		.date = arrival->date,
+		.arr_periapsis = arr_periapsis,
+		.moon_assist_enabled = moon_assist_enabled,
+		.valid = 1
+	};
+	return 1;
+}
+
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis) {
 	struct PorkchopPoint pp;
 	pp.arrival = itin;
 	pp.dur = get_itinerary_duration(itin);
 
 	Vector3 arrival_excess = subtract_vec3(itin->v_arr, itin->v_body);
-	double vinf = mag_vec3(arrival_excess);
-	double arrival_radius = alt2radius(itin->body, arr_periapsis);
-	pp.dv_arr_cap = dv_capture(itin->body, arrival_radius, vinf);
-	pp.dv_arr_circ = dv_circ(itin->body, arrival_radius, vinf);
-	// Search nodes call this for every candidate, so assists are only applied when asked for.
-	if(moon_assist_is_active() && itin->body != NULL) {
-		pp.dv_arr_cap = arrival_dv_with_assist(itin->body, arrival_excess, arrival_radius, 0, pp.dv_arr_cap, itin->date, NULL);
-		pp.dv_arr_circ = arrival_dv_with_assist(itin->body, arrival_excess, arrival_radius, 1, pp.dv_arr_circ, itin->date, NULL);
+	if(cache_itinerary_arrival_dvs(itin, arr_periapsis)) {
+		pp.dv_arr_cap = itin->arrival_dv_cache.dv_arr_cap;
+		pp.dv_arr_circ = itin->arrival_dv_cache.dv_arr_circ;
+	} else {
+		double vinf = mag_vec3(arrival_excess);
+		double arrival_radius = alt2radius(itin->body, arr_periapsis);
+		pp.dv_arr_cap = dv_capture(itin->body, arrival_radius, vinf);
+		pp.dv_arr_circ = dv_circ(itin->body, arrival_radius, vinf);
 	}
 
 	pp.dv_dsm = 0;
@@ -86,6 +128,13 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		alt2radius(itin->prev->body, dep_periapsis), &pp.dv_dep))
 		pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis),
 			mag_vec3(departure_vinf));
+	pp.arrival->arrival_dv_cache.dv_dep = pp.dv_dep;
+	pp.arrival->arrival_dv_cache.dv_dsm = pp.dv_dsm;
+	pp.arrival->arrival_dv_cache.dv_flyby = pp.dv_flyby;
+	pp.arrival->arrival_dv_cache.dv_arr_cap = pp.dv_arr_cap;
+	pp.arrival->arrival_dv_cache.dv_arr_circ = pp.dv_arr_circ;
+	pp.arrival->arrival_dv_cache.dep_periapsis = dep_periapsis;
+	pp.arrival->arrival_dv_cache.route_values_valid = 1;
 	return pp;
 }
 
@@ -224,7 +273,7 @@ int find_copy_and_store_end_nodes(struct ItinStep *curr_step, struct Body *arr_b
 
 		for(int i = 0; i < curr_step->num_next_nodes; i++) {
 			if(curr_step->next[i]->body == arr_body) {
-				struct ItinStep *end_node = malloc(num_of_end_nodes * sizeof(struct ItinStep));
+				struct ItinStep *end_node = calloc(1, sizeof(struct ItinStep));
 				end_node->body 	= curr_step->next[i]->body;
 				end_node->date 	= curr_step->next[i]->date;
 				end_node->r 	= curr_step->next[i]->r;
@@ -294,12 +343,14 @@ double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr
 		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
 	}
 	if(step->next == NULL) {
+		if(last_transfer_type != TF_CAPTURE && last_transfer_type != TF_CIRC) return 0;
+		if(cache_itinerary_arrival_dvs(step, arr_periapsis))
+			return last_transfer_type == TF_CIRC ?
+					step->arrival_dv_cache.dv_arr_circ : step->arrival_dv_cache.dv_arr_cap;
 		Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
 		double vinf = mag_vec3(excess), radius = alt2radius(step->body, arr_periapsis);
-		if(last_transfer_type != TF_CAPTURE && last_transfer_type != TF_CIRC) return 0;
-		int circularize = last_transfer_type == TF_CIRC;
-		double plain = circularize ? dv_circ(step->body, radius, vinf) : dv_capture(step->body, radius, vinf);
-		return moon_assist_is_active() ? arrival_dv_with_assist(step->body, excess, radius, circularize, plain, step->date, NULL) : plain;
+		return last_transfer_type == TF_CIRC ? dv_circ(step->body, radius, vinf) :
+				dv_capture(step->body, radius, vinf);
 	}
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = flyby_minimum_periapsis(step->body);

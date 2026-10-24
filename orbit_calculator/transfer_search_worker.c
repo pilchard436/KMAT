@@ -179,7 +179,7 @@ void *calc_itins_from_departure(void *args) {
 				if(num_steps == 2 && dv_dep + dv_arr > dv_filter.max_totdv) { count_search_rejection(REJECT_TOTAL_DV); continue; }
 
 				curr_step = get_first(curr_step);
-				curr_step->next[next_step_id] = (struct ItinStep *) malloc(sizeof(struct ItinStep));
+				curr_step->next[next_step_id] = (struct ItinStep *) calloc(1, sizeof(struct ItinStep));
 				curr_step->next[next_step_id]->prev = curr_step;
 				curr_step->next[next_step_id]->next = NULL;
 

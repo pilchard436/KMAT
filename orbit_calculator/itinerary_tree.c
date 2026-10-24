@@ -163,10 +163,11 @@ void copy_step_body_vectors_and_date(struct ItinStep *orig_step, struct ItinStep
 	step_copy->v_arr = orig_step->v_arr;
 	step_copy->v_dep = orig_step->v_dep;
 	step_copy->date = orig_step->date;
+	step_copy->arrival_dv_cache = orig_step->arrival_dv_cache;
 }
 
 struct ItinStep * create_itin_copy(struct ItinStep *step) {
-	struct ItinStep *new_step = (struct ItinStep*) malloc(sizeof(struct ItinStep));
+	struct ItinStep *new_step = (struct ItinStep*) calloc(1, sizeof(struct ItinStep));
 	copy_step_body_vectors_and_date(step, new_step);
 	new_step->prev = NULL;
 	new_step->num_next_nodes = step->num_next_nodes;
@@ -181,13 +182,13 @@ struct ItinStep * create_itin_copy(struct ItinStep *step) {
 }
 
 struct ItinStep * create_itin_copy_from_arrival(struct ItinStep *step) {
-	struct ItinStep *step_copy = (struct ItinStep*) malloc(sizeof(struct ItinStep));
+	struct ItinStep *step_copy = (struct ItinStep*) calloc(1, sizeof(struct ItinStep));
 	copy_step_body_vectors_and_date(step, step_copy);
 	step_copy->next = NULL;
 	step_copy->num_next_nodes = 0;
 
 	while(step->prev != NULL) {
-		step_copy->prev = (struct ItinStep*) malloc(sizeof(struct ItinStep));
+		step_copy->prev = (struct ItinStep*) calloc(1, sizeof(struct ItinStep));
 		step_copy->prev->next = (struct ItinStep**) malloc(sizeof(struct ItinStep*));
 		step_copy->prev->next[0] = step_copy;
 		step_copy->prev->num_next_nodes = 1;

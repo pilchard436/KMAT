@@ -272,7 +272,7 @@ int find_closest_transfer(struct ItinStep *step) {
 	// A maneuver node has no body to search for, and a maneuver predecessor has no state to search from.
 	if(step == NULL || step->body == NULL || step->prev == NULL || step->prev->prev == NULL || step->prev->body == NULL) return 0;
 	struct ItinStep *prev = step->prev;
-	struct ItinStep *temp = (struct ItinStep*) malloc(sizeof(struct ItinStep));
+	struct ItinStep *temp = (struct ItinStep*) calloc(1, sizeof(struct ItinStep));
 	copy_step_body_vectors_and_date(prev, temp);
 	temp->next = NULL;
 	temp->prev = NULL;

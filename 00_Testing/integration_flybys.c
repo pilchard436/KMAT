@@ -73,8 +73,12 @@ int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_b
 		int saved_routes = 0, saved_maneuvers = 0;
 		double saved_best = DBL_MAX;
 		summarize_itineraries(saved, with_dsm.num_deps, &calc_data, &saved_routes, &saved_maneuvers, &saved_best);
-		store_itineraries_in_bfile(saved, with_dsm.num_nodes, with_dsm.num_deps, with_dsm.num_itins,
-			calc_data, system, file_path, get_current_bin_file_type());
+		Itin_Calc_Results dual_results = with_dsm;
+		dual_results.capture_departures = saved;
+		dual_results.capture_num_deps = with_dsm.num_deps;
+		dual_results.capture_num_nodes = with_dsm.num_nodes;
+		dual_results.capture_num_itins = with_dsm.num_itins;
+		store_itineraries_in_bfile_both_modes(dual_results, calc_data, system, file_path);
 		struct ItinsLoadFileResults loaded = load_itineraries_from_bfile(file_path);
 		int loaded_routes = 0, loaded_maneuvers = 0;
 		double loaded_best = DBL_MAX;
@@ -97,6 +101,9 @@ int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_b
 		for(int i = 0; loaded.departures != NULL && i < loaded.header.num_deps; i++)
 			free_itinerary(loaded.departures[i]);
 		free(loaded.departures);
+		for(int i = 0; loaded.capture_departures != NULL && i < loaded.capture_num_deps; i++)
+			free_itinerary(loaded.capture_departures[i]);
+		free(loaded.capture_departures);
 		if(loaded.header.system != NULL) free_celestial_system(loaded.header.system);
 		remove(file_path);
 	}

@@ -5,11 +5,21 @@
 #include "orbitlib_transfer.h"
 #include <stdio.h>
 
+struct ItinArrivalDvCache {
+	double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+	Vector3 incoming_excess;
+	double date, dep_periapsis, arr_periapsis;
+	int moon_assist_enabled;
+	int route_values_valid;
+	int valid;
+};
+
 struct ItinStep {
 	Body *body;
 	Vector3 r;
 	Vector3 v_arr, v_body, v_dep;
 	double date;
+	struct ItinArrivalDvCache arrival_dv_cache;
 	int num_next_nodes;
 	struct ItinStep *prev;
 	struct ItinStep **next;
@@ -63,6 +73,7 @@ struct PorkchopPoint *create_porkchop_array_from_departures(struct ItinStep **de
 
 // add itinerary departure date, duration, departure dv, deep-space maneuvre dv and arrival dv in porkchop array
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis);
+int cache_itinerary_arrival_dvs(struct ItinStep *arrival, double arr_periapsis);
 int set_porkchop_exact_flybys(int exact);
 
 // from current step and given information, initiate calculation of next steps

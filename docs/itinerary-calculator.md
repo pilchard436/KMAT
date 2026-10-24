@@ -90,6 +90,17 @@ alongside their results. When a saved route is reopened, those settings are
 restored for option-dependent calculations and displays. Older files do not
 contain this provenance, so those settings cannot be recovered from them.
 
+Dual-mode `.itins` files store the five calculated delta-v components for each
+completed route: departure, DSM, flyby, capture, and circularization. Arrival
+values include moon-assist results when enabled; the Porkchop Analyzer reuses
+them when the route inputs and arrival periapsis match. The updated type-8
+record layout is not backward-compatible with earlier type-8 `.itins` files.
+
+New `.itin` route files store the same five delta-v components for the saved
+route, along with the departure and arrival periapses and moon-assist state
+used to compute them. The updated `.itin` record layout is not
+backward-compatible with earlier `.itin` files.
+
 ## 4. The search runs in the background
 
 After preparing the inputs, the GUI disables the Itinerary Calculator window,
@@ -215,8 +226,9 @@ phase timings, and aggregate option effects are recorded in
 
 Porkchop Analyzer reads both result sets from new dual-mode `.itins` files and
 switches between their independently optimized routes. Legacy calculation
-files marked for a single mode remain readable and keep that mode fixed.
-The existing single-itinerary `.itin` format remains unchanged and does not
-record the mode. A route loaded directly into Transfer Planner therefore has
-no known source mode and remains selectable; changing that mode updates the
-route's displayed arrival objective without rerunning the itinerary search.
+files containing only a single result mode are no longer supported; `.itins`
+files must contain both Fly-By and Capture result sets.
+New single-itinerary `.itin` files also retain their search options and mode.
+Older `.itin` files without this provenance have no known source mode; changing
+the mode in Transfer Planner updates the route's displayed arrival objective
+without rerunning the itinerary search.

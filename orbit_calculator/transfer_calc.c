@@ -64,6 +64,17 @@ static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Dat
 	return step->num_next_nodes > 0;
 }
 
+static void cache_arrival_dvs_in_tree(struct ItinStep *step, double dep_periapsis, double arr_periapsis) {
+	if(step == NULL) return;
+	if(step->num_next_nodes == 0) {
+		if(step->prev != NULL && step->body != NULL)
+			create_porkchop_point(step, dep_periapsis, arr_periapsis);
+		return;
+	}
+	for(int i = 0; i < step->num_next_nodes; i++)
+		cache_arrival_dvs_in_tree(step->next[i], dep_periapsis, arr_periapsis);
+}
+
 static struct ItinStep *copy_itinerary_tree_checked(const struct ItinStep *source) {
 	if(source == NULL) return NULL;
 	struct ItinStep *copy = calloc(1, sizeof(*copy));
@@ -394,6 +405,13 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 			capture_departures = NULL;
 		}
 	}
+
+	for(int i = 0; i < num_deps; i++)
+		cache_arrival_dvs_in_tree(departures[i], calc_data.dv_filter.dep_periapsis,
+			calc_data.dv_filter.arr_periapsis);
+	for(int i = 0; i < shared_num_deps && capture_departures != NULL; i++)
+		cache_arrival_dvs_in_tree(capture_departures[i], calc_data.dv_filter.dep_periapsis,
+			calc_data.dv_filter.arr_periapsis);
 
 	gettimeofday(&end, NULL);  // Record the ending time
 	elapsed_time = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;

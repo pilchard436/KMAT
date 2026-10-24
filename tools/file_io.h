@@ -48,10 +48,12 @@ struct ItinLoadFileResults {
 	struct ItinStep *itin;
 	CelestSystem *system;
 	ItinSearchOptions search_options;
+	double departure_periapsis;
+	double arrival_periapsis;
+	int arrival_dv_cache_stored;
 };
 
 // store itineraries in binary file from multiple departures (pre-order storing)
-void store_itineraries_in_bfile(struct ItinStep **departures, int num_nodes, int num_deps, int num_itins, Itin_Calc_Data calc_data, CelestSystem *system, char *filepath, int file_type);
 void store_itineraries_in_bfile_both_modes(Itin_Calc_Results results, Itin_Calc_Data calc_data,
 	CelestSystem *system, char *filepath);
 
@@ -63,7 +65,7 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath);
 // stores single itinerary (first branches in tree) (departure first)
 void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system, char *filepath);
 void store_single_itinerary_in_bfile_with_options(struct ItinStep *itin, CelestSystem *system,
-	char *filepath, ItinSearchOptions search_options);
+	char *filepath, ItinSearchOptions search_options, double dep_periapsis, double arr_periapsis);
 
 // loads single itinerary (first branches in tree) (departure first)
 struct ItinLoadFileResults load_single_itinerary_from_bfile(char *filepath);

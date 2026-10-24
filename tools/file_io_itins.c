@@ -1,16 +1,53 @@
 #include "file_io_internal.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include <gtk/gtk.h>
+
+static void restore_arrival_dv_cache_metadata(struct ItinStep *step, double dep_periapsis,
+		double arr_periapsis, int moon_assist_enabled) {
+	if(step == NULL) return;
+	if(step->num_next_nodes == 0) {
+		if(step->prev != NULL && step->body != NULL) {
+			step->arrival_dv_cache.incoming_excess = subtract_vec3(step->v_arr, step->v_body);
+			step->arrival_dv_cache.date = step->date;
+			step->arrival_dv_cache.dep_periapsis = dep_periapsis;
+			step->arrival_dv_cache.arr_periapsis = arr_periapsis;
+			step->arrival_dv_cache.moon_assist_enabled = !!moon_assist_enabled;
+			step->arrival_dv_cache.route_values_valid = 1;
+			step->arrival_dv_cache.valid = 1;
+		}
+		return;
+	}
+	for(int i = 0; i < step->num_next_nodes; i++)
+		restore_arrival_dv_cache_metadata(step->next[i], dep_periapsis, arr_periapsis, moon_assist_enabled);
+}
+
+static void ensure_route_dv_values(struct ItinStep *step, double dep_periapsis, double arr_periapsis) {
+	if(step == NULL) return;
+	if(step->num_next_nodes == 0) {
+		if(step->prev == NULL || step->body == NULL) return;
+		cache_itinerary_arrival_dvs(step, arr_periapsis);
+		if(!step->arrival_dv_cache.route_values_valid ||
+			fabs(step->arrival_dv_cache.dep_periapsis - dep_periapsis) > 1e-6)
+			create_porkchop_point(step, dep_periapsis, arr_periapsis);
+		return;
+	}
+	for(int i = 0; i < step->num_next_nodes; i++)
+		ensure_route_dv_values(step->next[i], dep_periapsis, arr_periapsis);
+}
 
 static void store_itineraries_in_bfile_internal(struct ItinStep **departures, int num_nodes,
 		int num_deps, int num_itins, Itin_Calc_Data calc_data, CelestSystem *system,
 		char *filepath, int file_type, struct ItinStep **capture_departures,
 		int capture_num_nodes, int capture_num_deps, int capture_num_itins, int both_modes) {
 	BinTypes bin_types = get_itins_file_bin_types_from_file_type(file_type);
-	if(bin_types.file_type < 0) return;
-	if((file_type == 7 || file_type == 8) && !both_modes) {
-		fprintf(stderr, "Dual-mode itinerary files require both result sets\n");
+	if(bin_types.file_type < 0 || file_type != 8) {
+		fprintf(stderr, "Unsupported itinerary file type: %d\n", file_type);
+		return;
+	}
+	if(!both_modes) {
+		fprintf(stderr, "Itinerary files require both Fly-By and Capture result sets\n");
 		return;
 	}
 	if((num_deps > 0 && departures == NULL) ||
@@ -18,6 +55,16 @@ static void store_itineraries_in_bfile_internal(struct ItinStep **departures, in
 		fprintf(stderr, "Cannot write itineraries: a result array is missing\n");
 		return;
 	}
+	if(!both_modes) {
+		fprintf(stderr, "Itinerary files require both Fly-By and Capture result sets\n");
+		return;
+	}
+	for(int i = 0; i < num_deps; i++)
+		ensure_route_dv_values(departures[i], calc_data.dv_filter.dep_periapsis,
+			calc_data.dv_filter.arr_periapsis);
+	for(int i = 0; i < capture_num_deps; i++)
+		ensure_route_dv_values(capture_departures[i], calc_data.dv_filter.dep_periapsis,
+			calc_data.dv_filter.arr_periapsis);
 	
 	// Check if the string ends with ".itins"
 	if (strlen(filepath) >= 6 && strcmp(filepath + strlen(filepath) - 6, ".itins") != 0) {
@@ -50,7 +97,9 @@ static void store_itineraries_in_bfile_internal(struct ItinStep **departures, in
 					.dv_filter = calc_data.dv_filter
 				};
 		
-				printf("Filesize: ~%.3f MB\n", (double) num_nodes*sizeof(struct ItinStepBinT2)/1e6);
+				size_t legacy_step_size = bin_types.itin_step_type == 3 ?
+						sizeof(struct ItinStepBinT3) : sizeof(struct ItinStepBinT2);
+				printf("Filesize: ~%.3f MB\n", (double) num_nodes*legacy_step_size/1e6);
 		
 				fwrite(&bin_header.t3, sizeof(struct ItinStepBinHeaderT3), 1, file);
 		
@@ -101,7 +150,9 @@ static void store_itineraries_in_bfile_internal(struct ItinStep **departures, in
 					.calc_acc = calc_data.calc_acc
 			};
 			
-			printf("Filesize: ~%.3f MB\n", (double) num_nodes*sizeof(struct ItinStepBinT2)/1e6);
+			size_t current_step_size = bin_types.itin_step_type == 3 ?
+					sizeof(struct ItinStepBinT3) : sizeof(struct ItinStepBinT2);
+			printf("Filesize: ~%.3f MB\n", (double) num_nodes*current_step_size/1e6);
 			
 			fwrite(&bin_header.t4, sizeof(struct ItinStepBinHeaderT4), 1, file);
 			
@@ -143,12 +194,6 @@ static void store_itineraries_in_bfile_internal(struct ItinStep **departures, in
 	// ---------------------------------------------------
 
 	fclose(file);
-}
-
-void store_itineraries_in_bfile(struct ItinStep **departures, int num_nodes, int num_deps,
-		int num_itins, Itin_Calc_Data calc_data, CelestSystem *system, char *filepath, int file_type) {
-	store_itineraries_in_bfile_internal(departures, num_nodes, num_deps, num_itins,
-		calc_data, system, filepath, file_type, NULL, 0, 0, 0, 0);
 }
 
 void store_itineraries_in_bfile_both_modes(Itin_Calc_Results results, Itin_Calc_Data calc_data,
@@ -365,13 +410,13 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 	}
 
 	for(int i = 0; i < header_data.num_deps; i++) {
-		departures[i] = (struct ItinStep *) malloc(sizeof(struct ItinStep));
+		departures[i] = (struct ItinStep *) calloc(1, sizeof(struct ItinStep));
 		departures[i]->prev = NULL;
 		load_step_from_bfile(departures[i], file, NULL, header_data.system, bin_types.itin_step_type);
 	}
 	struct ItinStep **capture_departures = NULL;
 	int capture_num_deps = 0, capture_num_nodes = 0, capture_num_itins = 0;
-	if(header_data.file_type == 7 || header_data.file_type == 8) {
+	if(header_data.file_type == 8) {
 		if(fread(&capture_num_nodes, sizeof(int), 1, file) != 1 ||
 			fread(&capture_num_deps, sizeof(int), 1, file) != 1 ||
 			fread(&capture_num_itins, sizeof(int), 1, file) != 1 ||
@@ -402,6 +447,18 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 			}
 			load_step_from_bfile(capture_departures[i], file, NULL, header_data.system, bin_types.itin_step_type);
 		}
+	}
+	if(header_data.file_type == 8) {
+		double dep_periapsis = header_data.calc_data.dv_filter.dep_periapsis;
+		double arr_periapsis = header_data.calc_data.dv_filter.arr_periapsis;
+		int moon_assist_enabled = header_data.calc_data.search_options.known &&
+				header_data.calc_data.search_options.moon_assist_arrival;
+		for(int i = 0; i < header_data.num_deps; i++)
+			restore_arrival_dv_cache_metadata(departures[i], dep_periapsis, arr_periapsis,
+				moon_assist_enabled);
+		for(int i = 0; i < capture_num_deps; i++)
+			restore_arrival_dv_cache_metadata(capture_departures[i], dep_periapsis, arr_periapsis,
+				moon_assist_enabled);
 	}
 	// ---------------------------------------------------
 
