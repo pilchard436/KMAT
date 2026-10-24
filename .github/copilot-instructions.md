@@ -13,7 +13,8 @@ Use the workspace-root `Itineraries/` folder for local itinerary fixtures and pe
 - KMAT is a C project using C11 and CMake. Follow the style and patterns of nearby code.
 - Keep changes focused; avoid unrelated refactoring and changes to vendored code under `external/`.
 - Prefer existing helpers and tests over introducing duplicate logic.
-- After a feature branch is successfully merged, delete its local branch. Delete a remote branch only when explicitly requested.
+- After a feature branch is successfully merged, delete its local branch. 
+- When creating new features, always do it in a new branch. When fixing bugs, if the fix is simple, you can directly commit it into main. If the fix is complicated, create a separate branch for it.
 
 ## Build and test
 
