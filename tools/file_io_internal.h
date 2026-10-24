@@ -12,50 +12,21 @@ typedef struct BinTypes {
 	int file_type, header_type, body_type, system_type, itin_step_type;
 } BinTypes;
 
-union CalcDataBin {
-	struct CalcDataBinT1 {
-		double jd_min_dep;
-		double jd_max_dep;
-		double jd_max_arr;
-		double max_duration;
-		double step_dep_date;
-		int num_deps_per_date;
-		int max_num_waiting_orbits;
-		struct Dv_Filter dv_filter;
-	} t1;
-	
-	struct CalcDataBinT2 {
-		double jd_min_dep;
-		double jd_max_dep;
-		double jd_max_arr;
-		double max_duration;
-		double step_dep_date;
-		int num_deps_per_date;
-		int max_num_waiting_orbits;
-		struct Dv_Filter dv_filter;
-		struct Calc_Acc calc_acc;
-	} t2;
+struct CalcDataBinT2 {
+	double jd_min_dep;
+	double jd_max_dep;
+	double jd_max_arr;
+	double max_duration;
+	double step_dep_date;
+	int num_deps_per_date;
+	int max_num_waiting_orbits;
+	struct Dv_Filter dv_filter;
+	struct Calc_Acc calc_acc;
 };
 
-
-union ItinStepBinHeader {
-	struct ItinStepBinHeaderValid {
-		int *ptr;
-	} is_valid;
-
-	struct ItinStepBinHeaderT2 {
-		int num_nodes, num_deps;
-	} t2;
-
-	struct ItinStepBinHeaderT3 {
-		int num_nodes, num_deps, num_itins;
-		struct CalcDataBinT1 calc_data;
-	} t3;
-	
-	struct ItinStepBinHeaderT4 {
-		int num_nodes, num_deps, num_itins;
-		struct CalcDataBinT2 calc_data;
-	} t4;
+struct ItinStepBinHeaderT4 {
+	int num_nodes, num_deps, num_itins;
+	struct CalcDataBinT2 calc_data;
 };
 
 typedef struct ItinSearchOptionsBin {
