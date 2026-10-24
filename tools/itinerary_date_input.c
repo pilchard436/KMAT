@@ -29,6 +29,28 @@ int itinerary_date_picker_day_limit(enum DateType date_type) {
 	return date_type == DATE_KERBAL ? 426 : 365;
 }
 
+int itinerary_date_picker_step_date(Datetime *date, int day_delta) {
+	if(date == NULL || date->y < 1 || date->y > 9999 || day_delta == 0) return 0;
+	Datetime stepped_date = *date;
+	if(date->date_type == DATE_ISO) {
+		if(!g_date_valid_dmy(date->d, date->m, date->y)) return 0;
+		double stepped_jd = jd_change_date(convert_date_JD(*date), 0, 0, day_delta, DATE_ISO);
+		stepped_date = convert_JD_date(stepped_jd, DATE_ISO);
+		if(stepped_date.y < 1 || stepped_date.y > 9999 ||
+			!g_date_valid_dmy(stepped_date.d, stepped_date.m, stepped_date.y)) return 0;
+	} else {
+		int days_per_year = itinerary_date_picker_day_limit(date->date_type);
+		if(date->d < 1 || date->d > days_per_year) return 0;
+		long long day_index = (long long)(date->y - 1) * days_per_year + date->d - 1 + day_delta;
+		long long year_count = (long long)9999 * days_per_year;
+		if(day_index < 0 || day_index >= year_count) return 0;
+		stepped_date.y = (int)(day_index / days_per_year) + 1;
+		stepped_date.d = (int)(day_index % days_per_year) + 1;
+	}
+	*date = stepped_date;
+	return 1;
+}
+
 int itinerary_date_entry_is_complete(const char *text, enum DateType date_type) {
 	if(text == NULL || !is_string_valid_date_format(text, date_type)) return 0;
 	Datetime date = date_from_string((char *)text, date_type);

@@ -10,7 +10,6 @@
 #include "gui/info_win_manager.h"
 #include "starting_orbit_editor.h"
 #include "tools/itinerary_date_input.h"
-#include "tools/itinerary_date_picker_state.h"
 
 #include <gtk/gtk.h>
 

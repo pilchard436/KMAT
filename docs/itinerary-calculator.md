@@ -21,8 +21,11 @@ The handler:
    When the option is disabled, any active custom orbit is cleared.
 
 The date entry fields also validate input while editing and normalize it when
-focus leaves the field. The date range validation and date-entry behavior are
-implemented in
+focus leaves the field. Their calendar picker supports arrow-key navigation
+across month and year boundaries. For ordinal calendars, stepping past the
+last day advances the year, and stepping back from day one goes to the
+previous year's last day. The date range validation and date-entry behavior
+are implemented in
 [`itinerary_calculator_dates.c`](../GUI/transfer_app/itinerary_calculator_dates.c).
 
 ## 2. The UI choices become search data

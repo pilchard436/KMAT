@@ -6,6 +6,95 @@
 
 static int pa_filter_entry_update_depth;
 
+static gboolean pa_numeric_entry_is_valid(const char *text) {
+	if(text == NULL || *text == '\0') return FALSE;
+	char *end = NULL;
+	double value = g_ascii_strtod(text, &end);
+	while(end != NULL && g_ascii_isspace(*end)) end++;
+	return end != text && end != NULL && *end == '\0' && isfinite(value) && value >= 0;
+}
+
+static gboolean pa_numeric_entry_is_valid_prefix(const char *text) {
+	if(text == NULL) return FALSE;
+	int has_decimal = 0;
+	for(const char *character = text; *character != '\0'; character++) {
+		if(g_ascii_isdigit(*character)) continue;
+		if(*character == '.' && !has_decimal) {
+			has_decimal = 1;
+			continue;
+		}
+		return FALSE;
+	}
+	return TRUE;
+}
+
+static void on_pa_numeric_entry_insert_text(
+		GtkEditable *editable, const gchar *new_text, gint new_text_length,
+		gint *position, gpointer user_data) {
+	(void)user_data;
+	const char *current_text = gtk_entry_get_text(GTK_ENTRY(editable));
+	gsize current_length = strlen(current_text);
+	gsize insert_position = *position < 0 ? current_length : (gsize)*position;
+	gsize insert_length = new_text_length < 0 ? strlen(new_text) : (gsize)new_text_length;
+	if(insert_position > current_length) {
+		g_signal_stop_emission_by_name(editable, "insert-text");
+		return;
+	}
+	GString *candidate = g_string_sized_new(current_length + insert_length);
+	g_string_append_len(candidate, current_text, insert_position);
+	g_string_append_len(candidate, new_text, insert_length);
+	g_string_append(candidate, current_text + insert_position);
+	gboolean valid = pa_numeric_entry_is_valid_prefix(candidate->str);
+	g_string_free(candidate, TRUE);
+	if(!valid) g_signal_stop_emission_by_name(editable, "insert-text");
+}
+
+static void on_pa_numeric_entry_changed(GtkEditable *editable, gpointer user_data) {
+	(void)user_data;
+	GtkWidget *entry = GTK_WIDGET(editable);
+	const char *text = gtk_entry_get_text(GTK_ENTRY(entry));
+	GtkStyleContext *style = gtk_widget_get_style_context(entry);
+	if(pa_numeric_entry_is_valid(text)) {
+		g_object_set_data_full(G_OBJECT(entry), "pa-last-valid-number", g_strdup(text), g_free);
+		gtk_style_context_remove_class(style, "error");
+	} else {
+		gtk_style_context_add_class(style, "error");
+	}
+}
+
+static gboolean on_pa_numeric_entry_focus_out(GtkWidget *widget, GdkEventFocus *event, gpointer user_data) {
+	(void)event;
+	(void)user_data;
+	const char *text = gtk_entry_get_text(GTK_ENTRY(widget));
+	if(!pa_numeric_entry_is_valid(text)) {
+		const char *last_valid = g_object_get_data(G_OBJECT(widget), "pa-last-valid-number");
+		gtk_entry_set_text(GTK_ENTRY(widget), last_valid != NULL ? last_valid : "");
+	}
+	return FALSE;
+}
+
+void connect_pa_filter_entry_validation(void) {
+	for(int field = 0; field < 6; field++) {
+		GtkEntry *entries[] = {
+			GTK_ENTRY(tf_pa_min_feedback[field]),
+			GTK_ENTRY(tf_pa_max_feedback[field])
+		};
+		for(size_t entry_index = 0; entry_index < G_N_ELEMENTS(entries); entry_index++) {
+			if(field == PA_DEP || field == PA_ARR) {
+				connect_itinerary_date_entry_validation(entries[entry_index]);
+			} else {
+				g_signal_connect(entries[entry_index], "insert-text",
+						G_CALLBACK(on_pa_numeric_entry_insert_text), NULL);
+				g_signal_connect(entries[entry_index], "changed",
+						G_CALLBACK(on_pa_numeric_entry_changed), NULL);
+				g_signal_connect(entries[entry_index], "focus-out-event",
+						G_CALLBACK(on_pa_numeric_entry_focus_out), NULL);
+				on_pa_numeric_entry_changed(GTK_EDITABLE(entries[entry_index]), NULL);
+			}
+		}
+	}
+}
+
 void begin_pa_filter_entry_update(void) {
 	pa_filter_entry_update_depth++;
 }

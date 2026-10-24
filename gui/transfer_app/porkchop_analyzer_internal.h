@@ -4,6 +4,7 @@
 /* State and helpers shared by the porkchop analyzer modules (core, groups, filter, io). */
 
 #include "porkchop_analyzer.h"
+#include "itinerary_calculator.h"
 #include "porkchop_analyzer_tools.h"
 #include "porkchop_analyzer_model.h"
 #include "gui/drawing.h"
@@ -73,6 +74,7 @@ void begin_pa_filter_entry_update(void);
 void end_pa_filter_entry_update(void);
 gboolean are_any_porkchop_points_in_filter(const double min[6], const double max[6]);
 int apply_filter(void);
+void connect_pa_filter_entry_validation(void);
 void update_best_itin();
 void analyze_departure_itins();
 

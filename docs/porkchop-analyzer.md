@@ -18,8 +18,13 @@ point color represents total delta-v.
 - **Hover near a plotted point** to see its delta-v, along with the departure
   date and duration or arrival date at the cursor.
 
-Filter changes apply as soon as a complete value is entered. **Save Selected
-Itinerary** saves the currently selected route. **Select Best in View** selects
+Filter changes apply as soon as a complete value is entered. Date fields accept
+the active date format and include a calendar picker; invalid or incomplete
+dates and numeric values are highlighted and revert to their last valid value
+when focus leaves the field. Calendar arrow keys step across month and year
+boundaries; ordinal calendars also roll from the last day of one year to day
+one of the next. **Save Selected Itinerary** saves the currently selected
+route. **Select Best in View** selects
 the lowest-delta-v node in the current plot window, considering only results
 included by the filters and visible itinerary groups. Applying a filter resets
 the plot view to the remaining results. **Reset Porkchop** restores the full

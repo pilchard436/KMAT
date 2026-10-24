@@ -30,6 +30,42 @@ void run_itinerary_date_input_tests(void) {
 	expect_int("Kerbal startup duration is zero", kerbal_defaults.max_duration_user_days, 0);
 	expect_int("Kerbal picker has 426 days", itinerary_date_picker_day_limit(DATE_KERBAL), 426);
 	expect_int("KerbalISO picker has 365 days", itinerary_date_picker_day_limit(DATE_KERBALISO), 365);
+	Datetime stepped_date = {.y = 4, .d = 426, .date_type = DATE_KERBAL};
+	expect_int("Kerbal picker wraps the last day into the next year",
+		itinerary_date_picker_step_date(&stepped_date, 1), 1);
+	expect_datetime("Kerbal next-year rollover date", stepped_date,
+		(Datetime) {.y = 5, .d = 1, .date_type = DATE_KERBAL}, 0);
+	expect_int("Kerbal picker wraps day one into the previous year",
+		itinerary_date_picker_step_date(&stepped_date, -1), 1);
+	expect_datetime("Kerbal previous-year rollover date", stepped_date,
+		(Datetime) {.y = 4, .d = 426, .date_type = DATE_KERBAL}, 0);
+	stepped_date = (Datetime) {.y = 2024, .m = 1, .d = 31, .date_type = DATE_ISO};
+	expect_int("ISO picker wraps January 31 into the next month",
+		itinerary_date_picker_step_date(&stepped_date, 1), 1);
+	expect_datetime("ISO next-month rollover date", stepped_date,
+		(Datetime) {.y = 2024, .m = 2, .d = 1, .date_type = DATE_ISO}, 0);
+	expect_int("ISO picker wraps the first day of a month into the previous month",
+		itinerary_date_picker_step_date(&stepped_date, -1), 1);
+	expect_datetime("ISO previous-month rollover date", stepped_date,
+		(Datetime) {.y = 2024, .m = 1, .d = 31, .date_type = DATE_ISO}, 0);
+	stepped_date = (Datetime) {.y = 2024, .m = 12, .d = 31, .date_type = DATE_ISO};
+	expect_int("ISO picker wraps December 31 into the next year",
+		itinerary_date_picker_step_date(&stepped_date, 1), 1);
+	expect_datetime("ISO next-year rollover date", stepped_date,
+		(Datetime) {.y = 2025, .m = 1, .d = 1, .date_type = DATE_ISO}, 0);
+	expect_int("ISO picker wraps January 1 into the previous year",
+		itinerary_date_picker_step_date(&stepped_date, -1), 1);
+	expect_datetime("ISO previous-year rollover date", stepped_date,
+		(Datetime) {.y = 2024, .m = 12, .d = 31, .date_type = DATE_ISO}, 0);
+	stepped_date = (Datetime) {.y = 2024, .m = 2, .d = 28, .date_type = DATE_ISO};
+	expect_int("ISO picker steps through leap day", itinerary_date_picker_step_date(&stepped_date, 1), 1);
+	expect_datetime("ISO leap-day navigation date", stepped_date,
+		(Datetime) {.y = 2024, .m = 2, .d = 29, .date_type = DATE_ISO}, 0);
+	stepped_date = (Datetime) {.y = 1, .m = 1, .d = 1, .date_type = DATE_ISO};
+	expect_int("ISO picker cannot wrap before year one",
+		itinerary_date_picker_step_date(&stepped_date, -1), 0);
+	expect_datetime("failed ISO rollover leaves the date unchanged", stepped_date,
+		(Datetime) {.y = 1, .m = 1, .d = 1, .date_type = DATE_ISO}, 0);
 
 	expect_int("ISO accepts leap day", itinerary_date_entry_is_complete("2024-02-29", DATE_ISO), 1);
 	expect_int("ISO rejects invalid leap day", itinerary_date_entry_is_complete("2023-02-29", DATE_ISO), 0);

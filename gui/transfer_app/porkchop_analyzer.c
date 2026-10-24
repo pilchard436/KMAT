@@ -230,6 +230,7 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	tf_pa_max_feedback[PA_TOTDV] = gtk_builder_get_object(builder, "tf_pa_max_totdv");
 	tf_pa_max_feedback[PA_DEPDV] = gtk_builder_get_object(builder, "tf_pa_max_depdv");
 	tf_pa_max_feedback[PA_SATDV] = gtk_builder_get_object(builder, "tf_pa_max_satdv");
+	connect_pa_filter_entry_validation();
 	for(int i = 0; i < 6; i++) {
 		g_signal_connect(tf_pa_min_feedback[i], "changed", G_CALLBACK(on_pa_filter_entry_changed), NULL);
 		g_signal_connect(tf_pa_max_feedback[i], "changed", G_CALLBACK(on_pa_filter_entry_changed), NULL);
