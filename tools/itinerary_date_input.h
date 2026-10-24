@@ -20,6 +20,7 @@ typedef enum {
 enum DateType itinerary_date_type_for_system_name(const char *system_name);
 ItineraryStartupDateDefaults calculate_itinerary_startup_date_defaults(enum DateType date_type);
 int itinerary_date_picker_day_limit(enum DateType date_type);
+int itinerary_date_picker_step_date(Datetime *date, int day_delta);
 int itinerary_date_entry_is_complete(const char *text, enum DateType date_type);
 int itinerary_date_entry_is_valid_prefix(const char *text, enum DateType date_type);
 ItineraryDateRangeStatus validate_itinerary_date_range(

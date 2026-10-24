@@ -10,6 +10,7 @@ void ic_clear_ksp_start(void);
 void ic_set_ksp_note(const char *text);
 void ic_change_date_type(enum DateType old_date_type, enum DateType new_date_type);
 void ic_initialize_date_defaults(void);
+void connect_itinerary_date_entry_validation(GtkEntry *entry);
 void set_ic_default_system(char *system_name);
 void reset_ic();
 

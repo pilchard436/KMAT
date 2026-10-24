@@ -1802,7 +1802,6 @@ The departure burn is minimized over the orbit.</property>
                                 <property name="has-frame">False</property>
                                 <property name="width-chars">14</property>
                                 <property name="xalign">1</property>
-                                <property name="input-purpose">number</property>
                               </object>
                               <packing>
                                 <property name="left-attach">1</property>
@@ -1816,7 +1815,6 @@ The departure burn is minimized over the orbit.</property>
                                 <property name="has-frame">False</property>
                                 <property name="width-chars">14</property>
                                 <property name="xalign">1</property>
-                                <property name="input-purpose">number</property>
                               </object>
                               <packing>
                                 <property name="left-attach">2</property>
@@ -1843,7 +1841,6 @@ The departure burn is minimized over the orbit.</property>
                                 <property name="has-frame">False</property>
                                 <property name="width-chars">14</property>
                                 <property name="xalign">1</property>
-                                <property name="input-purpose">number</property>
                               </object>
                               <packing>
                                 <property name="left-attach">1</property>
@@ -1857,7 +1854,6 @@ The departure burn is minimized over the orbit.</property>
                                 <property name="has-frame">False</property>
                                 <property name="width-chars">14</property>
                                 <property name="xalign">1</property>
-                                <property name="input-purpose">number</property>
                               </object>
                               <packing>
                                 <property name="left-attach">2</property>
