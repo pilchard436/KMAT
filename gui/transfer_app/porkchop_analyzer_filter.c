@@ -1,5 +1,6 @@
 #include "porkchop_analyzer_internal.h"
 #include "tools/itinerary_date_input.h"
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +196,11 @@ static int read_pa_filter_bounds(double min[6], double max[6]) {
 	const int date_fields[] = {PA_DEP, PA_ARR};
 	for(size_t i = 0; i < sizeof(date_fields) / sizeof(date_fields[0]); i++) {
 		int field = date_fields[i];
+		if(!porkchop_axis_filter_field_is_active(field, pa_yaxis_type)) {
+			min[field] = -DBL_MAX;
+			max[field] = DBL_MAX;
+			continue;
+		}
 		const char *min_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[field]));
 		const char *max_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[field]));
 		if(!itinerary_date_entry_is_complete(min_text, date_type) ||
@@ -204,6 +210,11 @@ static int read_pa_filter_bounds(double min[6], double max[6]) {
 	}
 
 	for(int i = PA_DUR; i < 6; i++) {
+		if(!porkchop_axis_filter_field_is_active((enum PaMinMaxType)i, pa_yaxis_type)) {
+			min[i] = -DBL_MAX;
+			max[i] = DBL_MAX;
+			continue;
+		}
 		const char *min_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[i]));
 		const char *max_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[i]));
 		char *min_end, *max_end;

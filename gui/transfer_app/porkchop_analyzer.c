@@ -27,6 +27,7 @@ CelestSystem *pa_system;
 double pa_min_vals[6], pa_max_vals[6];
 
 static GtkWidget *pa_transfer_type_buttons[2];
+static GtkWidget *pa_arrival_filter_label, *pa_duration_filter_label;
 static int pa_setting_transfer_type;
 
 enum PaYAxisType pa_yaxis_type = PA_YAXIS_DUR;
@@ -70,6 +71,16 @@ static int get_pa_porkchop_plot_bounds(double *left, double *right, double *bott
 	*right = pa_porkchop_screen->width - get_porkchop_colorbar_width();
 	*bottom = pa_porkchop_screen->height - get_porkchop_xaxis_y();
 	return *right > *left && *bottom > 0;
+}
+
+static void update_pa_y_axis_filter_fields(void) {
+	gboolean show_arrival = pa_yaxis_type == PA_YAXIS_ARRDATE;
+	gtk_widget_set_visible(pa_arrival_filter_label, show_arrival);
+	gtk_widget_set_visible(GTK_WIDGET(tf_pa_min_feedback[PA_ARR]), show_arrival);
+	gtk_widget_set_visible(GTK_WIDGET(tf_pa_max_feedback[PA_ARR]), show_arrival);
+	gtk_widget_set_visible(pa_duration_filter_label, !show_arrival);
+	gtk_widget_set_visible(GTK_WIDGET(tf_pa_min_feedback[PA_DUR]), !show_arrival);
+	gtk_widget_set_visible(GTK_WIDGET(tf_pa_max_feedback[PA_DUR]), !show_arrival);
 }
 
 static int pa_porkchop_point_inside_plot(double x, double y, double left, double right, double bottom) {
@@ -131,20 +142,10 @@ static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, 
 	cairo_line_to(cr, right, mouse_y);
 	cairo_stroke(cr);
 
-	char departure_text[32], value_text[64];
-	date_to_string(convert_JD_date(x_value, get_settings_datetime_type()), departure_text, 0);
-	if(pa_yaxis_type == PA_YAXIS_ARRDATE) {
-		char arrival_text[32];
-		date_to_string(convert_JD_date(y_value, get_settings_datetime_type()), arrival_text, 0);
-		g_snprintf(value_text, sizeof(value_text), "Arrival: %s", arrival_text);
-	} else {
-		double duration = get_settings_datetime_type() == DATE_KERBAL ? y_value * 4 : y_value;
-		g_snprintf(value_text, sizeof(value_text), "Duration: %.2f days", duration);
-	}
-
 	double nearest_distance_squared = 12.0 * 12.0;
 	double nearest_dv = 0;
 	int nearest_point_found = 0;
+	struct PorkchopPoint nearest_point = {0};
 	double x_span = pa_porkchop_view.range.max_x - pa_porkchop_view.range.min_x;
 	double y_span = pa_porkchop_view.range.max_y - pa_porkchop_view.range.min_y;
 	for(int point_idx = 0; point_idx < pa_num_itins; point_idx++) {
@@ -168,12 +169,35 @@ static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, 
 		nearest_distance_squared = distance_squared;
 		nearest_dv = total_dv;
 		nearest_point_found = 1;
+		nearest_point = data;
 	}
 
-	char dv_text[64], tooltip_text[192];
-	if(nearest_point_found) g_snprintf(dv_text, sizeof(dv_text), "Delta-v: %.0f m/s", nearest_dv);
-	else g_snprintf(dv_text, sizeof(dv_text), "Delta-v: no nearby point");
-	g_snprintf(tooltip_text, sizeof(tooltip_text), "Departure: %s\n%s\n%s", departure_text, value_text, dv_text);
+	char tooltip_text[256];
+	if(nearest_point_found) {
+		char departure_text[32], arrival_text[32];
+		date_to_string(convert_JD_date(nearest_point.dep_date, get_settings_datetime_type()),
+				departure_text, 0);
+		date_to_string(convert_JD_date(nearest_point.dep_date + nearest_point.dur,
+				get_settings_datetime_type()), arrival_text, 0);
+		double duration = get_settings_datetime_type() == DATE_KERBAL ?
+				nearest_point.dur * 4 : nearest_point.dur;
+		g_snprintf(tooltip_text, sizeof(tooltip_text),
+				"Departure: %s\nArrival: %s\nDuration: %.2f days\nDelta-v: %.0f m/s",
+				departure_text, arrival_text, duration, nearest_dv);
+	} else {
+		char departure_text[32], value_text[64];
+		date_to_string(convert_JD_date(x_value, get_settings_datetime_type()), departure_text, 0);
+		if(pa_yaxis_type == PA_YAXIS_ARRDATE) {
+			char arrival_text[32];
+			date_to_string(convert_JD_date(y_value, get_settings_datetime_type()), arrival_text, 0);
+			g_snprintf(value_text, sizeof(value_text), "Arrival: %s", arrival_text);
+		} else {
+			double duration = get_settings_datetime_type() == DATE_KERBAL ? y_value * 4 : y_value;
+			g_snprintf(value_text, sizeof(value_text), "Duration: %.2f days", duration);
+		}
+		g_snprintf(tooltip_text, sizeof(tooltip_text),
+				"Departure: %s\n%s\nDelta-v: no nearby point", departure_text, value_text);
+	}
 	set_stable_tooltip_at(GTK_WIDGET(da_pa_porkchop), tooltip_text, mouse_x, mouse_y);
 	draw_screen(pa_porkchop_screen);
 }
@@ -230,6 +254,9 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	tf_pa_max_feedback[PA_TOTDV] = gtk_builder_get_object(builder, "tf_pa_max_totdv");
 	tf_pa_max_feedback[PA_DEPDV] = gtk_builder_get_object(builder, "tf_pa_max_depdv");
 	tf_pa_max_feedback[PA_SATDV] = gtk_builder_get_object(builder, "tf_pa_max_satdv");
+	pa_arrival_filter_label = GTK_WIDGET(gtk_builder_get_object(builder, "lb_pa_arrival_filter"));
+	pa_duration_filter_label = GTK_WIDGET(gtk_builder_get_object(builder, "lb_pa_duration_filter"));
+	update_pa_y_axis_filter_fields();
 	connect_pa_filter_entry_validation();
 	for(int i = 0; i < 6; i++) {
 		g_signal_connect(tf_pa_min_feedback[i], "changed", G_CALLBACK(on_pa_filter_entry_changed), NULL);
@@ -552,8 +579,14 @@ void pa_update_body_show_status() {
 
 
 G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) {
-	pa_yaxis_type = pa_yaxis_type != PA_YAXIS_DUR ? PA_YAXIS_DUR : PA_YAXIS_ARRDATE;
-	reset_pa_porkchop_view();
+	enum PaYAxisType next_axis = pa_yaxis_type != PA_YAXIS_DUR ?
+			PA_YAXIS_DUR : PA_YAXIS_ARRDATE;
+	if(pa_porkchop_view.initialized &&
+		!porkchop_plot_switch_y_axis(&pa_porkchop_view.range, pa_yaxis_type, next_axis))
+		reset_pa_porkchop_view();
+	pa_yaxis_type = next_axis;
+	update_pa_y_axis_filter_fields();
+	if(pa_porkchop_points != NULL) apply_filter();
 	update_pa();
 }
 

@@ -86,10 +86,3 @@ G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data
 		first->body->atmo_alt + pa_dep_periapsis,
 		arrival->body->atmo_alt + pa_arr_periapsis);
 }
-
-G_MODULE_EXPORT void show_pa_analysis_parameters() {
-	if(pa_analysis_params.num_deps == 0) return;
-	char param_string[1000];
-	print_header_data_to_string(pa_analysis_params, param_string, sizeof(param_string), get_settings_datetime_type());
-	show_msg_window(param_string);
-}

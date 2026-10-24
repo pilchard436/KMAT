@@ -17,6 +17,17 @@ void run_porkchop_tests(void) {
     porkchop_points[2].inside_filter = 0;
     expect_int("visible porkchop selection returns no-match sentinel",
                            find_first_visible_porkchop_point(porkchop_points, 3), -1);
+    expect_int("arrival-date filter is active on arrival-date axis",
+                           porkchop_axis_filter_field_is_active(PA_ARR, PA_YAXIS_ARRDATE), 1);
+    expect_int("arrival-date filter is inactive on duration axis",
+                           porkchop_axis_filter_field_is_active(PA_ARR, PA_YAXIS_DUR), 0);
+    expect_int("duration filter is active on duration axis",
+                           porkchop_axis_filter_field_is_active(PA_DUR, PA_YAXIS_DUR), 1);
+    expect_int("duration filter is inactive on arrival-date axis",
+                           porkchop_axis_filter_field_is_active(PA_DUR, PA_YAXIS_ARRDATE), 0);
+    expect_int("departure filter stays active on both axes",
+                           porkchop_axis_filter_field_is_active(PA_DEP, PA_YAXIS_ARRDATE) &&
+                           porkchop_axis_filter_field_is_active(PA_DEP, PA_YAXIS_DUR), 1);
 
     struct PorkchopGroup selectable_group = {.show_group = 1};
     struct PorkchopGroup hidden_selectable_group = {.show_group = 0};
@@ -113,6 +124,21 @@ void run_porkchop_tests(void) {
     struct PorkchopPlotRange plot_range = {20, 80, 20, 80};
     struct PorkchopPlotRange plot_bounds = {0, 100, 0, 100};
     expect_int("porkchop plot range accepts increasing finite bounds", porkchop_plot_range_is_valid(&plot_range), 1);
+    struct PorkchopPlotRange axis_switch_range = {100, 200, 10, 30};
+    expect_int("duration to arrival axis preserves x range and plot span",
+               porkchop_plot_switch_y_axis(&axis_switch_range, PA_YAXIS_DUR, PA_YAXIS_ARRDATE), 1);
+    expect_near("duration to arrival axis keeps departure range",
+                axis_switch_range.min_x, 100, 0);
+    expect_near("duration to arrival axis translates y range around departure midpoint",
+                axis_switch_range.min_y, 160, 0);
+    expect_near("duration to arrival axis preserves y range span",
+                axis_switch_range.max_y - axis_switch_range.min_y, 20, 0);
+    expect_int("arrival to duration axis restores the view range",
+               porkchop_plot_switch_y_axis(&axis_switch_range, PA_YAXIS_ARRDATE, PA_YAXIS_DUR), 1);
+    expect_near("axis switching preserves the original y minimum",
+                axis_switch_range.min_y, 10, 1e-12);
+    expect_near("axis switching preserves the original y maximum",
+                axis_switch_range.max_y, 30, 1e-12);
     porkchop_plot_pan(&plot_range, &plot_bounds, 0.5, -1.0);
     expect_int("porkchop plot pan stays inside full data bounds",
                plot_range.min_x == 0 && plot_range.max_x == 60 &&

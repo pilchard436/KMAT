@@ -10,6 +10,23 @@ int porkchop_plot_range_is_valid(const struct PorkchopPlotRange *range) {
 		range->max_x > range->min_x && range->max_y > range->min_y;
 }
 
+int porkchop_plot_switch_y_axis(struct PorkchopPlotRange *range,
+		enum PaYAxisType current_axis, enum PaYAxisType next_axis) {
+	if(!porkchop_plot_range_is_valid(range) ||
+		(current_axis != PA_YAXIS_DUR && current_axis != PA_YAXIS_ARRDATE) ||
+		(next_axis != PA_YAXIS_DUR && next_axis != PA_YAXIS_ARRDATE)) return 0;
+	if(current_axis == next_axis) return 1;
+
+	double departure_midpoint = range->min_x + (range->max_x - range->min_x) / 2;
+	double y_shift = next_axis == PA_YAXIS_ARRDATE ? departure_midpoint : -departure_midpoint;
+	double min_y = range->min_y + y_shift;
+	double max_y = range->max_y + y_shift;
+	if(!isfinite(min_y) || !isfinite(max_y) || max_y <= min_y) return 0;
+	range->min_y = min_y;
+	range->max_y = max_y;
+	return 1;
+}
+
 static void constrain_plot_axis(double *min_value, double *max_value, double bound_min, double bound_max) {
 	double span = *max_value - *min_value;
 	double bound_span = bound_max - bound_min;
@@ -108,6 +125,12 @@ int find_first_visible_porkchop_point(const struct PorkchopAnalyzerPoint *points
 			return i;
 	}
 	return -1;
+}
+
+int porkchop_axis_filter_field_is_active(enum PaMinMaxType field, enum PaYAxisType axis) {
+	if(field == PA_ARR) return axis == PA_YAXIS_ARRDATE;
+	if(field == PA_DUR) return axis == PA_YAXIS_DUR;
+	return 1;
 }
 
 int find_best_porkchop_point_in_view(const struct PorkchopAnalyzerPoint *points, int num_points,

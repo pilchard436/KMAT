@@ -15,9 +15,6 @@
 
 #include <gtk/gtk.h>
 
-enum PaMinMaxType {PA_DEP, PA_ARR, PA_DUR, PA_TOTDV, PA_DEPDV, PA_SATDV};
-enum PaYAxisType {PA_YAXIS_DUR, PA_YAXIS_ARRDATE};
-
 extern int pa_num_deps, pa_num_itins;
 extern struct ItinStep **pa_departures;
 extern struct ItinStep **pa_dual_flyby_departures, **pa_dual_capture_departures;

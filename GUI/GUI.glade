@@ -1654,20 +1654,6 @@ The departure burn is minimized over the orbit.</property>
                                     <property name="position">2</property>
                                   </packing>
                                 </child>
-                                <child>
-                                  <object class="GtkButton" id="bt_pa_analysis_params">
-                                    <property name="label" translatable="yes">Analysis Parameters</property>
-                                    <property name="visible">True</property>
-                                    <property name="can-focus">True</property>
-                                    <property name="receives-default">True</property>
-                                    <signal name="clicked" handler="show_pa_analysis_parameters" swapped="no"/>
-                                  </object>
-                                  <packing>
-                                    <property name="expand">False</property>
-                                    <property name="fill">True</property>
-                                    <property name="position">3</property>
-                                  </packing>
-                                </child>
                               </object>
                               <packing>
                                 <property name="left-attach">0</property>
@@ -1943,7 +1929,7 @@ The departure burn is minimized over the orbit.</property>
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkLabel">
+                              <object class="GtkLabel" id="lb_pa_duration_filter">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>
                                 <property name="halign">end</property>
@@ -1984,7 +1970,7 @@ The departure burn is minimized over the orbit.</property>
                               </packing>
                             </child>
                             <child>
-                              <object class="GtkLabel">
+                              <object class="GtkLabel" id="lb_pa_arrival_filter">
                                 <property name="visible">True</property>
                                 <property name="can-focus">False</property>
                                 <property name="halign">end</property>
