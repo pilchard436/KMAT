@@ -51,6 +51,8 @@ First and foremost, this tool is a fun learning experience for me, and it has be
 
 [Itinerary Calculator workflow](docs/itinerary-calculator.md)
 
+[Porkchop Analyzer guide](docs/porkchop-analyzer.md)
+
 ## Literature
 Most of the orbital mechanics calculations were inspired by and can be found in Curtis' _Orbital Mechanics for Engineering Students_ or Vallado's _Fundamentals of Astrodynamics and Applications_.
 

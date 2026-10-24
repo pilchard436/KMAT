@@ -148,6 +148,7 @@ void apply_filter() {
 
 G_MODULE_EXPORT void on_apply_filter(GtkWidget* widget, gpointer data) {
 	if(pa_porkchop_points == NULL) return;
+	reset_pa_porkchop_view();
 	apply_filter();
 	reset_min_max_feedback(0);
 	apply_filter();
@@ -156,6 +157,7 @@ G_MODULE_EXPORT void on_apply_filter(GtkWidget* widget, gpointer data) {
 
 G_MODULE_EXPORT void on_reset_porkchop(GtkWidget* widget, gpointer data) {
 	if(pa_porkchop_points == NULL) return;
+	reset_pa_porkchop_view();
 	for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].inside_filter = 1;
 	for(int i = 0; i < pa_num_groups; i++) {pa_groups[i].show_group = 1; pa_groups[i].has_itin_inside_filter = 1;}
 	update_pa();
@@ -173,28 +175,44 @@ void update_best_itin() {
 }
 
 void analyze_departure_itins() {
+	gint64 collection_start = g_get_monotonic_time();
 	int num_itins = 0, tot_num_itins = 0;
-	for(int i = 0; i < pa_num_deps; i++) num_itins += get_number_of_itineraries(pa_departures[i]);
-	for(int i = 0; i < pa_num_deps; i++) tot_num_itins += get_total_number_of_stored_steps(pa_departures[i]);
+	struct ItinStep **arrivals = NULL;
+	if(!collect_itineraries_from_departures(pa_departures, pa_num_deps, &arrivals, &num_itins, &tot_num_itins)) {
+		fprintf(stderr, "Could not collect itineraries for the Porkchop Analyzer\n");
+		return;
+	}
+	gint64 collection_end = g_get_monotonic_time();
 
 	printf("\n%d itineraries found!\nNumber of Nodes: %d\n", num_itins, tot_num_itins);
 
-	int index = 0;
-	struct ItinStep **arrivals = (struct ItinStep**) malloc(num_itins * sizeof(struct ItinStep*));
-	for(int i = 0; i < pa_num_deps; i++) store_itineraries_in_array(pa_departures[i], arrivals, &index);
-	pa_porkchop_points = malloc(num_itins * sizeof(struct PorkchopAnalyzerPoint));
+	pa_porkchop_points = num_itins > 0 ?
+			malloc((size_t)num_itins * sizeof(*pa_porkchop_points)) : NULL;
+	if(num_itins > 0 && pa_porkchop_points == NULL) {
+		fprintf(stderr, "Could not allocate Porkchop Analyzer data for %d itineraries\n", num_itins);
+		free(arrivals);
+		return;
+	}
 	set_porkchop_exact_flybys(1);
 	for(int i = 0; i < num_itins; i++) {
-		pa_porkchop_points[i].data = create_porkchop_point(arrivals[i], get_first(arrivals[0])->body->atmo_alt + pa_dep_periapsis, arrivals[0]->body->atmo_alt + pa_arr_periapsis);
+		pa_porkchop_points[i].data = create_porkchop_point(arrivals[i],
+				get_first(arrivals[0])->body->atmo_alt + pa_dep_periapsis,
+				arrivals[0]->body->atmo_alt + pa_arr_periapsis);
 		pa_porkchop_points[i].inside_filter = 1;
 		pa_porkchop_points[i].group = NULL;
 	}
 	set_porkchop_exact_flybys(0);
 	free(arrivals);
+	gint64 metrics_end = g_get_monotonic_time();
 
 	pa_num_itins = num_itins;
 	initialize_itinerary_groups();
-	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
+	if(pa_num_itins > 1) sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
 	update_best_itin();
 	reset_min_max_feedback(1);
+	gint64 analysis_end = g_get_monotonic_time();
+	printf("Porkchop analysis timing: tree collection %.3f s, route metrics %.3f s, grouping/selection %.3f s\n",
+			(collection_end - collection_start) / 1e6,
+			(metrics_end - collection_end) / 1e6,
+			(analysis_end - metrics_end) / 1e6);
 }

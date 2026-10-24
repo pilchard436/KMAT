@@ -1,4 +1,6 @@
 #include "itinerary_tree.h"
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -51,6 +53,62 @@ void store_itineraries_in_array(struct ItinStep *itin, struct ItinStep **array, 
 	for(int i = 0; i < itin->num_next_nodes; i++) {
 		store_itineraries_in_array(itin->next[i], array, index);
 	}
+}
+
+typedef struct {
+	struct ItinStep **arrivals;
+	int num_itins;
+	int capacity;
+	int num_nodes;
+} ItineraryCollection;
+
+static int append_itinerary_arrival(ItineraryCollection *collection, struct ItinStep *arrival) {
+	if(collection->num_itins == collection->capacity) {
+		int new_capacity = collection->capacity == 0 ? 256 :
+				(collection->capacity > INT_MAX / 2 ? INT_MAX : collection->capacity * 2);
+		if(new_capacity <= collection->capacity ||
+			(size_t)new_capacity > SIZE_MAX / sizeof(*collection->arrivals)) return 0;
+		struct ItinStep **new_arrivals = realloc(collection->arrivals, (size_t)new_capacity * sizeof(*new_arrivals));
+		if(new_arrivals == NULL) return 0;
+		collection->arrivals = new_arrivals;
+		collection->capacity = new_capacity;
+	}
+	collection->arrivals[collection->num_itins++] = arrival;
+	return 1;
+}
+
+static int collect_itinerary_tree(struct ItinStep *step, ItineraryCollection *collection) {
+	if(step == NULL) return 1;
+	if(collection->num_nodes == INT_MAX) return 0;
+	collection->num_nodes++;
+	if(step->num_next_nodes < 0) return 0;
+	if(step->num_next_nodes == 0)
+		return step->prev == NULL || append_itinerary_arrival(collection, step);
+	if(step->next == NULL) return 0;
+	for(int next_idx = 0; next_idx < step->num_next_nodes; next_idx++)
+		if(!collect_itinerary_tree(step->next[next_idx], collection)) return 0;
+	return 1;
+}
+
+int collect_itineraries_from_departures(struct ItinStep **departures, int num_deps,
+		struct ItinStep ***arrivals, int *num_itins, int *num_nodes) {
+	if(arrivals == NULL || num_itins == NULL || num_nodes == NULL || num_deps < 0 ||
+		(num_deps > 0 && departures == NULL)) return 0;
+	*arrivals = NULL;
+	*num_itins = 0;
+	*num_nodes = 0;
+
+	ItineraryCollection collection = {0};
+	for(int dep_idx = 0; dep_idx < num_deps; dep_idx++) {
+		if(!collect_itinerary_tree(departures[dep_idx], &collection)) {
+			free(collection.arrivals);
+			return 0;
+		}
+	}
+	*arrivals = collection.arrivals;
+	*num_itins = collection.num_itins;
+	*num_nodes = collection.num_nodes;
+	return 1;
 }
 
 double get_itinerary_duration(struct ItinStep *itin) {

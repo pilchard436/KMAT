@@ -32,7 +32,8 @@ Screen * new_screen(GtkWidget *drawing_area, void (*resize_func)(), void (*butto
 	new_screen->dragging = FALSE;
 
 	g_signal_connect(drawing_area, "draw", G_CALLBACK(on_draw_screen), new_screen);
-	gtk_widget_add_events(drawing_area, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK);
+	gtk_widget_add_events(drawing_area, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK |
+			GDK_POINTER_MOTION_MASK | GDK_BUTTON_MOTION_MASK | GDK_SCROLL_MASK);
 	if(resize_func != NULL) 		g_signal_connect(drawing_area, "size-allocate", G_CALLBACK(resize_func), new_screen);
 	if(button_press_func != NULL) 	g_signal_connect(drawing_area, "button-press-event", G_CALLBACK(button_press_func), new_screen);
 	if(button_release_func != NULL)	g_signal_connect(drawing_area, "button-release-event", G_CALLBACK(button_release_func), new_screen);

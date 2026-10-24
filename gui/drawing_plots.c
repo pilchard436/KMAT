@@ -1,5 +1,6 @@
 #include "drawing.h"
 #include "settings.h"
+#include "transfer_app/porkchop_analyzer_model.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -218,36 +219,51 @@ static void draw_porkchop_color_scale(cairo_t *cr, double plot_width, double hei
 	cairo_new_path(cr);
 }
 
-void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnalyzerPoint *porkchop, int num_itins, enum LastTransferType last_transfer_type, int dur0arrdate1) {
+static void expand_porkchop_range(double *min_value, double *max_value) {
+	double span = *max_value - *min_value;
+	if(span <= 0 || !isfinite(span)) {
+		double padding = fmax(fabs(*min_value) * 1e-6, 0.5);
+		*min_value -= padding;
+		*max_value += padding;
+		return;
+	}
+
+	*min_value -= span * 0.05;
+	*max_value += span * 0.05;
+}
+
+void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnalyzerPoint *porkchop, int num_itins,
+		enum LastTransferType last_transfer_type, int dur0arrdate1, struct PorkchopPlotView *view) {
 	double dv, depdate, dur, arrdate;
+	struct PorkchopPlotView default_view = {0};
+	if(view == NULL) view = &default_view;
+	if(porkchop == NULL || num_itins <= 0) return;
 
 	double plot_width = width - porkchop_colorbar_width;
 	Vector2 origin = {dur0arrdate1 ? porkchop_arrdate_yaxis_x : porkchop_dur_yaxis_x, height-porkchop_xaxis_y};
 
 	int first_show_ind = 0;
-	while(!porkchop[first_show_ind].inside_filter) first_show_ind++;
+	while(first_show_ind < num_itins && !porkchop[first_show_ind].inside_filter) first_show_ind++;
+	if(first_show_ind >= num_itins) {
+		cairo_set_source_rgb(cr, 1, 1, 1);
+		draw_center_aligned_text(cr, plot_width / 2, height / 2, "No itineraries match the current filter");
+		return;
+	}
 
 	struct PorkchopPoint pp = porkchop[first_show_ind].data;
-	double dv_sat = pp.dv_dsm;
-	if(last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
-	if(last_transfer_type == TF_CIRC)		dv_sat += pp.dv_arr_circ;
 
 	double min_depdate = pp.dep_date, max_depdate = pp.dep_date;
 	double min_dur = pp.dur, max_dur = pp.dur;
 	double min_arrdate = pp.dep_date+pp.dur, max_arrdate = pp.dep_date+pp.dur;
-	double min_dv = pp.dv_dep + dv_sat + pp.dv_flyby;
-	double max_dv = pp.dv_dep + dv_sat + pp.dv_flyby;
+	double min_dv = porkchop_point_total_dv(pp, last_transfer_type);
+	double max_dv = min_dv;
 
 	// find min and max
 	for(int i = 1; i < num_itins; i++) {
 		if(!porkchop[i].inside_filter) continue;
 		pp = porkchop[i].data;
 
-		dv_sat = pp.dv_dsm;
-		if(last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
-		if(last_transfer_type == TF_CIRC)		dv_sat += pp.dv_arr_circ;
-
-		dv = pp.dv_dep + dv_sat + pp.dv_flyby;
+		dv = porkchop_point_total_dv(pp, last_transfer_type);
 		depdate = pp.dep_date;
 		dur = pp.dur;
 		arrdate = pp.dep_date+pp.dur;
@@ -264,33 +280,45 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	}
 
 
-	double ddepdate = max_depdate - min_depdate;
-	double ddur = max_dur - min_dur;
-	double darrdate = max_arrdate - min_arrdate;
+	expand_porkchop_range(&min_depdate, &max_depdate);
+	expand_porkchop_range(&min_dur, &max_dur);
+	expand_porkchop_range(&min_arrdate, &max_arrdate);
+	if(min_dur < 0) min_dur = 0;
 
-	double margin = 0.05;
-
-	min_depdate = min_depdate - ddepdate*margin;
-	max_depdate = max_depdate + ddepdate*margin;
-	min_dur = min_dur - ddur * margin;
-	max_dur = max_dur + ddur * margin;
-	min_arrdate = min_arrdate - darrdate * margin;
-	max_arrdate = max_arrdate + darrdate * margin;
+	view->data_range = (struct PorkchopPlotRange) {
+		.min_x = min_depdate,
+		.max_x = max_depdate,
+		.min_y = dur0arrdate1 ? min_arrdate : min_dur,
+		.max_y = dur0arrdate1 ? max_arrdate : max_dur
+	};
+	if(!view->initialized || !porkchop_plot_range_is_valid(&view->range)) {
+		view->range = view->data_range;
+		view->initialized = porkchop_plot_range_is_valid(&view->range);
+	}
+	min_depdate = view->range.min_x;
+	max_depdate = view->range.max_x;
+	if(dur0arrdate1) {
+		min_arrdate = view->range.min_y;
+		max_arrdate = view->range.max_y;
+	} else {
+		min_dur = view->range.min_y;
+		max_dur = view->range.max_y;
+	}
 
 	// gradients
-	double m_dur, m_depdate, m_arrdate;
-	m_depdate = (plot_width - origin.x)/(max_depdate - min_depdate);
-	m_arrdate = -origin.y/(max_arrdate - min_arrdate); // negative, because positive is down
-	m_dur = -origin.y/(max_dur - min_dur); // negative, because positive is down
+	double m_depdate = (plot_width - origin.x)/(max_depdate - min_depdate);
+	double m_arrdate = -origin.y/(max_arrdate - min_arrdate); // negative, because positive is down
+	double m_dur = -origin.y/(max_dur - min_dur); // negative, because positive is down
 
 	if(dur0arrdate1) draw_coordinate_system(cr, plot_width, height, COORD_LABEL_DATE, COORD_LABEL_DATE, min_depdate, max_depdate, min_arrdate, max_arrdate, origin, 8, 10);
 	else draw_coordinate_system(cr, plot_width, height, COORD_LABEL_DATE, COORD_LABEL_DURATION, min_depdate, max_depdate, min_dur, max_dur, origin, 8, 10);
 
 	// find points to draw
-	int *draw_idx = calloc(sizeof(int), num_itins);
+	int *draw_idx = calloc(num_itins, sizeof(int));
+	if(draw_idx == NULL) return;
 	int num_draw_itins = 0;
 	for(int i = 0; i < num_itins; i++) {
-		if(porkchop[i].inside_filter && porkchop[i].group->show_group) {
+		if(porkchop[i].inside_filter && porkchop[i].group != NULL && porkchop[i].group->show_group) {
 			draw_idx[num_draw_itins] = i;
 			num_draw_itins++;
 		}
@@ -299,6 +327,9 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	// Create an off-screen surface to draw porkchop all at onece
 	cairo_surface_t* buffer_surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, (int) width, (int) height);
 	cairo_t* buffer_cr = cairo_create(buffer_surface);
+	cairo_save(buffer_cr);
+	cairo_rectangle(buffer_cr, origin.x, 0, plot_width - origin.x, origin.y);
+	cairo_clip(buffer_cr);
 
 	// Dot size falls smoothly from 5 px for a few points to 1.5 px for 100,000 or more.
 	double point_radius = 5 - 3.5 * log10(fmax(num_draw_itins, 100) / 100.0) / 3;
@@ -310,17 +341,13 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 	while(i >= 0) {
 		pp = porkchop[draw_idx[i]].data;
 
-		dv_sat = pp.dv_dsm;
-		if(last_transfer_type == TF_CAPTURE)	dv_sat += pp.dv_arr_cap;
-		if(last_transfer_type == TF_CIRC)		dv_sat += pp.dv_arr_circ;
-
-		dv = pp.dv_dep + dv_sat + pp.dv_flyby;
+		dv = porkchop_point_total_dv(pp, last_transfer_type);
 		depdate = pp.dep_date;
 		dur = pp.dur;
 		arrdate = pp.dep_date+pp.dur;
 
 		// color coding
-		color_bias = (dv - min_dv) / (max_dv - min_dv);
+		color_bias = max_dv > min_dv ? (dv - min_dv) / (max_dv - min_dv) : 0.5;
 		double r, g, b;
 		porkchop_color(color_bias, &r, &g, &b);
 		cairo_set_source_rgb(buffer_cr, r,g,b);
@@ -331,6 +358,7 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 
 		i--;
 	}
+	cairo_restore(buffer_cr);
 
 	// Copy the buffer to the main canvas and buffer cleanup
 	cairo_set_source_surface(cr, buffer_surface, 0, 0);

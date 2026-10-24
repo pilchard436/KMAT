@@ -3,6 +3,7 @@
 
 #include <locale.h>
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 int pa_num_deps, pa_num_itins;
@@ -33,6 +34,9 @@ double pa_arr_periapsis = 50e3;
 
 Screen *pa_porkchop_screen;
 Camera *pa_itin_preview_camera;
+static struct PorkchopPlotView pa_porkchop_view;
+enum PaPorkchopDragMode {PA_PORKCHOP_DRAG_NONE, PA_PORKCHOP_DRAG_ZOOM, PA_PORKCHOP_DRAG_PAN};
+static enum PaPorkchopDragMode pa_porkchop_drag_mode;
 
 gboolean *body_show_status_pa;
 GObject *tf_pa_min_feedback[6];
@@ -51,10 +55,104 @@ double calc_total_dv_pa(void);
 double calc_periapsis_height_pa(void);
 
 void update_pa();
-void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr);
-void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr);
-void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
-void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpointer *ptr);
+gboolean on_pa_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+gboolean on_pa_porkchop_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr);
+void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr);
+void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer ptr);
+void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+
+static int get_pa_porkchop_plot_bounds(double *left, double *right, double *bottom) {
+	if(pa_porkchop_screen == NULL) return 0;
+	*left = pa_yaxis_type == PA_YAXIS_ARRDATE ? get_porkchop_arrdate_yaxis_x() : get_porkchop_dur_yaxis_x();
+	*right = pa_porkchop_screen->width - get_porkchop_colorbar_width();
+	*bottom = pa_porkchop_screen->height - get_porkchop_xaxis_y();
+	return *right > *left && *bottom > 0;
+}
+
+static int pa_porkchop_point_inside_plot(double x, double y, double left, double right, double bottom) {
+	return x >= left && x <= right && y >= 0 && y <= bottom;
+}
+
+static int pa_porkchop_value_at_pixel(double x, double y, double left, double right, double bottom,
+		double *x_value, double *y_value) {
+	if(!pa_porkchop_view.initialized || !porkchop_plot_range_is_valid(&pa_porkchop_view.range) ||
+		right <= left || bottom <= 0) return 0;
+	double x_fraction = (x - left) / (right - left);
+	double y_fraction = (bottom - y) / bottom;
+	return porkchop_plot_value_at_fraction(&pa_porkchop_view.range, x_fraction, y_fraction, x_value, y_value);
+}
+
+static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, double right, double bottom) {
+	clear_dynamic_screen_layer(pa_porkchop_screen);
+	double x_value, y_value;
+	if(!pa_porkchop_value_at_pixel(mouse_x, mouse_y, left, right, bottom, &x_value, &y_value)) {
+		set_stable_tooltip(GTK_WIDGET(da_pa_porkchop),
+				"Left-drag to zoom. Right-drag to pan. Scroll to zoom.");
+		draw_screen(pa_porkchop_screen);
+		return;
+	}
+
+	cairo_t *cr = pa_porkchop_screen->dynamic_layer.cr;
+	cairo_set_source_rgba(cr, 1.0, 0.55, 0.1, 0.9);
+	cairo_set_line_width(cr, 1);
+	cairo_move_to(cr, mouse_x, 0);
+	cairo_line_to(cr, mouse_x, bottom);
+	cairo_move_to(cr, left, mouse_y);
+	cairo_line_to(cr, right, mouse_y);
+	cairo_stroke(cr);
+
+	char departure_text[32], value_text[64];
+	date_to_string(convert_JD_date(x_value, get_settings_datetime_type()), departure_text, 0);
+	if(pa_yaxis_type == PA_YAXIS_ARRDATE) {
+		char arrival_text[32];
+		date_to_string(convert_JD_date(y_value, get_settings_datetime_type()), arrival_text, 0);
+		g_snprintf(value_text, sizeof(value_text), "Arrival: %s", arrival_text);
+	} else {
+		double duration = get_settings_datetime_type() == DATE_KERBAL ? y_value * 4 : y_value;
+		g_snprintf(value_text, sizeof(value_text), "Duration: %.2f days", duration);
+	}
+
+	double nearest_distance_squared = 12.0 * 12.0;
+	double nearest_dv = 0;
+	int nearest_point_found = 0;
+	double x_span = pa_porkchop_view.range.max_x - pa_porkchop_view.range.min_x;
+	double y_span = pa_porkchop_view.range.max_y - pa_porkchop_view.range.min_y;
+	for(int point_idx = 0; point_idx < pa_num_itins; point_idx++) {
+		struct PorkchopAnalyzerPoint *point = &pa_porkchop_points[point_idx];
+		if(!point->inside_filter || point->group == NULL || !point->group->show_group) continue;
+
+		struct PorkchopPoint data = point->data;
+		double plot_y = pa_yaxis_type == PA_YAXIS_ARRDATE ? data.dep_date + data.dur : data.dur;
+		double point_x = left + (data.dep_date - pa_porkchop_view.range.min_x) / x_span * (right - left);
+		double point_y = bottom - (plot_y - pa_porkchop_view.range.min_y) / y_span * bottom;
+		if(point_x < left || point_x > right || point_y < 0 || point_y > bottom) continue;
+
+		double dx = point_x - mouse_x;
+		double dy = point_y - mouse_y;
+		double distance_squared = dx * dx + dy * dy;
+		if(distance_squared > nearest_distance_squared) continue;
+
+		double total_dv = porkchop_point_total_dv(data, pa_last_transfer_type);
+		if(!isfinite(total_dv)) continue;
+
+		nearest_distance_squared = distance_squared;
+		nearest_dv = total_dv;
+		nearest_point_found = 1;
+	}
+
+	char dv_text[64], tooltip_text[192];
+	if(nearest_point_found) g_snprintf(dv_text, sizeof(dv_text), "Delta-v: %.0f m/s", nearest_dv);
+	else g_snprintf(dv_text, sizeof(dv_text), "Delta-v: no nearby point");
+	g_snprintf(tooltip_text, sizeof(tooltip_text), "Departure: %s\n%s\n%s", departure_text, value_text, dv_text);
+	set_stable_tooltip_at(GTK_WIDGET(da_pa_porkchop), tooltip_text, mouse_x, mouse_y);
+	draw_screen(pa_porkchop_screen);
+}
+
+void reset_pa_porkchop_view() {
+	pa_porkchop_view.initialized = 0;
+	pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_NONE;
+}
 
 void pa_set_last_transfer_type(enum LastTransferType type, int locked) {
 	if(type == TF_CIRC) type = TF_CAPTURE;
@@ -84,6 +182,7 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	pa_has_both_modes = 0;
 	pa_porkchop_points = NULL;
 	curr_transfer_pa = NULL;
+	reset_pa_porkchop_view();
 	pa_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_fb"));
 	pa_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_cap"));
 	pa_set_last_transfer_type(TF_FLYBY, 0);
@@ -110,7 +209,12 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	vp_pa_groups = gtk_builder_get_object(builder, "vp_pa_groups");
 
 
-	pa_porkchop_screen = new_screen(GTK_WIDGET(da_pa_porkchop), &on_pa_screen_resize, &on_screen_button_press, &on_pa_screen_button_release, &on_pa_screen_mouse_move, NULL);
+	set_stable_tooltip(GTK_WIDGET(da_pa_porkchop),
+			"Left-drag to zoom. Right-drag to pan. Scroll to zoom. Reset Porkchop restores the full view.");
+	pa_porkchop_screen = new_screen(GTK_WIDGET(da_pa_porkchop), &on_pa_screen_resize, NULL,
+			&on_pa_screen_button_release, &on_pa_screen_mouse_move, NULL);
+	g_signal_connect(da_pa_porkchop, "button-press-event", G_CALLBACK(on_pa_screen_button_press), pa_porkchop_screen);
+	g_signal_connect(da_pa_porkchop, "scroll-event", G_CALLBACK(on_pa_porkchop_scroll), pa_porkchop_screen);
 	set_screen_background_color(pa_porkchop_screen, 0.15, 0.15, 0.15);
 	pa_itin_preview_camera = new_camera(GTK_WIDGET(da_pa_preview), &on_pa_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_pa_screen_mouse_move, &on_pa_screen_scroll);
 
@@ -122,7 +226,9 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 void update_pa_porkchop_diagram() {
 	clear_screen(pa_porkchop_screen);
 
-	if(pa_porkchop_points != NULL) draw_porkchop(pa_porkchop_screen->static_layer.cr, pa_porkchop_screen->width, pa_porkchop_screen->height, pa_porkchop_points, pa_num_itins, pa_last_transfer_type, pa_yaxis_type);
+	if(pa_porkchop_points != NULL) draw_porkchop(pa_porkchop_screen->static_layer.cr, pa_porkchop_screen->width,
+			pa_porkchop_screen->height, pa_porkchop_points, pa_num_itins, pa_last_transfer_type, pa_yaxis_type,
+			&pa_porkchop_view);
 	draw_screen(pa_porkchop_screen);
 }
 
@@ -171,14 +277,45 @@ void update_pa_itinerary_preview() {
 	draw_camera_image(pa_itin_preview_camera);
 }
 
-void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer *ptr) {
+void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr) {
 	if((Camera*)ptr == pa_itin_preview_camera) {
 		on_camera_zoom(widget, event, pa_itin_preview_camera);
 		update_pa_itinerary_preview();
 	}
 }
 
-void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr) {
+gboolean on_pa_porkchop_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr) {
+	if((Screen*)ptr != pa_porkchop_screen) return FALSE;
+	double left, right, bottom;
+	if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom) ||
+		!pa_porkchop_view.initialized || !pa_porkchop_point_inside_plot(event->x, event->y, left, right, bottom))
+		return FALSE;
+
+	double scroll_steps;
+	switch(event->direction) {
+		case GDK_SCROLL_UP: scroll_steps = -1; break;
+		case GDK_SCROLL_DOWN: scroll_steps = 1; break;
+		case GDK_SCROLL_SMOOTH: scroll_steps = event->delta_y; break;
+		default: return FALSE;
+	}
+	double factor = pow(1.2, scroll_steps);
+	double x_span = pa_porkchop_view.range.max_x - pa_porkchop_view.range.min_x;
+	double y_span = pa_porkchop_view.range.max_y - pa_porkchop_view.range.min_y;
+	double min_x_span = (pa_porkchop_view.data_range.max_x - pa_porkchop_view.data_range.min_x) * 1e-6;
+	double min_y_span = (pa_porkchop_view.data_range.max_y - pa_porkchop_view.data_range.min_y) * 1e-6;
+	double max_x_span = (pa_porkchop_view.data_range.max_x - pa_porkchop_view.data_range.min_x) * 1e4;
+	double max_y_span = (pa_porkchop_view.data_range.max_y - pa_porkchop_view.data_range.min_y) * 1e4;
+	if(!isfinite(factor) || factor <= 0 || !isfinite(x_span) || !isfinite(y_span)) return TRUE;
+	factor = fmax(factor, fmax(min_x_span / x_span, min_y_span / y_span));
+	factor = fmin(factor, fmin(max_x_span / x_span, max_y_span / y_span));
+	porkchop_plot_zoom(&pa_porkchop_view.range, &pa_porkchop_view.data_range, factor,
+			(event->x - left) / (right - left),
+			(bottom - event->y) / bottom);
+	update_pa_porkchop_diagram();
+	return TRUE;
+}
+
+void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer ptr) {
 	if((Screen*)ptr == pa_porkchop_screen) {
 		resize_screen(pa_porkchop_screen);
 		update_pa_porkchop_diagram();
@@ -189,26 +326,52 @@ void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer *ptr) {
 	}
 }
 
-void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer *ptr) {
+gboolean on_pa_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
+	if((Screen*)ptr != pa_porkchop_screen ||
+		(event->button != GDK_BUTTON_PRIMARY && event->button != GDK_BUTTON_SECONDARY)) return FALSE;
+	double left, right, bottom;
+	if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom) ||
+		!pa_porkchop_point_inside_plot(event->x, event->y, left, right, bottom)) return FALSE;
+
+	on_screen_button_press(widget, event, pa_porkchop_screen);
+	if(event->button == GDK_BUTTON_SECONDARY)
+		pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_PAN;
+	else
+		pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_ZOOM;
+	return TRUE;
+}
+
+void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
 	if((Screen*)ptr == pa_porkchop_screen) {
-		if(pa_system == NULL) return;
-		int min_x = pa_yaxis_type == PA_YAXIS_ARRDATE ? get_porkchop_arrdate_yaxis_x() : get_porkchop_dur_yaxis_x();
-		int min_y = get_porkchop_xaxis_y();
+		double left, right, bottom;
+		if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom)) return;
 		if(pa_porkchop_screen->dragging) {
-			double x = pa_porkchop_screen->mouse_pos_on_press.x;
-			double y = pa_porkchop_screen->mouse_pos_on_press.y;
-			double width = event->x-pa_porkchop_screen->mouse_pos_on_press.x;
-			double height = event->y-pa_porkchop_screen->mouse_pos_on_press.y;
-			if(x < min_x || y > pa_porkchop_screen->height-min_y) return;
-			if(x+width < min_x) width = min_x-x;
-			if(y+height < 0) height = -y;
-			double plot_right = pa_porkchop_screen->width - get_porkchop_colorbar_width();
-			if(x+width > plot_right) width = plot_right-x;
-			if(y+height > pa_porkchop_screen->height-min_y) height = (pa_porkchop_screen->height-min_y)-y;
+			if(pa_porkchop_drag_mode == PA_PORKCHOP_DRAG_PAN) {
+				double dx_fraction = (event->x - pa_porkchop_screen->last_mouse_pos.x) / (right - left);
+				double dy_fraction = (event->y - pa_porkchop_screen->last_mouse_pos.y) / bottom;
+				porkchop_plot_pan(&pa_porkchop_view.range, &pa_porkchop_view.data_range,
+						dx_fraction, dy_fraction);
+				pa_porkchop_screen->last_mouse_pos = vec2(event->x, event->y);
+				update_pa_porkchop_diagram();
+			} else if(pa_porkchop_drag_mode == PA_PORKCHOP_DRAG_ZOOM) {
+				double x0 = pa_porkchop_screen->mouse_pos_on_press.x;
+				double y0 = pa_porkchop_screen->mouse_pos_on_press.y;
+				double x1 = fmax(left, fmin(right, event->x));
+				double y1 = fmax(0, fmin(bottom, event->y));
+				x0 = fmax(left, fmin(right, x0));
+				y0 = fmax(0, fmin(bottom, y0));
+				clear_dynamic_screen_layer(pa_porkchop_screen);
+				cairo_t *cr = pa_porkchop_screen->dynamic_layer.cr;
+				cairo_rectangle(cr, fmin(x0, x1), fmin(y0, y1), fabs(x1 - x0), fabs(y1 - y0));
+				cairo_set_source_rgba(cr, 1, 0, 0, 1);
+				cairo_stroke(cr);
+				draw_screen(pa_porkchop_screen);
+			}
+		} else if(pa_porkchop_view.initialized &&
+				pa_porkchop_point_inside_plot(event->x, event->y, left, right, bottom)) {
+			draw_pa_porkchop_hover(event->x, event->y, left, right, bottom);
+		} else {
 			clear_dynamic_screen_layer(pa_porkchop_screen);
-			cairo_rectangle(pa_porkchop_screen->dynamic_layer.cr, x, y, width, height);
-			cairo_set_source_rgba(pa_porkchop_screen->dynamic_layer.cr, 1, 0, 0, 1);
-			cairo_stroke(pa_porkchop_screen->dynamic_layer.cr);
 			draw_screen(pa_porkchop_screen);
 		}
 	}
@@ -219,47 +382,38 @@ void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer 
 	}
 }
 
-void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpointer *ptr) {
+void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpointer ptr) {
 	if((Screen*)ptr == pa_porkchop_screen) {
+		enum PaPorkchopDragMode drag_mode = pa_porkchop_drag_mode;
 		pa_porkchop_screen->dragging = FALSE;
+		pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_NONE;
 
 		clear_dynamic_screen_layer(pa_porkchop_screen);
 
-		if(pa_system == NULL) return;
-
-		double x0 = pa_porkchop_screen->mouse_pos_on_press.x;
-		double y0 = pa_porkchop_screen->mouse_pos_on_press.y;
-		double x1 = event->x;
-		double y1 = event->y;
-
-		if(x0 < 45 || y0 > pa_porkchop_screen->height-40) return;
-		get_min_max_dep_arr_dur_range_from_mouse_rect(&x0, &x1, &y0, &y1, pa_min_vals[PA_DEP], pa_max_vals[PA_DEP],
-													  pa_min_vals[pa_yaxis_type == PA_YAXIS_DUR ? PA_DUR : PA_ARR],
-													  pa_max_vals[pa_yaxis_type == PA_YAXIS_DUR ? PA_DUR : PA_ARR],
-													  pa_porkchop_screen->width, pa_porkchop_screen->height,
-													  pa_yaxis_type);
-
-		char string[20];
-		date_to_string(convert_JD_date(x0, get_settings_datetime_type()), string, 0);
-		gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]), string);
-		date_to_string(convert_JD_date(x1, get_settings_datetime_type()), string, 0);
-		gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DEP]), string);
-		
-		if(pa_yaxis_type == PA_YAXIS_ARRDATE) {
-			date_to_string(convert_JD_date(y0, get_settings_datetime_type()), string, 0);
-			gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_ARR]), string);
-			date_to_string(convert_JD_date(y1, get_settings_datetime_type()), string, 0);
-			gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_ARR]), string);
-		} else {
-			sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? y0*4 : y0);
-			gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DUR]), string);
-			sprintf(string, "%.0f", get_settings_datetime_type() == DATE_KERBAL ? y1*4 : y1);
-			gtk_entry_set_text(GTK_ENTRY(tf_pa_max_feedback[PA_DUR]), string);
+		if(drag_mode == PA_PORKCHOP_DRAG_ZOOM) {
+			double left, right, bottom;
+			if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom)) return;
+			double x0 = fmax(left, fmin(right, pa_porkchop_screen->mouse_pos_on_press.x));
+			double x1 = fmax(left, fmin(right, event->x));
+			double y0 = fmax(0, fmin(bottom, pa_porkchop_screen->mouse_pos_on_press.y));
+			double y1 = fmax(0, fmin(bottom, event->y));
+			if(fabs(x1 - x0) < 2 || fabs(y1 - y0) < 2) {
+				draw_screen(pa_porkchop_screen);
+				return;
+			}
+			double min_x_fraction = (fmin(x0, x1) - left) / (right - left);
+			double max_x_fraction = (fmax(x0, x1) - left) / (right - left);
+			double min_y_fraction = (bottom - fmax(y0, y1)) / bottom;
+			double max_y_fraction = (bottom - fmin(y0, y1)) / bottom;
+			porkchop_plot_zoom_to_box(&pa_porkchop_view.range, min_x_fraction, max_x_fraction,
+					min_y_fraction, max_y_fraction);
+			update_pa_porkchop_diagram();
+			return;
 		}
-
-		on_apply_filter(NULL, NULL);
-
-		draw_screen(pa_porkchop_screen);
+		if(drag_mode != PA_PORKCHOP_DRAG_ZOOM) {
+			draw_screen(pa_porkchop_screen);
+			return;
+		}
 	}
 }
 
@@ -311,6 +465,7 @@ void pa_update_body_show_status() {
 
 G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data) {
 	pa_yaxis_type = pa_yaxis_type != PA_YAXIS_DUR ? PA_YAXIS_DUR : PA_YAXIS_ARRDATE;
+	reset_pa_porkchop_view();
 	update_pa();
 }
 
@@ -337,6 +492,7 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 			pa_num_deps = pa_dual_flyby_num_deps;
 		}
 		analyze_departure_itins();
+		reset_pa_porkchop_view();
 		update_pa_porkchop_diagram();
 		update_pa_itinerary_preview();
 		return;
@@ -344,7 +500,7 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 
 	pa_last_transfer_type = selected_type;
 	if(pa_porkchop_points == NULL) return;
-
+	reset_pa_porkchop_view();
 	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
 	update_best_itin();
 	update_pa_porkchop_diagram();
@@ -363,6 +519,7 @@ void update_pa() {
 
 G_MODULE_EXPORT void on_pa_update(GtkWidget* widget, gpointer data) {
 	if(pa_porkchop_points == NULL) return;
+	reset_pa_porkchop_view();
 	reset_min_max_feedback(0);
 	apply_filter();
 	update_pa();

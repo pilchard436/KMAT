@@ -20,6 +20,7 @@ struct PorkchopAnalyzerPoint {
 	struct PorkchopGroup *group;
 };
 
+double porkchop_point_total_dv(struct PorkchopPoint point, enum LastTransferType last_transfer_type);
 
 void sort_porkchop(struct PorkchopAnalyzerPoint *pp, int num_itins, enum LastTransferType last_transfer_type);
 

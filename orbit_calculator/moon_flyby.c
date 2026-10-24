@@ -348,7 +348,8 @@ static int search_moon_assist(const AssistGoal *goal, Vector3 incoming_excess, c
 			for(int i = 0; i < planet->system->num_bodies; i++) {
 				Body *moon = planet->system->bodies[i];
 				MoonFrame frame;
-				if(moon == NULL || !(moon->radius > 0) || !(moon->mu > 0) || !moon_frame(planet, moon, jd, &frame)) continue;
+				if(moon == NULL || moon->orbit.cb != planet || !(moon->radius > 0) || !(moon->mu > 0) ||
+					!moon_frame(planet, moon, jd, &frame)) continue;
 				int elliptical = moon->orbit.a > 0 && moon->orbit.e < 1;
 				double moon_radius = elliptical ? moon->orbit.a : frame.radius;
 				double ecc_margin = elliptical ? moon->orbit.a * moon->orbit.e : 0;

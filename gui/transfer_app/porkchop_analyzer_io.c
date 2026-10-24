@@ -19,9 +19,12 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath, ".itins", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
 
+	gint64 load_started = g_get_monotonic_time();
+	reset_pa_porkchop_view();
 	free_all_porkchop_analyzer_itins();
 	pa_set_last_transfer_type(TF_FLYBY, 0);
 	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
+	gint64 file_read_finished = g_get_monotonic_time();
 	char param_string[1000];
 	print_header_data_to_string(load_results.header, param_string, sizeof(param_string), get_settings_datetime_type());
 	printf("%s\n", param_string);
@@ -56,9 +59,15 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	if(body_show_status_pa != NULL) free(body_show_status_pa);
 	body_show_status_pa = (int*) calloc(pa_system->num_bodies, sizeof(int));
 	analyze_departure_itins();
+	gint64 analysis_finished = g_get_monotonic_time();
 
 	update_pa_porkchop_diagram();
 	update_pa_itinerary_preview();
+	gint64 display_setup_finished = g_get_monotonic_time();
+	printf("Itinerary load timing: file decode %.3f s, analyzer %.3f s, initial display setup %.3f s\n",
+			(file_read_finished - load_started) / 1e6,
+			(analysis_finished - file_read_finished) / 1e6,
+			(display_setup_finished - analysis_finished) / 1e6);
 }
 
 G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {

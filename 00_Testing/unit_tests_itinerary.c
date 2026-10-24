@@ -50,6 +50,16 @@ static void check_itinerary_tree(void) {
 	int index = 0;
 	store_itineraries_in_array(first, arrivals, &index);
 	check_true("arrival nodes are stored in tree order", index == 2 && arrivals[0] == last && arrivals[1] == second_arrival);
+	struct ItinStep empty_departure = {0};
+	struct ItinStep *departure_trees[] = {first, &empty_departure};
+	struct ItinStep **collected_arrivals = NULL;
+	int collected_count = 0, collected_nodes = 0;
+	check_true("one-pass collection succeeds for branched departure trees",
+		collect_itineraries_from_departures(departure_trees, 2, &collected_arrivals, &collected_count, &collected_nodes));
+	check_true("one-pass collection preserves arrival order and skips empty roots",
+		collected_count == 2 && collected_arrivals[0] == last && collected_arrivals[1] == second_arrival);
+	check_true("one-pass collection counts every stored node", collected_nodes == 5);
+	free(collected_arrivals);
 
 	check_true("a flyby itinerary is valid", is_valid_itinerary(last));
 	check_true("a departure node alone is not a valid itinerary", !is_valid_itinerary(first));

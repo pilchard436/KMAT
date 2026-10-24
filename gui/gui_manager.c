@@ -316,6 +316,13 @@ void set_stable_tooltip(GtkWidget *widget, const char *text) {
 	set_stable_tooltip_content(widget, text, FALSE);
 }
 
+void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double y) {
+	set_stable_tooltip_content(widget, text, FALSE);
+	StableTooltip *tip = g_object_get_data(G_OBJECT(widget), "stable-tooltip");
+	GdkRectangle pointing_to = {(gint)x, (gint)y, 1, 1};
+	gtk_popover_set_pointing_to(GTK_POPOVER(tip->popover), &pointing_to);
+}
+
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup) {
 	set_stable_tooltip_content(widget, markup, TRUE);
 }

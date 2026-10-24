@@ -206,6 +206,14 @@ void check_moon_flybys(void) {
 	set_moon_assist_enabled(0);
 
 	place_moon(&fixture, 0);
+	Body other_primary = {.mu = fixture.planet.mu};
+	Body unrelated_moon = fixture.moon;
+	unrelated_moon.orbit.cb = &other_primary;
+	fixture.moon_list[0] = &unrelated_moon;
+	check_true("arrival assists ignore bodies orbiting another primary",
+		!moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius, dv_capture,
+			plain_capture, TEST_JD, &assist));
+	fixture.moon_list[0] = &fixture.moon;
 	fixture.moon.mu = 1e3;
 	check_true("a tiny moon cannot help", !moon_assist_arrival(&fixture.planet, vec3(3000, 0, 0), capture_radius,
 		dv_capture, plain_capture, TEST_JD, &assist));

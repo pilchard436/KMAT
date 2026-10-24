@@ -8,8 +8,10 @@ void start_gui(const char* gui_filepath);
 
 void create_combobox_dropdown_text_renderer(GObject *combo_box, GtkAlign align);
 
-// Tooltip shown below the widget so it never opens under the pointer and steals the hover.
+// Stable tooltips appear below their anchor so they do not cover the hover target.
 void set_stable_tooltip(GtkWidget *widget, const char *text);
+// Anchor the tooltip to widget-local pointer coordinates.
+void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double y);
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup);
 
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry);

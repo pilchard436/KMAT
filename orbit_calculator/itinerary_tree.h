@@ -21,6 +21,10 @@ int get_total_number_of_stored_steps(struct ItinStep *itin);
 // stores all arrival nodes in array from itin (departure first)
 void store_itineraries_in_array(struct ItinStep *itin, struct ItinStep **array, int *index);
 
+// Collects all arrival nodes from departure trees in one traversal. The caller owns *arrivals.
+int collect_itineraries_from_departures(struct ItinStep **departures, int num_deps,
+		struct ItinStep ***arrivals, int *num_itins, int *num_nodes);
+
 // returns the itinerary duration in days (arrival first)
 double get_itinerary_duration(struct ItinStep *itin);
 

@@ -6,16 +6,16 @@
 
 static enum LastTransferType sort_last_transfer_type;
 
-static double porkchop_total_dv(struct PorkchopAnalyzerPoint point) {
-	double total_dv = point.data.dv_dep + point.data.dv_dsm + point.data.dv_flyby;
-	if(sort_last_transfer_type == TF_CAPTURE) total_dv += point.data.dv_arr_cap;
-	if(sort_last_transfer_type == TF_CIRC) total_dv += point.data.dv_arr_circ;
+double porkchop_point_total_dv(struct PorkchopPoint point, enum LastTransferType last_transfer_type) {
+	double total_dv = point.dv_dep + point.dv_dsm + point.dv_flyby;
+	if(last_transfer_type == TF_CAPTURE) total_dv += point.dv_arr_cap;
+	if(last_transfer_type == TF_CIRC) total_dv += point.dv_arr_circ;
 	return total_dv;
 }
 
 static int compare_porkchop_points(const void *left, const void *right) {
-	double left_dv = porkchop_total_dv(*(const struct PorkchopAnalyzerPoint *)left);
-	double right_dv = porkchop_total_dv(*(const struct PorkchopAnalyzerPoint *)right);
+	double left_dv = porkchop_point_total_dv(((const struct PorkchopAnalyzerPoint *)left)->data, sort_last_transfer_type);
+	double right_dv = porkchop_point_total_dv(((const struct PorkchopAnalyzerPoint *)right)->data, sort_last_transfer_type);
 	return (left_dv > right_dv) - (left_dv < right_dv);
 }
 

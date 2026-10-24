@@ -7,6 +7,8 @@
 #include "transfer_app/porkchop_analyzer_tools.h"
 #include "gui/gui_tools/camera.h"
 
+struct PorkchopPlotView;
+
 
 enum CoordAxisLabelType {COORD_LABEL_NUMBER, COORD_LABEL_DATE, COORD_LABEL_DURATION};
 
@@ -43,7 +45,8 @@ int get_porkchop_dur_yaxis_x();
 int get_porkchop_arrdate_yaxis_x();
 int get_porkchop_xaxis_y();
 int get_porkchop_colorbar_width();
-void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnalyzerPoint *porkchop, int num_itins, enum LastTransferType last_transfer_type, int dur0arrdate1);
+void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnalyzerPoint *porkchop, int num_itins,
+		enum LastTransferType last_transfer_type, int dur0arrdate1, struct PorkchopPlotView *view);
 void draw_plot(cairo_t *cr, double width, double height, double *x, double *y, int num_points);
 void draw_multi_plot(cairo_t *cr, double width, double height, double *x, double **y, int num_plots, int num_points);
 

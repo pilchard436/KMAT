@@ -52,6 +52,7 @@ extern GtkWidget *grid_pa_groups;
 void update_pa();
 void update_pa_porkchop_diagram();
 void update_pa_itinerary_preview();
+void reset_pa_porkchop_view();
 void pa_update_body_show_status();
 void pa_set_last_transfer_type(enum LastTransferType type, int locked);
 double calc_step_dv_pa(struct ItinStep *step);

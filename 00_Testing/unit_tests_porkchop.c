@@ -60,4 +60,53 @@ void run_porkchop_tests(void) {
     set_porkchop_groups_visibility(group_list, 3, 1);
     expect_int("toggling groups keeps the list and its point links in place", list_before == group_list && group_points[0].group == &group_list[2] && group_points[1].group == &group_list[0], 1);
     expect_int("a missing group list changes nothing", set_porkchop_groups_visibility(NULL, 3, 1), 0);
+
+    struct PorkchopPlotRange plot_range = {20, 80, 20, 80};
+    struct PorkchopPlotRange plot_bounds = {0, 100, 0, 100};
+    expect_int("porkchop plot range accepts increasing finite bounds", porkchop_plot_range_is_valid(&plot_range), 1);
+    porkchop_plot_pan(&plot_range, &plot_bounds, 0.5, -1.0);
+    expect_int("porkchop plot pan stays inside full data bounds",
+               plot_range.min_x == 0 && plot_range.max_x == 60 &&
+               plot_range.min_y == 0 && plot_range.max_y == 60, 1);
+
+    plot_range = (struct PorkchopPlotRange) {0, 100, 10, 110};
+    struct PorkchopPlotRange zoom_bounds = {0, 200, 0, 200};
+    porkchop_plot_zoom(&plot_range, &zoom_bounds, 0.5, 0.25, 0.75);
+    expect_int("porkchop plot zoom keeps its cursor anchor fixed",
+               plot_range.min_x == 12.5 && plot_range.max_x == 62.5 &&
+               plot_range.min_y == 47.5 && plot_range.max_y == 97.5, 1);
+    double x_value = 0, y_value = 0;
+    expect_int("porkchop plot converts cursor fractions to data values",
+               porkchop_plot_value_at_fraction(&plot_range, 0.25, 0.75, &x_value, &y_value) &&
+               x_value == 25 && y_value == 85, 1);
+    expect_int("porkchop plot rejects a degenerate range",
+               porkchop_plot_value_at_fraction(&(struct PorkchopPlotRange) {1, 1, 0, 1}, 0.5, 0.5, &x_value, &y_value), 0);
+    plot_range = (struct PorkchopPlotRange) {20, 80, 0, 60};
+    porkchop_plot_zoom(&plot_range, &plot_bounds, 2.0, 0.5, 0.0);
+    expect_int("zooming out at the duration boundary stays within data bounds",
+               plot_range.min_x == 0 && plot_range.max_x == 100 &&
+               plot_range.min_y == 0 && plot_range.max_y == 100, 1);
+    plot_range = (struct PorkchopPlotRange) {0, 100, 0, 100};
+    expect_int("box zoom selects the chosen data rectangle",
+               porkchop_plot_zoom_to_box(&plot_range, 0.2, 0.6, 0.1, 0.7) &&
+               plot_range.min_x == 20 && plot_range.max_x == 60 &&
+               plot_range.min_y == 10 && plot_range.max_y == 70, 1);
+    porkchop_plot_pan(&plot_range, &plot_bounds, -0.5, -0.5);
+    expect_int("panning after box zoom can move beyond the selected rectangle",
+               plot_range.min_x == 40 && plot_range.max_x == 80 &&
+               plot_range.min_y == 0 && plot_range.max_y == 60, 1);
+
+    struct PorkchopPoint dv_point = {
+        .dv_dep = 100,
+        .dv_dsm = 20,
+        .dv_flyby = 30,
+        .dv_arr_cap = 40,
+        .dv_arr_circ = 50
+    };
+    expect_int("flyby delta-v excludes arrival capture and circularization",
+               porkchop_point_total_dv(dv_point, TF_FLYBY) == 150, 1);
+    expect_int("capture delta-v includes arrival capture",
+               porkchop_point_total_dv(dv_point, TF_CAPTURE) == 190, 1);
+    expect_int("circularization delta-v includes arrival circularization",
+               porkchop_point_total_dv(dv_point, TF_CIRC) == 200, 1);
 }
