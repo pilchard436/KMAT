@@ -16,7 +16,17 @@ struct PorkchopPlotView {
 	int initialized;
 };
 
+enum PorkchopDirection {PORKCHOP_LEFT, PORKCHOP_RIGHT, PORKCHOP_UP, PORKCHOP_DOWN};
+
 int find_first_visible_porkchop_point(const struct PorkchopAnalyzerPoint *points, int num_points);
+int find_best_porkchop_point_in_view(const struct PorkchopAnalyzerPoint *points, int num_points,
+		enum LastTransferType last_transfer_type, int arrival_date_axis, const struct PorkchopPlotRange *range);
+int find_directional_porkchop_neighbor(const struct PorkchopAnalyzerPoint *points, int num_points,
+		const struct ItinStep *selected_arrival, enum PorkchopDirection direction, int arrival_date_axis,
+		const struct PorkchopPlotRange *range, double plot_width, double plot_height);
+int find_nearest_porkchop_point(const struct PorkchopAnalyzerPoint *points, int num_points,
+		int arrival_date_axis, const struct PorkchopPlotRange *range, double left, double right, double bottom,
+		double mouse_x, double mouse_y, double max_distance);
 // Shows or hides every group that has an itinerary inside the filter; other groups keep their state.
 // Returns how many groups changed.
 int set_porkchop_groups_visibility(struct PorkchopGroup *groups, int num_groups, int show);

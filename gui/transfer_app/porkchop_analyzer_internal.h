@@ -25,6 +25,7 @@ extern enum LastTransferType pa_last_transfer_type;
 extern int pa_last_transfer_type_locked;
 extern GObject *da_pa_porkchop, *da_pa_preview;
 extern struct ItinStep *curr_transfer_pa;
+extern struct ItinStep *pa_selected_arrival;
 extern double current_date_pa;
 extern int pa_num_groups;
 extern struct PorkchopGroup *pa_groups;
@@ -52,6 +53,7 @@ extern GtkWidget *grid_pa_groups;
 void update_pa();
 void update_pa_porkchop_diagram();
 void update_pa_itinerary_preview();
+void update_pa_selected_itinerary(void);
 void reset_pa_porkchop_view();
 void pa_update_body_show_status();
 void pa_set_last_transfer_type(enum LastTransferType type, int locked);
@@ -67,8 +69,10 @@ void initialize_itinerary_groups();
 
 // porkchop_analyzer_filter.c
 void reset_min_max_feedback(int take_hidden_group_into_account);
+void begin_pa_filter_entry_update(void);
+void end_pa_filter_entry_update(void);
 gboolean are_any_porkchop_points_in_filter(const double min[6], const double max[6]);
-void apply_filter();
+int apply_filter(void);
 void update_best_itin();
 void analyze_departure_itins();
 

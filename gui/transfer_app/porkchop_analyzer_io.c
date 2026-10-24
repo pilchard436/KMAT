@@ -72,7 +72,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 			(display_setup_finished - analysis_finished) / 1e6);
 }
 
-G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
+G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data) {
 	struct ItinStep *first = get_first(curr_transfer_pa);
 	if(first == NULL) return;
 	struct ItinStep *arrival = get_last(first);

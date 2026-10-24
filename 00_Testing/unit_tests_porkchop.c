@@ -18,6 +18,55 @@ void run_porkchop_tests(void) {
     expect_int("visible porkchop selection returns no-match sentinel",
                            find_first_visible_porkchop_point(porkchop_points, 3), -1);
 
+    struct PorkchopGroup selectable_group = {.show_group = 1};
+    struct PorkchopGroup hidden_selectable_group = {.show_group = 0};
+    struct PorkchopAnalyzerPoint selectable_points[] = {
+        {.data = {.dep_date = 5, .dur = 5, .dv_dep = 100}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.dep_date = 8, .dur = 8, .dv_dep = 5}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.dep_date = 4, .dur = 4, .dv_dep = 1}, .inside_filter = 1, .group = &hidden_selectable_group},
+        {.data = {.dep_date = 2, .dur = 2, .dv_dep = 2}, .inside_filter = 0, .group = &selectable_group},
+        {.data = {.dep_date = 2, .dur = 3, .dv_dep = 20}, .inside_filter = 1, .group = &selectable_group}
+    };
+    struct PorkchopPlotRange selectable_range = {0, 10, 0, 10};
+    expect_int("best porkchop node in duration view ignores filtered, hidden, and off-view nodes",
+               find_best_porkchop_point_in_view(selectable_points, 5, TF_FLYBY, 0, &selectable_range), 1);
+    expect_int("best porkchop node in arrival-date view uses arrival date coordinates",
+               find_best_porkchop_point_in_view(selectable_points, 5, TF_FLYBY, 1, &selectable_range), 4);
+    expect_int("porkchop node hit testing selects the nearest visible point",
+               find_nearest_porkchop_point(selectable_points, 5, 0, &selectable_range,
+                       0, 100, 100, 51, 50, 10), 0);
+    expect_int("porkchop node hit testing ignores points outside the click radius",
+               find_nearest_porkchop_point(selectable_points, 5, 0, &selectable_range,
+                       0, 100, 100, 100, 0, 5), -1);
+
+    struct ItinStep navigation_nodes[7] = {{0}};
+    struct PorkchopAnalyzerPoint navigation_points[] = {
+        {.data = {.arrival = &navigation_nodes[0], .dep_date = 5, .dur = 5}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.arrival = &navigation_nodes[1], .dep_date = 3, .dur = 5}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.arrival = &navigation_nodes[2], .dep_date = 7, .dur = 5}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.arrival = &navigation_nodes[3], .dep_date = 5, .dur = 7}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.arrival = &navigation_nodes[4], .dep_date = 5, .dur = 3}, .inside_filter = 1, .group = &selectable_group},
+        {.data = {.arrival = &navigation_nodes[5], .dep_date = 5.5, .dur = 5}, .inside_filter = 1, .group = &hidden_selectable_group},
+        {.data = {.arrival = &navigation_nodes[6], .dep_date = 5.6, .dur = 5.8}, .inside_filter = 1, .group = &selectable_group}
+    };
+    expect_int("left arrow selects the nearest visible node to the left",
+               find_directional_porkchop_neighbor(navigation_points, 7, &navigation_nodes[0],
+                       PORKCHOP_LEFT, 0, &selectable_range, 100, 100), 1);
+    expect_int("right arrow prefers a cardinal node over a closer diagonal node",
+               find_directional_porkchop_neighbor(navigation_points, 7, &navigation_nodes[0],
+                       PORKCHOP_RIGHT, 0, &selectable_range, 100, 100), 2);
+    navigation_points[2].inside_filter = 0;
+    expect_int("right arrow falls back to the nearest off-axis node when needed",
+               find_directional_porkchop_neighbor(navigation_points, 7, &navigation_nodes[0],
+                       PORKCHOP_RIGHT, 0, &selectable_range, 100, 100), 6);
+    navigation_points[2].inside_filter = 1;
+    expect_int("up arrow prefers a straight-up node over an up-left node",
+               find_directional_porkchop_neighbor(navigation_points, 7, &navigation_nodes[0],
+                       PORKCHOP_UP, 0, &selectable_range, 100, 100), 3);
+    expect_int("down arrow selects the nearest visible node below",
+               find_directional_porkchop_neighbor(navigation_points, 7, &navigation_nodes[0],
+                       PORKCHOP_DOWN, 0, &selectable_range, 100, 100), 4);
+
     Body earth = {.name = "Earth"};
     Body mars = {.name = "Mars"};
     Body venus = {.name = "Venus"};

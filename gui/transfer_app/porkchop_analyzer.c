@@ -14,6 +14,7 @@ enum LastTransferType pa_last_transfer_type;
 int pa_last_transfer_type_locked;
 GObject *da_pa_porkchop, *da_pa_preview;
 struct ItinStep *curr_transfer_pa;
+struct ItinStep *pa_selected_arrival;
 double current_date_pa;
 int pa_num_groups = 0;
 struct PorkchopGroup *pa_groups;
@@ -56,6 +57,7 @@ double calc_periapsis_height_pa(void);
 
 void update_pa();
 gboolean on_pa_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpointer ptr);
+gboolean on_pa_porkchop_key_press(GtkWidget *widget, GdkEventKey *event, gpointer ptr);
 gboolean on_pa_porkchop_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr);
 void on_pa_screen_scroll(GtkWidget *widget, GdkEventScroll *event, gpointer ptr);
 void on_pa_screen_resize(GtkWidget *widget, cairo_t *cr, gpointer ptr);
@@ -83,12 +85,39 @@ static int pa_porkchop_value_at_pixel(double x, double y, double left, double ri
 	return porkchop_plot_value_at_fraction(&pa_porkchop_view.range, x_fraction, y_fraction, x_value, y_value);
 }
 
+static void draw_pa_porkchop_selection_marker(void) {
+	if(pa_selected_arrival == NULL || pa_porkchop_points == NULL || !pa_porkchop_view.initialized) return;
+	double left, right, bottom;
+	if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom)) return;
+	double x_span = pa_porkchop_view.range.max_x - pa_porkchop_view.range.min_x;
+	double y_span = pa_porkchop_view.range.max_y - pa_porkchop_view.range.min_y;
+	for(int i = 0; i < pa_num_itins; i++) {
+		struct PorkchopAnalyzerPoint *point = &pa_porkchop_points[i];
+		if(point->data.arrival != pa_selected_arrival || !point->inside_filter ||
+			point->group == NULL || !point->group->show_group) continue;
+		double y_value = pa_yaxis_type == PA_YAXIS_ARRDATE ?
+				point->data.dep_date + point->data.dur : point->data.dur;
+		if(point->data.dep_date < pa_porkchop_view.range.min_x ||
+			point->data.dep_date > pa_porkchop_view.range.max_x ||
+			y_value < pa_porkchop_view.range.min_y || y_value > pa_porkchop_view.range.max_y) return;
+		double x = left + (point->data.dep_date - pa_porkchop_view.range.min_x) / x_span * (right - left);
+		double y = bottom - (y_value - pa_porkchop_view.range.min_y) / y_span * bottom;
+		cairo_t *cr = pa_porkchop_screen->dynamic_layer.cr;
+		cairo_set_source_rgb(cr, 1, 1, 1);
+		cairo_set_line_width(cr, 2);
+		cairo_arc(cr, x, y, 6, 0, 2 * M_PI);
+		cairo_stroke(cr);
+		return;
+	}
+}
+
 static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, double right, double bottom) {
 	clear_dynamic_screen_layer(pa_porkchop_screen);
+	draw_pa_porkchop_selection_marker();
 	double x_value, y_value;
 	if(!pa_porkchop_value_at_pixel(mouse_x, mouse_y, left, right, bottom, &x_value, &y_value)) {
 		set_stable_tooltip(GTK_WIDGET(da_pa_porkchop),
-				"Left-drag to zoom. Right-drag to pan. Scroll to zoom.");
+				"Click a node to select it; use arrow keys to navigate. Left-drag to zoom, right-drag to pan, scroll to zoom.");
 		draw_screen(pa_porkchop_screen);
 		return;
 	}
@@ -182,6 +211,7 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	pa_has_both_modes = 0;
 	pa_porkchop_points = NULL;
 	curr_transfer_pa = NULL;
+	pa_selected_arrival = NULL;
 	reset_pa_porkchop_view();
 	pa_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_fb"));
 	pa_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_cap"));
@@ -200,6 +230,10 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	tf_pa_max_feedback[PA_TOTDV] = gtk_builder_get_object(builder, "tf_pa_max_totdv");
 	tf_pa_max_feedback[PA_DEPDV] = gtk_builder_get_object(builder, "tf_pa_max_depdv");
 	tf_pa_max_feedback[PA_SATDV] = gtk_builder_get_object(builder, "tf_pa_max_satdv");
+	for(int i = 0; i < 6; i++) {
+		g_signal_connect(tf_pa_min_feedback[i], "changed", G_CALLBACK(on_pa_filter_entry_changed), NULL);
+		g_signal_connect(tf_pa_max_feedback[i], "changed", G_CALLBACK(on_pa_filter_entry_changed), NULL);
+	}
 	lb_pa_tfdate = gtk_builder_get_object(builder, "lb_pa_tfdate");
 	lb_pa_tfbody = gtk_builder_get_object(builder, "lb_pa_tfbody");
 	lb_pa_transfer_dv = gtk_builder_get_object(builder, "lb_pa_transfer_dv");
@@ -210,10 +244,12 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 
 
 	set_stable_tooltip(GTK_WIDGET(da_pa_porkchop),
-			"Left-drag to zoom. Right-drag to pan. Scroll to zoom. Reset Porkchop restores the full view.");
+			"Click a node to select it; use arrow keys to navigate. Left-drag to zoom, right-drag to pan, scroll to zoom.");
+	gtk_widget_add_events(GTK_WIDGET(da_pa_porkchop), GDK_KEY_PRESS_MASK);
 	pa_porkchop_screen = new_screen(GTK_WIDGET(da_pa_porkchop), &on_pa_screen_resize, NULL,
 			&on_pa_screen_button_release, &on_pa_screen_mouse_move, NULL);
 	g_signal_connect(da_pa_porkchop, "button-press-event", G_CALLBACK(on_pa_screen_button_press), pa_porkchop_screen);
+	g_signal_connect(da_pa_porkchop, "key-press-event", G_CALLBACK(on_pa_porkchop_key_press), pa_porkchop_screen);
 	g_signal_connect(da_pa_porkchop, "scroll-event", G_CALLBACK(on_pa_porkchop_scroll), pa_porkchop_screen);
 	set_screen_background_color(pa_porkchop_screen, 0.15, 0.15, 0.15);
 	pa_itin_preview_camera = new_camera(GTK_WIDGET(da_pa_preview), &on_pa_screen_resize, &on_enable_camera_rotation, &on_disable_camera_rotation, &on_pa_screen_mouse_move, &on_pa_screen_scroll);
@@ -229,7 +265,45 @@ void update_pa_porkchop_diagram() {
 	if(pa_porkchop_points != NULL) draw_porkchop(pa_porkchop_screen->static_layer.cr, pa_porkchop_screen->width,
 			pa_porkchop_screen->height, pa_porkchop_points, pa_num_itins, pa_last_transfer_type, pa_yaxis_type,
 			&pa_porkchop_view);
+	draw_pa_porkchop_selection_marker();
 	draw_screen(pa_porkchop_screen);
+}
+
+static void select_pa_porkchop_point(int point_index) {
+	if(point_index < 0 || point_index >= pa_num_itins || pa_porkchop_points == NULL) return;
+	pa_selected_arrival = pa_porkchop_points[point_index].data.arrival;
+	update_pa_selected_itinerary();
+	clear_dynamic_screen_layer(pa_porkchop_screen);
+	draw_pa_porkchop_selection_marker();
+	draw_screen(pa_porkchop_screen);
+	update_pa_itinerary_preview();
+}
+
+gboolean on_pa_porkchop_key_press(GtkWidget *widget, GdkEventKey *event, gpointer ptr) {
+	if((Screen*)ptr != pa_porkchop_screen || pa_porkchop_points == NULL ||
+		!pa_porkchop_view.initialized) return FALSE;
+	enum PorkchopDirection direction;
+	switch(event->keyval) {
+		case GDK_KEY_Left: direction = PORKCHOP_LEFT; break;
+		case GDK_KEY_Right: direction = PORKCHOP_RIGHT; break;
+		case GDK_KEY_Up: direction = PORKCHOP_UP; break;
+		case GDK_KEY_Down: direction = PORKCHOP_DOWN; break;
+		default: return FALSE;
+	}
+	double left, right, bottom;
+	if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom)) return TRUE;
+	int point_index = find_directional_porkchop_neighbor(pa_porkchop_points, pa_num_itins,
+			pa_selected_arrival, direction, pa_yaxis_type, &pa_porkchop_view.range,
+			right - left, bottom);
+	select_pa_porkchop_point(point_index);
+	return TRUE;
+}
+
+G_MODULE_EXPORT void on_pa_select_best_visible_node(GtkWidget* widget, gpointer data) {
+	if(pa_porkchop_points == NULL || !pa_porkchop_view.initialized) return;
+	int best_index = find_best_porkchop_point_in_view(pa_porkchop_points, pa_num_itins,
+			pa_last_transfer_type, pa_yaxis_type, &pa_porkchop_view.range);
+	select_pa_porkchop_point(best_index);
 }
 
 void update_pa_itinerary_preview() {
@@ -333,6 +407,7 @@ gboolean on_pa_screen_button_press(GtkWidget *widget, GdkEventButton *event, gpo
 	if(!get_pa_porkchop_plot_bounds(&left, &right, &bottom) ||
 		!pa_porkchop_point_inside_plot(event->x, event->y, left, right, bottom)) return FALSE;
 
+	gtk_widget_grab_focus(widget);
 	on_screen_button_press(widget, event, pa_porkchop_screen);
 	if(event->button == GDK_BUTTON_SECONDARY)
 		pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_PAN;
@@ -361,6 +436,7 @@ void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer 
 				x0 = fmax(left, fmin(right, x0));
 				y0 = fmax(0, fmin(bottom, y0));
 				clear_dynamic_screen_layer(pa_porkchop_screen);
+				draw_pa_porkchop_selection_marker();
 				cairo_t *cr = pa_porkchop_screen->dynamic_layer.cr;
 				cairo_rectangle(cr, fmin(x0, x1), fmin(y0, y1), fabs(x1 - x0), fabs(y1 - y0));
 				cairo_set_source_rgba(cr, 1, 0, 0, 1);
@@ -372,6 +448,7 @@ void on_pa_screen_mouse_move(GtkWidget *widget, GdkEventButton *event, gpointer 
 			draw_pa_porkchop_hover(event->x, event->y, left, right, bottom);
 		} else {
 			clear_dynamic_screen_layer(pa_porkchop_screen);
+			draw_pa_porkchop_selection_marker();
 			draw_screen(pa_porkchop_screen);
 		}
 	}
@@ -389,6 +466,7 @@ void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpoin
 		pa_porkchop_drag_mode = PA_PORKCHOP_DRAG_NONE;
 
 		clear_dynamic_screen_layer(pa_porkchop_screen);
+		draw_pa_porkchop_selection_marker();
 
 		if(drag_mode == PA_PORKCHOP_DRAG_ZOOM) {
 			double left, right, bottom;
@@ -398,6 +476,13 @@ void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpoin
 			double y0 = fmax(0, fmin(bottom, pa_porkchop_screen->mouse_pos_on_press.y));
 			double y1 = fmax(0, fmin(bottom, event->y));
 			if(fabs(x1 - x0) < 2 || fabs(y1 - y0) < 2) {
+				int point_index = find_nearest_porkchop_point(pa_porkchop_points, pa_num_itins,
+						pa_yaxis_type, &pa_porkchop_view.range, left, right, bottom,
+						event->x, event->y, 10);
+				if(point_index >= 0) {
+					select_pa_porkchop_point(point_index);
+					return;
+				}
 				draw_screen(pa_porkchop_screen);
 				return;
 			}
@@ -421,10 +506,12 @@ void on_pa_screen_button_release(GtkWidget *widget, GdkEventButton *event, gpoin
 
 
 void pa_change_date_type(enum DateType old_date_type, enum DateType new_date_type) {
+	begin_pa_filter_entry_update();
 	change_text_field_date_type(tf_pa_min_feedback[PA_DEP], old_date_type, new_date_type);
 	change_text_field_date_type(tf_pa_max_feedback[PA_DEP], old_date_type, new_date_type);
 	change_text_field_date_type(tf_pa_min_feedback[PA_ARR], old_date_type, new_date_type);
 	change_text_field_date_type(tf_pa_max_feedback[PA_ARR], old_date_type, new_date_type);
+	end_pa_filter_entry_update();
 	if(curr_transfer_pa != NULL) change_label_date_type(lb_pa_tfdate, old_date_type, new_date_type);
 	else if(new_date_type == DATE_ISO) gtk_label_set_text(GTK_LABEL(lb_pa_tfdate), "0000-00-00");
 	else gtk_label_set_text(GTK_LABEL(lb_pa_tfdate), "0000-000");
@@ -513,7 +600,6 @@ void update_pa() {
 	update_pa_porkchop_diagram();
 	update_pa_itinerary_preview();
 	update_group_overview();
-	reset_min_max_feedback(1);
 }
 
 

@@ -1554,7 +1554,7 @@ The departure burn is minimized over the orbit.</property>
                     <child>
                       <object class="GtkDrawingArea" id="da_pa_porkchop">
                         <property name="visible">True</property>
-                        <property name="can-focus">False</property>
+                        <property name="can-focus">True</property>
                         <property name="hexpand">True</property>
                         <property name="vexpand">True</property>
                       </object>
@@ -1628,16 +1628,30 @@ The departure burn is minimized over the orbit.</property>
                                 </child>
                                 <child>
                                   <object class="GtkButton" id="bt_pa_save_itin">
-                                    <property name="label" translatable="yes">Save best Itinerary</property>
+                                    <property name="label" translatable="yes">Save Selected Itinerary</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                     <property name="receives-default">True</property>
-                                    <signal name="clicked" handler="on_save_best_itinerary" swapped="no"/>
+                                    <signal name="clicked" handler="on_save_selected_itinerary" swapped="no"/>
                                   </object>
                                   <packing>
                                     <property name="expand">False</property>
                                     <property name="fill">True</property>
                                     <property name="position">1</property>
+                                  </packing>
+                                </child>
+                                <child>
+                                  <object class="GtkButton" id="bt_pa_select_best_visible">
+                                    <property name="label" translatable="yes">Select Best in View</property>
+                                    <property name="visible">True</property>
+                                    <property name="can-focus">True</property>
+                                    <property name="receives-default">True</property>
+                                    <signal name="clicked" handler="on_pa_select_best_visible_node" swapped="no"/>
+                                  </object>
+                                  <packing>
+                                    <property name="expand">False</property>
+                                    <property name="fill">True</property>
+                                    <property name="position">2</property>
                                   </packing>
                                 </child>
                                 <child>
@@ -1651,7 +1665,7 @@ The departure burn is minimized over the orbit.</property>
                                   <packing>
                                     <property name="expand">False</property>
                                     <property name="fill">True</property>
-                                    <property name="position">2</property>
+                                    <property name="position">3</property>
                                   </packing>
                                 </child>
                               </object>
@@ -2024,7 +2038,7 @@ The departure burn is minimized over the orbit.</property>
                           </packing>
                         </child>
                         <child>
-                          <!-- n-columns=3 n-rows=2 -->
+                          <!-- n-columns=2 n-rows=2 -->
                           <object class="GtkGrid">
                             <property name="visible">True</property>
                             <property name="can-focus">False</property>
@@ -2034,19 +2048,6 @@ The departure burn is minimized over the orbit.</property>
                             <property name="column-spacing">5</property>
                             <property name="column-homogeneous">True</property>
                             <child>
-                              <object class="GtkButton" id="bt_pa_apply_filter">
-                                <property name="label" translatable="yes">Apply Filter</property>
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="receives-default">True</property>
-                                <signal name="clicked" handler="on_apply_filter" swapped="no"/>
-                              </object>
-                              <packing>
-                                <property name="left-attach">0</property>
-                                <property name="top-attach">0</property>
-                              </packing>
-                            </child>
-                            <child>
                               <object class="GtkButton" id="bt_pa_update">
                                 <property name="label" translatable="yes">Update</property>
                                 <property name="visible">True</property>
@@ -2055,7 +2056,7 @@ The departure burn is minimized over the orbit.</property>
                                 <signal name="clicked" handler="on_pa_update" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="left-attach">1</property>
+                                <property name="left-attach">0</property>
                                 <property name="top-attach">0</property>
                               </packing>
                             </child>
@@ -2068,7 +2069,7 @@ The departure burn is minimized over the orbit.</property>
                                 <signal name="clicked" handler="on_reset_porkchop" swapped="no"/>
                               </object>
                               <packing>
-                                <property name="left-attach">2</property>
+                                <property name="left-attach">1</property>
                                 <property name="top-attach">0</property>
                               </packing>
                             </child>
@@ -2083,7 +2084,7 @@ The departure burn is minimized over the orbit.</property>
                               <packing>
                                 <property name="left-attach">0</property>
                                 <property name="top-attach">1</property>
-                                <property name="width">3</property>
+                                <property name="width">2</property>
                               </packing>
                             </child>
                           </object>

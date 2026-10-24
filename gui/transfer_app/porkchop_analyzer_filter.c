@@ -1,7 +1,18 @@
 #include "porkchop_analyzer_internal.h"
+#include "tools/itinerary_date_input.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int pa_filter_entry_update_depth;
+
+void begin_pa_filter_entry_update(void) {
+	pa_filter_entry_update_depth++;
+}
+
+void end_pa_filter_entry_update(void) {
+	if(pa_filter_entry_update_depth > 0) pa_filter_entry_update_depth--;
+}
 
 void reset_min_max_feedback(int take_hidden_group_into_account) {
 	if(pa_num_itins == 0) return;
@@ -45,6 +56,7 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 	}
 
 	char string[32];
+	begin_pa_filter_entry_update();
 	date_to_string(convert_JD_date(min[PA_DEP], get_settings_datetime_type()), string, 0);
 	gtk_entry_set_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]), string);
 	date_to_string(convert_JD_date(min[PA_ARR], get_settings_datetime_type()), string, 0);
@@ -67,6 +79,7 @@ void reset_min_max_feedback(int take_hidden_group_into_account) {
 	}
 	memcpy(pa_min_vals, min, sizeof(min));
 	memcpy(pa_max_vals, max, sizeof(max));
+	end_pa_filter_entry_update();
 }
 
 gboolean are_any_porkchop_points_in_filter(const double min[6], const double max[6]) {
@@ -88,24 +101,35 @@ gboolean are_any_porkchop_points_in_filter(const double min[6], const double max
 	return FALSE;
 }
 
-void apply_filter() {
-	if(pa_porkchop_points == NULL) return;
-	double min[6], max[6];
-	char *string;
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[PA_DEP]));
-	min[PA_DEP] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))-1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[PA_DEP]));
-	max[PA_DEP] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))+1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[PA_ARR]));
-	min[PA_ARR] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))-1;	// rounding imprecision in filter entry field
-	string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[PA_ARR]));
-	max[PA_ARR] = convert_date_JD(date_from_string(string, get_settings_datetime_type()))+1;	// rounding imprecision in filter entry field
-	for(int i = 2; i < 6; i++) {
-		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[i]));
-		min[i] = strtod(string, NULL)-1;	// rounding imprecision in filter entry field
-		string = (char*) gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[i]));
-		max[i] = strtod(string, NULL)+1;	// rounding imprecision in filter entry field
-		if(get_settings_datetime_type() == DATE_KERBAL && i == PA_DUR) {min[i] /= 4; max[i] /= 4;}
+static int read_pa_filter_bounds(double min[6], double max[6]) {
+	enum DateType date_type = get_settings_datetime_type();
+	const int date_fields[] = {PA_DEP, PA_ARR};
+	for(size_t i = 0; i < sizeof(date_fields) / sizeof(date_fields[0]); i++) {
+		int field = date_fields[i];
+		const char *min_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[field]));
+		const char *max_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[field]));
+		if(!itinerary_date_entry_is_complete(min_text, date_type) ||
+			!itinerary_date_entry_is_complete(max_text, date_type)) return 0;
+		min[field] = convert_date_JD(date_from_string((char *)min_text, date_type)) - 1;
+		max[field] = convert_date_JD(date_from_string((char *)max_text, date_type)) + 1;
+	}
+
+	for(int i = PA_DUR; i < 6; i++) {
+		const char *min_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_min_feedback[i]));
+		const char *max_text = gtk_entry_get_text(GTK_ENTRY(tf_pa_max_feedback[i]));
+		char *min_end, *max_end;
+		min[i] = strtod(min_text, &min_end);
+		max[i] = strtod(max_text, &max_end);
+		while(g_ascii_isspace(*min_end)) min_end++;
+		while(g_ascii_isspace(*max_end)) max_end++;
+		if(min_end == min_text || max_end == max_text || *min_end != '\0' || *max_end != '\0' ||
+			!isfinite(min[i]) || !isfinite(max[i])) return 0;
+		min[i] -= 1;
+		max[i] += 1;
+		if(date_type == DATE_KERBAL && i == PA_DUR) {
+			min[i] /= 4;
+			max[i] /= 4;
+		}
 	}
 
 	for(int i = 0; i < 6; i++) {
@@ -115,18 +139,19 @@ void apply_filter() {
 			max[i] = temp;
 		}
 	}
+	return 1;
+}
 
-	if(!are_any_porkchop_points_in_filter(min, max)) return;
+int apply_filter(void) {
+	if(pa_porkchop_points == NULL) return 0;
+	double min[6], max[6];
+	if(!read_pa_filter_bounds(min, max) || !are_any_porkchop_points_in_filter(min, max)) return 0;
 
 	// show only groups inside filter in gui (setting visible below)
 	for(int group_idx = 0; group_idx < pa_num_groups; group_idx++) pa_groups[group_idx].has_itin_inside_filter = 0;
 
-	int init_num_itins = 0, rem_num_itins = 0;
-
 	struct PorkchopPoint pp;
 	for(int i = 0; i < pa_num_itins; i++) {
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) init_num_itins++;
-
 		pa_porkchop_points[i].inside_filter = 1;
 		pp = pa_porkchop_points[i].data;
 
@@ -141,17 +166,14 @@ void apply_filter() {
 			pp.dv_dep 			< min[PA_DEPDV] || pp.dv_dep 			> max[PA_DEPDV] ||
 			dv_sat + pp.dv_flyby 	< min[PA_SATDV] || dv_sat + pp.dv_flyby 	> max[PA_SATDV]) pa_porkchop_points[i].inside_filter = 0;
 		else pa_porkchop_points[i].group->has_itin_inside_filter = 1;
-
-		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group->show_group) rem_num_itins++;
 	}
+	return 1;
 }
 
-G_MODULE_EXPORT void on_apply_filter(GtkWidget* widget, gpointer data) {
-	if(pa_porkchop_points == NULL) return;
+G_MODULE_EXPORT void on_pa_filter_entry_changed(GtkWidget* widget, gpointer data) {
+	if(pa_porkchop_points == NULL || pa_filter_entry_update_depth > 0) return;
+	if(!apply_filter()) return;
 	reset_pa_porkchop_view();
-	apply_filter();
-	reset_min_max_feedback(0);
-	apply_filter();
 	update_pa();
 }
 
@@ -160,18 +182,42 @@ G_MODULE_EXPORT void on_reset_porkchop(GtkWidget* widget, gpointer data) {
 	reset_pa_porkchop_view();
 	for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].inside_filter = 1;
 	for(int i = 0; i < pa_num_groups; i++) {pa_groups[i].show_group = 1; pa_groups[i].has_itin_inside_filter = 1;}
+	reset_min_max_feedback(1);
 	update_pa();
 }
 
-void update_best_itin() {
+void update_pa_selected_itinerary(void) {
 	if(pa_porkchop_points == NULL || pa_num_itins <= 0) return;
-	int best_show_ind = find_first_visible_porkchop_point(pa_porkchop_points, pa_num_itins);
-	if(best_show_ind < 0 || best_show_ind >= pa_num_itins) return;
+	int best_show_ind = -1;
+	for(int i = 0; i < pa_num_itins; i++) {
+		if(pa_porkchop_points[i].inside_filter && pa_porkchop_points[i].group != NULL &&
+			pa_porkchop_points[i].group->show_group &&
+			pa_porkchop_points[i].data.arrival == pa_selected_arrival) {
+			best_show_ind = i;
+			break;
+		}
+	}
+	if(best_show_ind < 0)
+		best_show_ind = find_first_visible_porkchop_point(pa_porkchop_points, pa_num_itins);
+	if(best_show_ind < 0 || best_show_ind >= pa_num_itins) {
+		if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
+		curr_transfer_pa = NULL;
+		pa_selected_arrival = NULL;
+		return;
+	}
+	pa_selected_arrival = pa_porkchop_points[best_show_ind].data.arrival;
 	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
 	curr_transfer_pa = create_itin_copy_from_arrival(pa_porkchop_points[best_show_ind].data.arrival);
-	current_date_pa = get_last(curr_transfer_pa)->date;
+	if(curr_transfer_pa == NULL) return;
+	struct ItinStep *last_step = get_last(curr_transfer_pa);
+	if(last_step == NULL) return;
+	current_date_pa = last_step->date;
 	pa_update_body_show_status();
 	camera_zoom_to_fit_itinerary(pa_itin_preview_camera, curr_transfer_pa);
+}
+
+void update_best_itin() {
+	update_pa_selected_itinerary();
 }
 
 void analyze_departure_itins() {

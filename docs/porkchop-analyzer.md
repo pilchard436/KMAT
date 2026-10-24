@@ -8,10 +8,19 @@ point color represents total delta-v.
 
 - **Left-drag** a rectangle to zoom into that departure-date and
   duration/arrival-date range.
+- **Click a plotted node** to select its itinerary. The selected node is
+  outlined and its route appears in the preview.
+- **Focus the plot and use the arrow keys** to select a nearby node in that
+  direction. Navigation prefers nodes more aligned with the arrow's direction,
+  then falls back to the nearest off-axis node if needed.
 - **Right-drag** to pan the view without changing the filters.
 - **Scroll** to zoom around the pointer.
 - **Hover near a plotted point** to see its delta-v, along with the departure
   date and duration or arrival date at the cursor.
 
-Applying a filter resets the plot view to the remaining results. **Reset
-Porkchop** restores the full result set and its default view.
+Filter changes apply as soon as a complete value is entered. **Save Selected
+Itinerary** saves the currently selected route. **Select Best in View** selects
+the lowest-delta-v node in the current plot window, considering only results
+included by the filters and visible itinerary groups. Applying a filter resets
+the plot view to the remaining results. **Reset Porkchop** restores the full
+result set and its default view.

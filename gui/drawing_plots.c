@@ -151,13 +151,6 @@ void draw_data_point(cairo_t *cr, double x, double y, double radius) {
 	cairo_fill(cr);
 }
 
-// The best route, a white dot a little larger than the others.
-static void draw_best_route_marker(cairo_t *cr, double x, double y, double point_radius) {
-	cairo_set_source_rgb(cr, 1, 1, 1);
-	cairo_arc(cr, x, y, point_radius + 2, 0, M_PI*2);
-	cairo_fill(cr);
-}
-
 const int porkchop_dur_yaxis_x = 40;
 const int porkchop_arrdate_yaxis_x = 60;
 const int porkchop_xaxis_y = 40;
@@ -353,8 +346,7 @@ void draw_porkchop(cairo_t *cr, double width, double height, struct PorkchopAnal
 		cairo_set_source_rgb(buffer_cr, r,g,b);
 
 		Vector2 data_point = vec2(origin.x + m_depdate*(depdate - min_depdate), origin.y + (dur0arrdate1 ? (m_arrdate*(arrdate - min_arrdate)) : (m_dur*(dur - min_dur))));
-		if(i > 0) draw_data_point(buffer_cr, data_point.x, data_point.y, point_radius);
-		else draw_best_route_marker(buffer_cr, data_point.x, data_point.y, point_radius);
+		draw_data_point(buffer_cr, data_point.x, data_point.y, point_radius);
 
 		i--;
 	}

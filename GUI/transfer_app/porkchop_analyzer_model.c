@@ -110,6 +110,116 @@ int find_first_visible_porkchop_point(const struct PorkchopAnalyzerPoint *points
 	return -1;
 }
 
+int find_best_porkchop_point_in_view(const struct PorkchopAnalyzerPoint *points, int num_points,
+		enum LastTransferType last_transfer_type, int arrival_date_axis, const struct PorkchopPlotRange *range) {
+	if(points == NULL || num_points <= 0 || !porkchop_plot_range_is_valid(range)) return -1;
+	int best_index = -1;
+	double best_dv = INFINITY;
+	for(int i = 0; i < num_points; i++) {
+		if(!points[i].inside_filter || points[i].group == NULL || !points[i].group->show_group) continue;
+		struct PorkchopPoint point = points[i].data;
+		double y_value = arrival_date_axis ? point.dep_date + point.dur : point.dur;
+		if(point.dep_date < range->min_x || point.dep_date > range->max_x ||
+			y_value < range->min_y || y_value > range->max_y) continue;
+		double total_dv = porkchop_point_total_dv(point, last_transfer_type);
+		if(isfinite(total_dv) && total_dv < best_dv) {
+			best_index = i;
+			best_dv = total_dv;
+		}
+	}
+	return best_index;
+}
+
+int find_directional_porkchop_neighbor(const struct PorkchopAnalyzerPoint *points, int num_points,
+		const struct ItinStep *selected_arrival, enum PorkchopDirection direction, int arrival_date_axis,
+		const struct PorkchopPlotRange *range, double plot_width, double plot_height) {
+	if(points == NULL || num_points <= 0 || selected_arrival == NULL ||
+		direction < PORKCHOP_LEFT || direction > PORKCHOP_DOWN ||
+		!porkchop_plot_range_is_valid(range) || !isfinite(plot_width) || !isfinite(plot_height) ||
+		plot_width <= 0 || plot_height <= 0) return -1;
+
+	const struct PorkchopPoint *selected_point = NULL;
+	for(int i = 0; i < num_points; i++) {
+		if(points[i].data.arrival == selected_arrival) {
+			selected_point = &points[i].data;
+			break;
+		}
+	}
+	if(selected_point == NULL) return -1;
+
+	double x_span = range->max_x - range->min_x;
+	double y_span = range->max_y - range->min_y;
+	double selected_y = arrival_date_axis ?
+			selected_point->dep_date + selected_point->dur : selected_point->dur;
+	double selected_x_pixel = (selected_point->dep_date - range->min_x) / x_span * plot_width;
+	double selected_y_pixel = -(selected_y - range->min_y) / y_span * plot_height;
+	double best_cardinal_distance_squared = INFINITY;
+	double best_any_distance_squared = INFINITY;
+	int best_cardinal_index = -1;
+	int best_any_index = -1;
+
+	for(int i = 0; i < num_points; i++) {
+		if(!points[i].inside_filter || points[i].group == NULL || !points[i].group->show_group ||
+			points[i].data.arrival == selected_arrival) continue;
+		const struct PorkchopPoint *candidate = &points[i].data;
+		double candidate_y = arrival_date_axis ?
+				candidate->dep_date + candidate->dur : candidate->dur;
+		if(candidate->dep_date < range->min_x || candidate->dep_date > range->max_x ||
+			candidate_y < range->min_y || candidate_y > range->max_y) continue;
+
+		double dx = (candidate->dep_date - range->min_x) / x_span * plot_width - selected_x_pixel;
+		double dy = -(candidate_y - range->min_y) / y_span * plot_height - selected_y_pixel;
+		if((direction == PORKCHOP_LEFT && dx >= 0) ||
+			(direction == PORKCHOP_RIGHT && dx <= 0) ||
+			(direction == PORKCHOP_UP && dy >= 0) ||
+			(direction == PORKCHOP_DOWN && dy <= 0)) continue;
+		double distance_squared = dx * dx + dy * dy;
+		if(distance_squared < best_any_distance_squared) {
+			best_any_distance_squared = distance_squared;
+			best_any_index = i;
+		}
+		double primary_distance = direction == PORKCHOP_LEFT || direction == PORKCHOP_RIGHT ?
+				fabs(dx) : fabs(dy);
+		double secondary_distance = direction == PORKCHOP_LEFT || direction == PORKCHOP_RIGHT ?
+				fabs(dy) : fabs(dx);
+		if(primary_distance >= 4 * secondary_distance &&
+			distance_squared < best_cardinal_distance_squared) {
+			best_cardinal_distance_squared = distance_squared;
+			best_cardinal_index = i;
+		}
+	}
+	return best_cardinal_index >= 0 ? best_cardinal_index : best_any_index;
+}
+
+int find_nearest_porkchop_point(const struct PorkchopAnalyzerPoint *points, int num_points,
+		int arrival_date_axis, const struct PorkchopPlotRange *range, double left, double right, double bottom,
+		double mouse_x, double mouse_y, double max_distance) {
+	if(points == NULL || num_points <= 0 || !porkchop_plot_range_is_valid(range) ||
+		!isfinite(left) || !isfinite(right) || !isfinite(bottom) ||
+		!isfinite(mouse_x) || !isfinite(mouse_y) || !isfinite(max_distance) ||
+		right <= left || bottom <= 0 || max_distance < 0) return -1;
+	double x_span = range->max_x - range->min_x;
+	double y_span = range->max_y - range->min_y;
+	double nearest_distance_squared = max_distance * max_distance;
+	int nearest_index = -1;
+	for(int i = 0; i < num_points; i++) {
+		if(!points[i].inside_filter || points[i].group == NULL || !points[i].group->show_group) continue;
+		struct PorkchopPoint point = points[i].data;
+		double plot_y = arrival_date_axis ? point.dep_date + point.dur : point.dur;
+		double point_x = left + (point.dep_date - range->min_x) / x_span * (right - left);
+		double point_y = bottom - (plot_y - range->min_y) / y_span * bottom;
+		if(point_x < left || point_x > right || point_y < 0 || point_y > bottom) continue;
+		double dx = point_x - mouse_x;
+		double dy = point_y - mouse_y;
+		double distance_squared = dx * dx + dy * dy;
+		if(distance_squared <= nearest_distance_squared) {
+			nearest_index = i;
+			nearest_distance_squared = distance_squared;
+		}
+	}
+	return nearest_index;
+}
+
 void mark_itinerary_bodies_visible(int *visible, size_t num_bodies, const struct ItinStep *selected_step, const CelestSystem *system) {
 	if(visible == NULL || system == NULL) return;
 	memset(visible, 0, num_bodies * sizeof(*visible));

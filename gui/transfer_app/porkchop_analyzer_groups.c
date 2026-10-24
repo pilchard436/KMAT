@@ -18,6 +18,7 @@ void clear_porkchop_analyzer_analysis() {
 	g_clear_pointer(&group_overview_build_data, g_free);
 	if(pa_porkchop_points != NULL) free(pa_porkchop_points);
 	pa_porkchop_points = NULL;
+	pa_selected_arrival = NULL;
 	if(curr_transfer_pa != NULL) free_itinerary(get_first(curr_transfer_pa));
 	curr_transfer_pa = NULL;
 	free(pa_groups);
