@@ -1720,6 +1720,24 @@ The departure burn is minimized over the orbit.</property>
                                         <property name="position">1</property>
                                       </packing>
                                     </child>
+                                    <child>
+                                      <object class="GtkCheckButton" id="cb_pa_moon_assist">
+                                        <property name="label" translatable="yes">Include moon-assist DV</property>
+                                        <property name="visible">True</property>
+                                        <property name="sensitive">False</property>
+                                        <property name="can-focus">True</property>
+                                        <property name="receives-default">False</property>
+                                        <property name="draw-indicator">True</property>
+                                        <property name="margin-start">20</property>
+                                        <property name="tooltip-text" translatable="yes">Include arrival moon-assist savings in Capture delta-v when available.</property>
+                                        <signal name="toggled" handler="on_pa_moon_assist_toggled" swapped="no"/>
+                                      </object>
+                                      <packing>
+                                        <property name="expand">False</property>
+                                        <property name="fill">True</property>
+                                        <property name="position">2</property>
+                                      </packing>
+                                    </child>
                                   </object>
                                   <packing>
                                     <property name="left-attach">0</property>

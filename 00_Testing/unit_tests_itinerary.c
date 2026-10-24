@@ -351,6 +351,19 @@ static void check_itinerary_files(void) {
 		cache_itinerary_arrival_dvs(loaded_arrival, single_arr_periapsis);
 		check_near("loaded single-route arrival delta-v cache is reused",
 			loaded_arrival->arrival_dv_cache.dv_arr_cap, 321, 0);
+		set_moon_assist_enabled(0);
+		cache_itinerary_arrival_dvs(loaded_arrival, single_arr_periapsis);
+		check_true("disabling arrival moon assist refreshes the capture-cost cache",
+			!loaded_arrival->arrival_dv_cache.moon_assist_enabled);
+		Vector3 incoming_excess = subtract_vec3(loaded_arrival->v_arr, loaded_arrival->v_body);
+		check_near("disabled arrival moon assist uses the plain capture cost",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap,
+			dv_capture(loaded_arrival->body, alt2radius(loaded_arrival->body, single_arr_periapsis),
+				mag_vec3(incoming_excess)), 1e-9);
+		set_moon_assist_enabled(1);
+		cache_itinerary_arrival_dvs(loaded_arrival, single_arr_periapsis);
+		check_true("enabling arrival moon assist refreshes the capture-cost cache",
+			loaded_arrival->arrival_dv_cache.moon_assist_enabled);
 	}
 	check_true("single-route files preserve search options",
 		loaded.search_options.known && loaded.search_options.allow_dsm &&

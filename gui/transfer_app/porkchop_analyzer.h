@@ -18,6 +18,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_pa_select_best_visible_node(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointer data);
+G_MODULE_EXPORT void on_pa_moon_assist_toggled(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_pa_filter_entry_changed(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_pa_update(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_prev_transfer_pa(GtkWidget* widget, gpointer data);

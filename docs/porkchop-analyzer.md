@@ -31,4 +31,7 @@ axes preserves the current plot zoom and pan.
 **Select Best in View** selects the lowest-delta-v node in the current plot
 window, considering only results included by the filters and visible itinerary
 groups. Applying a filter resets the plot view to the remaining results.
+When **Capture** is selected, the checkbox below it controls whether available
+arrival moon-assist savings are included in Capture delta-v. Changing the option
+recalculates capture costs and reapplies the current filters.
 **Reset Porkchop** restores the full result set and its default view.

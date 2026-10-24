@@ -27,8 +27,10 @@ CelestSystem *pa_system;
 double pa_min_vals[6], pa_max_vals[6];
 
 static GtkWidget *pa_transfer_type_buttons[2];
+static GtkWidget *pa_moon_assist_toggle;
 static GtkWidget *pa_arrival_filter_label, *pa_duration_filter_label;
 static int pa_setting_transfer_type;
+static int pa_setting_moon_assist;
 
 enum PaYAxisType pa_yaxis_type = PA_YAXIS_DUR;
 double pa_dep_periapsis = 50e3;
@@ -220,6 +222,12 @@ void pa_set_last_transfer_type(enum LastTransferType type, int locked) {
 		gtk_widget_set_sensitive(pa_transfer_type_buttons[i], !locked || i == type);
 	}
 	pa_setting_transfer_type = 0;
+	if(pa_moon_assist_toggle != NULL) {
+		pa_setting_moon_assist = 1;
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pa_moon_assist_toggle), moon_assist_is_active());
+		gtk_widget_set_sensitive(pa_moon_assist_toggle, type == TF_CAPTURE);
+		pa_setting_moon_assist = 0;
+	}
 }
 
 
@@ -239,6 +247,7 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	reset_pa_porkchop_view();
 	pa_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_fb"));
 	pa_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_cap"));
+	pa_moon_assist_toggle = GTK_WIDGET(gtk_builder_get_object(builder, "cb_pa_moon_assist"));
 	pa_set_last_transfer_type(TF_FLYBY, 0);
 	da_pa_porkchop = gtk_builder_get_object(builder, "da_pa_porkchop");
 	da_pa_preview = gtk_builder_get_object(builder, "da_pa_preview");
@@ -604,6 +613,8 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 	}
 	if(pa_has_both_modes && selected_type != pa_last_transfer_type) {
 		pa_last_transfer_type = selected_type;
+		if(pa_moon_assist_toggle != NULL)
+			gtk_widget_set_sensitive(pa_moon_assist_toggle, selected_type == TF_CAPTURE);
 		clear_porkchop_analyzer_analysis();
 		if(selected_type == TF_CAPTURE) {
 			pa_departures = pa_dual_capture_departures;
@@ -620,6 +631,8 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 	}
 
 	pa_last_transfer_type = selected_type;
+	if(pa_moon_assist_toggle != NULL)
+		gtk_widget_set_sensitive(pa_moon_assist_toggle, selected_type == TF_CAPTURE);
 	if(pa_porkchop_points == NULL) return;
 	reset_pa_porkchop_view();
 	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
@@ -627,6 +640,35 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 	update_pa_porkchop_diagram();
 	update_pa_itinerary_preview();
 	reset_min_max_feedback(1);
+}
+
+G_MODULE_EXPORT void on_pa_moon_assist_toggled(GtkWidget* widget, gpointer data) {
+	if(pa_setting_moon_assist || widget != pa_moon_assist_toggle ||
+		pa_last_transfer_type != TF_CAPTURE) return;
+
+	int enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+	if(set_moon_assist_enabled(enabled) == enabled) return;
+	if(pa_analysis_params.calc_data.search_options.known)
+		pa_analysis_params.calc_data.search_options.moon_assist_arrival = enabled;
+	if(pa_porkchop_points == NULL || pa_num_itins <= 0) return;
+
+	int previous_exact_flybys = set_porkchop_exact_flybys(1);
+	for(int i = 0; i < pa_num_itins; i++) {
+		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
+		struct ItinStep *departure = get_first(arrival);
+		pa_porkchop_points[i].data = create_porkchop_point(arrival,
+				departure->body->atmo_alt + pa_dep_periapsis,
+				arrival->body->atmo_alt + pa_arr_periapsis);
+	}
+	set_porkchop_exact_flybys(previous_exact_flybys);
+
+	if(!apply_filter()) {
+		for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].inside_filter = 1;
+		reset_min_max_feedback(1);
+		apply_filter();
+	}
+	if(pa_num_itins > 1) sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
+	update_pa();
 }
 
 void update_pa() {
