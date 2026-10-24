@@ -49,6 +49,14 @@ void run_porkchop_tests(void) {
     expect_int("porkchop node hit testing ignores points outside the click radius",
                find_nearest_porkchop_point(selectable_points, 5, 0, &selectable_range,
                        0, 100, 100, 100, 0, 5), -1);
+    struct PorkchopAnalyzerPoint nonfinite_dv_point = {
+        .data = {.dep_date = 5, .dur = 5, .dv_dep = NAN},
+        .inside_filter = 1,
+        .group = &selectable_group
+    };
+    expect_int("porkchop hover hit testing recognizes nodes with unavailable delta-v",
+               find_nearest_porkchop_point(&nonfinite_dv_point, 1, 0, &selectable_range,
+                       0, 100, 100, 50, 50, 12), 0);
 
     struct ItinStep navigation_nodes[7] = {{0}};
     struct PorkchopAnalyzerPoint navigation_points[] = {

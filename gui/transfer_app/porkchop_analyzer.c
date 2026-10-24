@@ -142,35 +142,11 @@ static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, 
 	cairo_line_to(cr, right, mouse_y);
 	cairo_stroke(cr);
 
-	double nearest_distance_squared = 12.0 * 12.0;
-	double nearest_dv = 0;
-	int nearest_point_found = 0;
+	int nearest_point_index = find_nearest_porkchop_point(pa_porkchop_points, pa_num_itins,
+			pa_yaxis_type, &pa_porkchop_view.range, left, right, bottom, mouse_x, mouse_y, 12);
+	int nearest_point_found = nearest_point_index >= 0;
 	struct PorkchopPoint nearest_point = {0};
-	double x_span = pa_porkchop_view.range.max_x - pa_porkchop_view.range.min_x;
-	double y_span = pa_porkchop_view.range.max_y - pa_porkchop_view.range.min_y;
-	for(int point_idx = 0; point_idx < pa_num_itins; point_idx++) {
-		struct PorkchopAnalyzerPoint *point = &pa_porkchop_points[point_idx];
-		if(!point->inside_filter || point->group == NULL || !point->group->show_group) continue;
-
-		struct PorkchopPoint data = point->data;
-		double plot_y = pa_yaxis_type == PA_YAXIS_ARRDATE ? data.dep_date + data.dur : data.dur;
-		double point_x = left + (data.dep_date - pa_porkchop_view.range.min_x) / x_span * (right - left);
-		double point_y = bottom - (plot_y - pa_porkchop_view.range.min_y) / y_span * bottom;
-		if(point_x < left || point_x > right || point_y < 0 || point_y > bottom) continue;
-
-		double dx = point_x - mouse_x;
-		double dy = point_y - mouse_y;
-		double distance_squared = dx * dx + dy * dy;
-		if(distance_squared > nearest_distance_squared) continue;
-
-		double total_dv = porkchop_point_total_dv(data, pa_last_transfer_type);
-		if(!isfinite(total_dv)) continue;
-
-		nearest_distance_squared = distance_squared;
-		nearest_dv = total_dv;
-		nearest_point_found = 1;
-		nearest_point = data;
-	}
+	if(nearest_point_found) nearest_point = pa_porkchop_points[nearest_point_index].data;
 
 	char tooltip_text[256];
 	if(nearest_point_found) {
@@ -181,9 +157,13 @@ static void draw_pa_porkchop_hover(double mouse_x, double mouse_y, double left, 
 				get_settings_datetime_type()), arrival_text, 0);
 		double duration = get_settings_datetime_type() == DATE_KERBAL ?
 				nearest_point.dur * 4 : nearest_point.dur;
+		double total_dv = porkchop_point_total_dv(nearest_point, pa_last_transfer_type);
+		char dv_text[64];
+		if(isfinite(total_dv)) g_snprintf(dv_text, sizeof(dv_text), "Delta-v: %.0f m/s", total_dv);
+		else g_strlcpy(dv_text, "Delta-v: unavailable", sizeof(dv_text));
 		g_snprintf(tooltip_text, sizeof(tooltip_text),
-				"Departure: %s\nArrival: %s\nDuration: %.2f days\nDelta-v: %.0f m/s",
-				departure_text, arrival_text, duration, nearest_dv);
+				"Departure: %s\nArrival: %s\nDuration: %.2f days\n%s",
+				departure_text, arrival_text, duration, dv_text);
 	} else {
 		char departure_text[32], value_text[64];
 		date_to_string(convert_JD_date(x_value, get_settings_datetime_type()), departure_text, 0);
