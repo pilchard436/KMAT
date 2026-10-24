@@ -75,13 +75,16 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 G_MODULE_EXPORT void on_save_best_itinerary(GtkWidget* widget, gpointer data) {
 	struct ItinStep *first = get_first(curr_transfer_pa);
 	if(first == NULL) return;
+	struct ItinStep *arrival = get_last(first);
+	if(first->body == NULL || arrival == NULL || arrival->body == NULL) return;
 
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
 	ItinSearchOptions options = pa_analysis_params.calc_data.search_options;
 	if(options.known) options.last_transfer_type = pa_last_transfer_type;
 	store_single_itinerary_in_bfile_with_options(first, pa_system, filepath, options,
-		pa_dep_periapsis, pa_arr_periapsis);
+		first->body->atmo_alt + pa_dep_periapsis,
+		arrival->body->atmo_alt + pa_arr_periapsis);
 }
 
 G_MODULE_EXPORT void show_pa_analysis_parameters() {
