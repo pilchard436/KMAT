@@ -242,6 +242,8 @@ typedef struct StableTooltip {
 	GtkWidget *popover;
 	GtkWidget *label;
 	guint timer_id;
+	gboolean entry_icon_only;
+	GtkEntryIconPosition icon_position;
 } StableTooltip;
 
 static void hide_stable_tooltip(StableTooltip *tip) {
@@ -264,15 +266,43 @@ static void schedule_stable_tooltip(StableTooltip *tip) {
 		tip->timer_id = g_timeout_add(500, show_stable_tooltip, tip);
 }
 
+// Event coordinates over an entry icon are relative to the icon's own window, so query the pointer instead.
+static gboolean stable_tooltip_pointer_over_entry_icon(GtkWidget *widget, StableTooltip *tip) {
+	if(!tip->entry_icon_only || !GTK_IS_ENTRY(widget)) return FALSE;
+	GtkWidget *toplevel = gtk_widget_get_toplevel(widget);
+	GdkWindow *top_window = gtk_widget_get_window(toplevel);
+	GdkSeat *seat = gdk_display_get_default_seat(gtk_widget_get_display(widget));
+	if(top_window == NULL || seat == NULL) return FALSE;
+	gint px, py, ex, ey;
+	gdk_window_get_device_position(top_window, gdk_seat_get_pointer(seat), &px, &py, NULL);
+	if(!gtk_widget_translate_coordinates(toplevel, widget, px, py, &ex, &ey)) return FALSE;
+	return gtk_entry_get_icon_at_pos(GTK_ENTRY(widget), ex, ey) == (gint)tip->icon_position;
+}
+
 static gboolean on_stable_tooltip_enter(GtkWidget *widget, GdkEventCrossing *event, gpointer data) {
 	StableTooltip *tip = data;
 	// Grab-related crossings follow a click and must not reopen the tooltip.
-	if(event->mode == GDK_CROSSING_NORMAL) schedule_stable_tooltip(tip);
+	if(event->mode == GDK_CROSSING_NORMAL &&
+		(!tip->entry_icon_only || stable_tooltip_pointer_over_entry_icon(widget, tip)))
+		schedule_stable_tooltip(tip);
+	return FALSE;
+}
+
+static gboolean on_stable_tooltip_motion(GtkWidget *widget, GdkEventMotion *event, gpointer data) {
+	StableTooltip *tip = data;
+	if(!tip->entry_icon_only) return FALSE;
+	if(stable_tooltip_pointer_over_entry_icon(widget, tip))
+		schedule_stable_tooltip(tip);
+	else
+		hide_stable_tooltip(tip);
 	return FALSE;
 }
 
 static gboolean on_stable_tooltip_hide(GtkWidget *widget, GdkEvent *event, gpointer data) {
-	hide_stable_tooltip(data);
+	StableTooltip *tip = data;
+	// Moving between an entry's text area and its icon also emits leave events.
+	if(event->type == GDK_LEAVE_NOTIFY && stable_tooltip_pointer_over_entry_icon(widget, tip)) return FALSE;
+	hide_stable_tooltip(tip);
 	return FALSE;
 }
 
@@ -289,7 +319,6 @@ static void on_stable_tooltip_widget_destroy(GtkWidget *widget, gpointer data) {
 
 static void set_stable_tooltip_content(GtkWidget *widget, const char *text, gboolean use_markup) {
 	StableTooltip *tip = g_object_get_data(G_OBJECT(widget), "stable-tooltip");
-	gtk_widget_set_tooltip_text(widget, NULL);
 	if(tip == NULL) {
 		tip = g_new0(StableTooltip, 1);
 		tip->popover = gtk_popover_new(widget);
@@ -302,8 +331,10 @@ static void set_stable_tooltip_content(GtkWidget *widget, const char *text, gboo
 		gtk_label_set_max_width_chars(GTK_LABEL(tip->label), 50);
 		gtk_label_set_xalign(GTK_LABEL(tip->label), 0.0f);
 		gtk_container_add(GTK_CONTAINER(tip->popover), tip->label);
-		gtk_widget_add_events(widget, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK | GDK_BUTTON_PRESS_MASK);
+		gtk_widget_add_events(widget, GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK |
+			GDK_BUTTON_PRESS_MASK | GDK_POINTER_MOTION_MASK);
 		g_signal_connect(widget, "enter-notify-event", G_CALLBACK(on_stable_tooltip_enter), tip);
+		g_signal_connect(widget, "motion-notify-event", G_CALLBACK(on_stable_tooltip_motion), tip);
 		g_signal_connect(widget, "leave-notify-event", G_CALLBACK(on_stable_tooltip_hide), tip);
 		g_signal_connect(widget, "button-press-event", G_CALLBACK(on_stable_tooltip_hide), tip);
 		g_signal_connect(widget, "unmap", G_CALLBACK(on_stable_tooltip_unmap), tip);
@@ -330,6 +361,13 @@ void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double
 
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup) {
 	set_stable_tooltip_content(widget, markup, TRUE);
+}
+
+void set_stable_tooltip_for_entry_icon(GtkEntry *entry, GtkEntryIconPosition icon_position, const char *text) {
+	set_stable_tooltip_content(GTK_WIDGET(entry), text, FALSE);
+	StableTooltip *tip = g_object_get_data(G_OBJECT(entry), "stable-tooltip");
+	tip->entry_icon_only = TRUE;
+	tip->icon_position = icon_position;
 }
 
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry) {

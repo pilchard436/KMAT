@@ -36,6 +36,10 @@ void init_sequence_calculator(GtkBuilder *builder) {
 	tf_sc_maxarrdate = gtk_builder_get_object(builder, "tf_sc_maxarrdate");
 	tf_sc_maxdur = gtk_builder_get_object(builder, "tf_sc_maxdur");
 	cb_sc_transfertype = gtk_builder_get_object(builder, "cb_sc_transfertype");
+	// The combo box's inner button receives the hover events, not the combo box itself.
+	GtkWidget *sc_transfertype_button = gtk_bin_get_child(GTK_BIN(cb_sc_transfertype));
+	set_stable_tooltip(sc_transfertype_button != NULL ? sc_transfertype_button : GTK_WIDGET(cb_sc_transfertype),
+		"Both Fly-By and Capture results are calculated together and can be switched in Porkchop Analyzer.");
 	tf_sc_totdv = gtk_builder_get_object(builder, "tf_sc_totdv");
 	tf_sc_depdv = gtk_builder_get_object(builder, "tf_sc_depdv");
 	tf_sc_satdv = gtk_builder_get_object(builder, "tf_sc_satdv");
