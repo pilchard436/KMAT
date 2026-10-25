@@ -62,7 +62,7 @@ static gboolean on_ic_info_icon_leave(GtkWidget *widget, GdkEventCrossing *event
 	return FALSE;
 }
 
-static void setup_ic_info_icon_hover(GtkWidget *widget) {
+void setup_ic_info_icon_hover(GtkWidget *widget) {
 	set_css_class_for_widget(widget, "ic-info-icon");
 	g_signal_connect(widget, "enter-notify-event", G_CALLBACK(on_ic_info_icon_enter), NULL);
 	g_signal_connect(widget, "leave-notify-event", G_CALLBACK(on_ic_info_icon_leave), NULL);

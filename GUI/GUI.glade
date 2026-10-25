@@ -5827,7 +5827,7 @@ The departure burn is minimized over the orbit.</property>
           </packing>
         </child>
         <child>
-          <!-- n-columns=2 n-rows=4 -->
+          <!-- n-columns=3 n-rows=4 -->
           <object class="GtkGrid">
             <property name="visible">True</property>
             <property name="can-focus">False</property>
@@ -5910,7 +5910,6 @@ The departure burn is minimized over the orbit.</property>
               <object class="GtkComboBoxText" id="cb_settings_seed_budget">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
-                <property name="tooltip-text" translatable="yes">Higher values find more route families when many options are enabled, but make the itinerary search slower. Applies to searches started afterwards.</property>
                 <items>
                   <item translatable="yes">512 (fastest)</item>
                   <item translatable="yes">1024</item>
@@ -5922,6 +5921,28 @@ The departure burn is minimized over the orbit.</property>
               </object>
               <packing>
                 <property name="left-attach">1</property>
+                <property name="top-attach">3</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEventBox" id="eb_settings_seed_budget_info">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="visible-window">True</property>
+                <property name="halign">start</property>
+                <property name="width-request">24</property>
+                <property name="height-request">24</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="use-markup">True</property>
+                    <property name="label">&lt;span size=&quot;x-large&quot;&gt;&lt;b&gt;&#x24D8;&lt;/b&gt;&lt;/span&gt;</property>
+                  </object>
+                </child>
+              </object>
+              <packing>
+                <property name="left-attach">2</property>
                 <property name="top-attach">3</property>
               </packing>
             </child>

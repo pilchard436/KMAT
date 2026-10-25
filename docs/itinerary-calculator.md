@@ -93,7 +93,8 @@ optional control is unavailable, it is treated as disabled.
 ### Search depth
 
 The **Settings** tab has an **Itinerary search depth (seeds per departure)**
-dropdown (512, 1024, 2048 by default, 4096, 8192). It sets how many powered
+dropdown (512, 1024, 2048 by default, 4096, 8192) with an info icon whose
+tooltip explains the setting. It sets how many powered
 flyby seeds each departure may add before the search stops adding them. When
 many options are enabled, a low value can exhaust the budget before the search
 reaches some route families; a higher value finds more of them but takes

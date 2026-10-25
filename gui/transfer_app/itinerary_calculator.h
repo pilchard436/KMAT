@@ -13,6 +13,8 @@ void ic_initialize_date_defaults(void);
 void connect_itinerary_date_entry_validation(GtkEntry *entry);
 void set_ic_default_system(char *system_name);
 void reset_ic();
+/* Styles an event box as a hoverable info icon. */
+void setup_ic_info_icon_hover(GtkWidget *widget);
 
 
 
