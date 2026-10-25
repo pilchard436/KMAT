@@ -140,7 +140,6 @@ int check_dsm_model(CelestSystem *system, Body *departure_body, Body *flyby_body
 	// Flyby and arrival offsets in days; the first pair is a route where a DSM clearly helps.
 	double pairs[][2] = {{66, 1414}, {218, 1414}, {238, 1414}, {120, 900}, {201, 1100}, {150, 1300}};
 	int valid = 1;
-	int unstable_pairs = 0;
 	double first_saving = 0, first_maneuver = 0;
 	PoweredLegDsm first_found[2] = {{0}};
 	for(size_t p = 0; p < sizeof(pairs) / sizeof(pairs[0]); p++) {
@@ -153,14 +152,14 @@ int check_dsm_model(CelestSystem *system, Body *departure_body, Body *flyby_body
 		double recheck = evaluate_powered_flyby_route_objective_with_dsm(&calc_data, bodies, times, 3, found);
 		if(!(plain < DBL_MAX) || !(with_zero < DBL_MAX) || !(best < DBL_MAX)) {
 			fprintf(stderr, "DSM model: route +%.0f/+%.0f was not evaluable\n", pairs[p][0], pairs[p][1]);
-			unstable_pairs++;
+			valid = 0;
 			continue;
 		}
 		// A zero maneuver is the plain route; the gap is the evaluator's convergence noise.
 		if(fabs(with_zero - plain) > 10.0) {
 			fprintf(stderr, "DSM model: zero-delta-v DSM changed the cost by %.3f m/s on route +%.0f/+%.0f\n",
 				with_zero - plain, pairs[p][0], pairs[p][1]);
-			unstable_pairs++;
+			valid = 0;
 		}
 		if(best > plain + 1e-6 || fabs(recheck - best) > 0.01) {
 			fprintf(stderr, "DSM model: optimizer returned %.3f (recheck %.3f) against plain %.3f on route +%.0f/+%.0f\n",
@@ -173,11 +172,6 @@ int check_dsm_model(CelestSystem *system, Body *departure_body, Body *flyby_body
 			for(int leg = 0; leg < 2; leg++)
 				if(found[leg].enabled) first_maneuver = fmax(first_maneuver, mag_vec3(found[leg].delta_v));
 		}
-	}
-	// The SOI iteration hovers near its tolerance on some dates, so a few pairs may be noisy.
-	if(unstable_pairs > 2) {
-		fprintf(stderr, "DSM model: %d of %zu date pairs were unstable\n", unstable_pairs, sizeof(pairs) / sizeof(pairs[0]));
-		valid = 0;
 	}
 	if(first_saving < 100.0 || first_maneuver < POWERED_TEST_DV_TOLERANCE) {
 		fprintf(stderr, "DSM model: expected a saving above 100 m/s on the first route, got %.3f m/s with a %.1f m/s maneuver\n",

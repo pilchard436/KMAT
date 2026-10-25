@@ -388,8 +388,9 @@ int run_powered_flyby_objective_regression(CelestSystem *system,
 				checked, unscorable, worst_mismatch);
 			goto cleanup;
 		}
-		if(results.powered_initial_rejections == 0 || results.powered_repairs_attempted == 0 ||
-			results.powered_repairs_recovered == 0 || results.powered_repairs_competing == 0 ||
+		// Routes that settle in the SOI iteration are not rejected, so repairs only have to be consistent when needed.
+		if((results.powered_initial_rejections > 0 && (results.powered_repairs_attempted == 0 ||
+			results.powered_repairs_recovered == 0 || results.powered_repairs_competing == 0)) ||
 			results.powered_repairs_recovered > results.powered_repairs_attempted ||
 			(unsigned long long)results.powered_repairs_attempted > results.powered_initial_rejections ||
 			results.powered_repairs_competing > results.powered_repairs_recovered) {

@@ -9,6 +9,7 @@
 
 /* Residual is in units of the convergence tolerance. */
 #define POWERED_STALL_CHECK_ITERATION 25
+#define POWERED_FREEZE_ITERATION 4
 #define POWERED_STALL_RESIDUAL 30.0
 
 _Thread_local int objective_budget = -1;
@@ -209,8 +210,12 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	PoweredDsmResult *dsm_local = calloc(candidate->num_steps, sizeof(*dsm_local));
 	double *forced_radius = calloc(candidate->num_steps, sizeof(*forced_radius));
 	int *forced_side = calloc(candidate->num_steps, sizeof(*forced_side));
+	double *frozen_radius = calloc(candidate->num_steps, sizeof(*frozen_radius));
+	int *frozen_side = calloc(candidate->num_steps, sizeof(*frozen_side));
 	if(flybys == NULL || incoming_excess == NULL || outgoing_excess == NULL || dsm_local == NULL ||
-		forced_radius == NULL || forced_side == NULL) {
+		forced_radius == NULL || forced_side == NULL || frozen_radius == NULL || frozen_side == NULL) {
+		free(frozen_radius);
+		free(frozen_side);
 		free(flybys);
 		free(incoming_excess);
 		free(outgoing_excess);
@@ -237,6 +242,7 @@ static double evaluate_route_variants_core(const PoweredRouteCandidate *candidat
 	int replanned = 0;
 iterate:;
 	int converged = 0;
+	memset(frozen_radius, 0, candidate->num_steps * sizeof(*frozen_radius));
 	double best_residual = DBL_MAX;
 	for(int iteration = 0; valid_route && !itinerary_search_cancelled(NULL) && iteration < 60; iteration++) {
 		for(size_t i = 0; i + 1 < candidate->num_steps && !itinerary_search_cancelled(NULL); i++) {
@@ -306,10 +312,21 @@ iterate:;
 			new_outgoing_excess = scale_vec3(add_vec3(outgoing_excess[i], new_outgoing_excess), 0.5);
 			PoweredFlybyResult updated_flyby;
 			double minimum_periapsis = flyby_minimum_periapsis(body);
+			double use_radius = forced_radius[i] > 0 ? forced_radius[i] : frozen_radius[i];
+			int use_side = forced_radius[i] > 0 ? forced_side[i] : frozen_side[i];
+			// The frozen choice is only a damping aid, so fall back to the free optimum if it stops being feasible.
 			if(!route_flyby(new_incoming_excess, new_outgoing_excess, body, minimum_periapsis,
-				forced_radius[i], forced_side[i], &updated_flyby)) {
+				use_radius, use_side, &updated_flyby) &&
+				!(use_radius > 0 && forced_radius[i] <= 0 && route_flyby(new_incoming_excess, new_outgoing_excess,
+					body, minimum_periapsis, 0, 0, &updated_flyby))) {
 				valid_route = 0;
 				break;
+			}
+			if(iteration + 1 == POWERED_FREEZE_ITERATION && frozen_radius[i] <= 0) {
+				// The periapsis radius and side flip between near-equal optima, which keeps the iteration from settling.
+				Vector3 plane_normal = cross_vec3(new_incoming_excess, new_outgoing_excess);
+				frozen_radius[i] = updated_flyby.periapsis_radius;
+				frozen_side[i] = dot_vec3(updated_flyby.periapsis_direction, plane_normal) >= 0 ? 1 : -1;
 			}
 			double time_change = fmax(fabs(updated_flyby.incoming_soi_time - flybys[i].incoming_soi_time),
 				fabs(updated_flyby.outgoing_soi_time - flybys[i].outgoing_soi_time));
@@ -421,6 +438,8 @@ iterate:;
 		memcpy(dsm_out, dsm_local, (candidate->num_steps - 1) * sizeof(*dsm_out));
 
 cleanup:
+	free(frozen_radius);
+	free(frozen_side);
 	free(flybys);
 	free(incoming_excess);
 	free(outgoing_excess);
