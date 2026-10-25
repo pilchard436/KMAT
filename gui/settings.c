@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "orbitlib.h"
+#include "orbit_calculator/flyby_search.h"
 #include "gui_manager.h"
 #include "ksp/ksp_session.h"
 #include "tools/starting_orbit.h"
@@ -15,7 +16,7 @@
 #include <string.h>
 
 
-GObject *cb_settings_default_system;
+GObject *cb_settings_default_system, *cb_settings_seed_budget;
 GObject *bt_settings_ksp_connect, *lb_settings_ksp_status;
 
 struct GlobalSettings {
@@ -23,8 +24,9 @@ struct GlobalSettings {
 	char default_system_name[100];
 	char ksp_host[128];
 	uint16_t ksp_port;
+	int powered_seed_budget;
 	} global_settings = {.date_type = DATE_ISO, .default_system_name = "Solar System (Ephemeris)",
-		.ksp_host = "127.0.0.1", .ksp_port = 50000};
+		.ksp_host = "127.0.0.1", .ksp_port = 50000, .powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE};
 
 static gchar *get_settings_file_path() {
 	return g_build_filename(g_get_user_config_dir(), "kmat", "settings.ini", NULL);
@@ -45,6 +47,8 @@ static void load_persisted_settings() {
 		g_free(ksp_host);
 		gint ksp_port = g_key_file_get_integer(key_file, "Settings", "ksp-port", NULL);
 		if(ksp_port > 0 && ksp_port <= UINT16_MAX) global_settings.ksp_port = (uint16_t)ksp_port;
+		gint seed_budget = g_key_file_get_integer(key_file, "Settings", "powered-seed-budget", NULL);
+		if(find_powered_seed_budget_preset(seed_budget) >= 0) global_settings.powered_seed_budget = seed_budget;
 	} else {
 		g_clear_error(&error);
 	}
@@ -65,6 +69,7 @@ static void save_settings() {
 	g_key_file_remove_key(key_file, "Settings", "default-departure-date", NULL);
 	g_key_file_set_string(key_file, "Settings", "ksp-host", global_settings.ksp_host);
 	g_key_file_set_integer(key_file, "Settings", "ksp-port", global_settings.ksp_port);
+	g_key_file_set_integer(key_file, "Settings", "powered-seed-budget", global_settings.powered_seed_budget);
 	gchar *data = g_key_file_to_data(key_file, &data_length, NULL);
 	if(g_mkdir_with_parents(directory, 0700) != 0) {
 		g_warning("Failed to create KMAT settings directory: %s", directory);
@@ -82,7 +87,13 @@ void init_global_settings(GtkBuilder *builder) {
 	cb_settings_default_system = gtk_builder_get_object(builder, "cb_settings_default_system");
 	bt_settings_ksp_connect = gtk_builder_get_object(builder, "bt_settings_ksp_connect");
 	lb_settings_ksp_status = gtk_builder_get_object(builder, "lb_settings_ksp_status");
+	cb_settings_seed_budget = gtk_builder_get_object(builder, "cb_settings_seed_budget");
 	load_persisted_settings();
+	set_powered_seed_budget(global_settings.powered_seed_budget);
+	g_signal_handlers_block_by_func(cb_settings_seed_budget, G_CALLBACK(on_change_seed_budget), NULL);
+	gtk_combo_box_set_active(GTK_COMBO_BOX(cb_settings_seed_budget),
+		find_powered_seed_budget_preset(global_settings.powered_seed_budget));
+	g_signal_handlers_unblock_by_func(cb_settings_seed_budget, G_CALLBACK(on_change_seed_budget), NULL);
 	gtk_button_set_label(GTK_BUTTON(bt_settings_ksp_connect), ksp_session_is_connected() ? "Disconnect from KSP" : "Connect to KSP");
 	gtk_label_set_text(GTK_LABEL(lb_settings_ksp_status), ksp_session_is_connected() ? "Connected to KSP" : "Not connected");
 	char default_system_name[sizeof(global_settings.default_system_name)];
@@ -125,6 +136,14 @@ G_MODULE_EXPORT void on_change_default_system() {
 	int active = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_settings_default_system));
 	if(active < 0 || active >= get_num_available_systems()) return;
 	strcpy(global_settings.default_system_name, get_available_systems()[active]->name);
+	save_settings();
+}
+
+G_MODULE_EXPORT void on_change_seed_budget() {
+	int active = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_settings_seed_budget));
+	if(active < 0 || active >= POWERED_SEED_BUDGET_PRESET_COUNT) return;
+	global_settings.powered_seed_budget = get_powered_seed_budget_preset(active);
+	set_powered_seed_budget(global_settings.powered_seed_budget);
 	save_settings();
 }
 

@@ -1,6 +1,7 @@
 #include "test_support.h"
 #include "orbit_calculator/itin_tool.h"
 #include "orbit_calculator/flyby_policy.h"
+#include "orbit_calculator/flyby_search.h"
 #include "orbit_calculator/search_rejections.h"
 #include "orbit_calculator/soi_encounter.h"
 #include "tools/file_io.h"
@@ -224,6 +225,30 @@ static void check_resonant_samples(void) {
 	check_true("every sample duration stays within 25 percent of the revolutions", window_ok);
 	resonant_departure_sample(count - 1, period, &duration, &variant);
 	check_true("the last sample is the highest variant of the second window", variant == 8 && duration > 1.7 * period);
+}
+
+static void check_powered_seed_budget_presets(void) {
+	int ascending = 1, found_default = 0, round_trip = 1;
+	for(int i = 0; i < POWERED_SEED_BUDGET_PRESET_COUNT; i++) {
+		int budget = get_powered_seed_budget_preset(i);
+		if(i > 0) ascending &= budget > get_powered_seed_budget_preset(i - 1);
+		found_default |= budget == POWERED_SEEDS_PER_DEPARTURE;
+		round_trip &= find_powered_seed_budget_preset(budget) == i;
+	}
+	check_true("seed budget presets ascend", ascending);
+	check_true("seed budget presets include the default", found_default);
+	check_true("seed budget presets map back to their index", round_trip);
+	check_true("a non-preset seed budget is not found", find_powered_seed_budget_preset(777) == -1);
+	check_true("an out-of-range preset index falls back to the default",
+		get_powered_seed_budget_preset(-1) == POWERED_SEEDS_PER_DEPARTURE &&
+		get_powered_seed_budget_preset(POWERED_SEED_BUDGET_PRESET_COUNT) == POWERED_SEEDS_PER_DEPARTURE);
+	int previous = get_powered_seed_budget();
+	set_powered_seed_budget(1024);
+	check_true("the seed budget can be changed", get_powered_seed_budget() == 1024);
+	set_powered_seed_budget(0);
+	set_powered_seed_budget(-5);
+	check_true("a non-positive seed budget is ignored", get_powered_seed_budget() == 1024);
+	set_powered_seed_budget(previous);
 }
 
 static double polar_angle(Vector3 position) {
@@ -729,6 +754,7 @@ int run_itinerary_unit_tests(void) {
 	check_flyby_policy();
 	check_leg_variants();
 	check_resonant_samples();
+	check_powered_seed_budget_presets();
 	check_conjunction_times();
 	check_itinerary_files();
 	check_search_rejections();

@@ -13,6 +13,7 @@ char *get_settings_default_system();
 
 // Handler --------------------------
 G_MODULE_EXPORT void on_change_default_system();
+G_MODULE_EXPORT void on_change_seed_budget();
 G_MODULE_EXPORT void on_settings_ksp_connect(GtkWidget *widget, gpointer data);
 
 #endif //KSP_SETTINGS_H

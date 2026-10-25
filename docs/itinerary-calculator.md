@@ -90,6 +90,18 @@ The following checkboxes alter the search or route evaluation:
 These flags are read from the form at the start of the calculation. If an
 optional control is unavailable, it is treated as disabled.
 
+### Search depth
+
+The **Settings** tab has an **Itinerary search depth (seeds per departure)**
+dropdown (512, 1024, 2048 by default, 4096, 8192). It sets how many powered
+flyby seeds each departure may add before the search stops adding them. When
+many options are enabled, a low value can exhaust the budget before the search
+reaches some route families; a higher value finds more of them but takes
+longer. The choice is saved as `powered-seed-budget` in the settings file and
+applies to searches started afterwards. See
+[`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md#raising-the-seed-budget)
+for measurements.
+
 New `.itins` search files and `.itin` route files store the search options
 alongside their results. When a saved route is reopened, those settings are
 restored for option-dependent calculations and displays. Older files do not

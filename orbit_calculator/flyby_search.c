@@ -16,9 +16,27 @@ static _Thread_local int powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
 static int seeds_per_departure = POWERED_SEEDS_PER_DEPARTURE;
 static _Thread_local PoweredSeedSearchStats *seed_search_stats;
 
-// Only for coverage measurements; call before a search starts.
+// Applies to searches started afterwards.
 void set_powered_seed_budget(int seeds) {
+	if(seeds < 1) return;
 	seeds_per_departure = seeds;
+}
+
+int get_powered_seed_budget(void) {
+	return seeds_per_departure;
+}
+
+static const int powered_seed_budget_presets[POWERED_SEED_BUDGET_PRESET_COUNT] = {512, 1024, POWERED_SEEDS_PER_DEPARTURE, 4096, 8192};
+
+int get_powered_seed_budget_preset(int index) {
+	if(index < 0 || index >= POWERED_SEED_BUDGET_PRESET_COUNT) return POWERED_SEEDS_PER_DEPARTURE;
+	return powered_seed_budget_presets[index];
+}
+
+int find_powered_seed_budget_preset(int seeds) {
+	for(int i = 0; i < POWERED_SEED_BUDGET_PRESET_COUNT; i++)
+		if(powered_seed_budget_presets[i] == seeds) return i;
+	return -1;
 }
 
 void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
