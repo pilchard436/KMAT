@@ -414,51 +414,9 @@ pre-change samples would make the comparison stronger.
   this scenario, but are not repeated-run performance estimates.
 
 
-## CPU speedup: Kepler solver for orbit propagation
+## CPU speedup
 
-`propagate_orbit_time` (orbitlib `src/orbit.c`) found the true anomaly with a
-step-halving search to a 1 s tolerance. `osv_from_elements` cost about
-2,860 ns per call, while a Lambert solve costs about 100 ns, so target-state
-propagation dominated every flyby evaluation. Elliptic orbits (`0 <= e < 1`)
-now use a Newton solve of Kepler's equation (about 509 ns per call, 5.6x
-faster); the old search remains as a fallback and for `e >= 1`.
-
-| Case | Before | After |
-|---|---|---|
-| Coverage run, total wall time | 88.7 s | 47.7 s |
-| Jupiter, budget 512 | 5.6 s | 3.6 s |
-| Jupiter, budget 2,048 | 14.8 s | 10.7 s |
-| Saturn, budget 512 | 28.1 s | 11.8 s |
-
-Node and itinerary counts moved by at most about 0.2%, because the old
-propagator was only accurate to about 1 s of orbital time. Integration checks
-that were calibrated to that numerical noise (DSM total comparison, resonant
-re-solve cost for maneuver-free routes, and the DSM model date pair) were
-adjusted.
-
-
-## CPU speedup: SOI iteration freeze and golden-section reuse
-
-Profiling at budget 512 showed the per-seed powered flyby optimization
-(`calculate_powered_flyby`, about 4.5 us per call) as the other large cost next to
-the root-finder, and it grows with the seed budget.
-
-- **Golden-section reuse** in `calculate_powered_flyby` (orbitlib): each of the 32
-  refinement steps now evaluates one new periapsis radius instead of two.
-- **SOI iteration freeze** in `powered_route_objective.c`: the periapsis radius
-  and side flipped between near-equal optima, so many routes oscillated until the
-  60-iteration limit (4,544 solves in one integration run). Freezing the choice
-  after four iterations cuts that to 84, and routes that previously failed the
-  convergence check now converge. The "zero-delta-v DSM equals the plain route"
-  check passes on every date pair again.
-
-| Case | After Kepler solver | After both changes |
-|---|---|---|
-| Jupiter, budget 512 | 3.6 s | 2.7 s |
-| Jupiter, budget 2,048 | 10.7 s | 8.2 s |
-| Saturn, budget 512 | 11.8 s | 9.8 s |
-| Coverage run, total wall time | 47.7 s | 37.9 s |
-
-Itinerary counts are unchanged at budget 512 (4,598 Jupiter, 8,908 Saturn). The
-integration test no longer requires rejected-route repairs, because the search
-fixture no longer produces rejections.
+The tables above predate the CPU-side speedups (Kepler solver, SOI iteration
+freeze, golden-section reuse, and related changes). Those changes, their
+before/after timings, and the rejected experiments are in
+[`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md).
