@@ -269,12 +269,29 @@ int continue_to_next_steps_and_check_for_valid_itins(struct ItinStep *curr_step,
 	int step_del = 0;
 	int has_valid_init;
 
+	int group_active = 0;
+	int group_floor = 0;
+	struct Body *group_body = NULL;
+
 	for(int i = 0; i < init_num_nodes-num_of_end_nodes && !itinerary_search_cancelled(NULL); i++) {
 		int idx = i - step_del;
+		int remaining = init_num_nodes - num_of_end_nodes - i;
+		struct Body *body = curr_step->next[idx]->body;
+		// Children are grouped by body; each body group leaves part of the budget for the bodies after it.
+		if(!group_active || body != group_body) {
+			if(group_active) end_powered_seed_share(group_floor);
+			int groups = 1;
+			for(int k = 1; k < remaining; k++)
+				if(curr_step->next[idx + k]->body != curr_step->next[idx + k - 1]->body) groups++;
+			group_floor = begin_powered_seed_share(groups);
+			group_active = 1;
+			group_body = body;
+		}
 		has_valid_init = calc_next_itin_to_target_step(curr_step->next[idx], seq_info, jd_max_arr, max_total_duration, dv_filter);
 		num_valid += has_valid_init;
 		if(!has_valid_init) step_del++;
 	}
+	if(group_active) end_powered_seed_share(group_floor);
 
 	return itinerary_search_cancelled(NULL) || num_valid > 0;
 }

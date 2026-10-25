@@ -20,6 +20,11 @@ typedef struct PoweredSeedSearchStats {
 #define POWERED_EXTRA_SEEDS_PER_DEPARTURE 8
 #define POWERED_SEED_BUDGET_PRESET_COUNT 5
 void begin_powered_seed_search(PoweredSeedSearchStats *stats);
+// Seeds the current subtree may still use (the budget left above the active share floor).
+int get_powered_seed_available(void);
+// Limits the next subtree so that half of the seeds still available stay reserved for the other `shares`-1 siblings.
+int begin_powered_seed_share(int shares);
+void end_powered_seed_share(int previous_floor);
 /* Applies to searches started afterwards; values below 1 are ignored. */
 void set_powered_seed_budget(int seeds);
 int get_powered_seed_budget(void);

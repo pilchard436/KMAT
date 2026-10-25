@@ -103,6 +103,13 @@ applies to searches started afterwards. See
 [`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md#raising-the-seed-budget)
 for measurements.
 
+The budget is shared out as the search descends the route tree. At each step the
+candidate flybys are grouped by body, and a body's subtree may use only about
+half of the seeds still available when later bodies are waiting, so an early,
+expensive family (for example Eve) can no longer starve a later one (for
+example Duna). Unused seeds flow on to the next body. On the Earth to Saturn
+benchmark this gave 9,300 instead of 9,238 itineraries in 21 s instead of 20 s.
+
 New `.itins` search files and `.itin` route files store the search options
 alongside their results. When a saved route is reopened, those settings are
 restored for option-dependent calculations and displays. Older files do not

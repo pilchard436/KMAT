@@ -251,6 +251,24 @@ static void check_powered_seed_budget_presets(void) {
 	set_powered_seed_budget(previous);
 }
 
+static void check_powered_seed_share(void) {
+	begin_powered_seed_search(NULL);
+	int total = get_powered_seed_budget();
+	check_true("a new departure has its whole budget available", get_powered_seed_available() == total);
+	int outer = begin_powered_seed_share(4);
+	int first = get_powered_seed_available();
+	check_true("a share among several bodies leaves seeds for the others", first < total && first >= total / 2);
+	int inner = begin_powered_seed_share(2);
+	check_true("nested shares shrink further", get_powered_seed_available() < first);
+	end_powered_seed_share(inner);
+	check_true("ending a nested share restores the outer limit", get_powered_seed_available() == first);
+	end_powered_seed_share(outer);
+	check_true("ending a share restores the whole budget", get_powered_seed_available() == total);
+	outer = begin_powered_seed_share(1);
+	check_true("a single child gets everything", get_powered_seed_available() == total);
+	end_powered_seed_share(outer);
+}
+
 static double polar_angle(Vector3 position) {
 	double angle = atan2(position.y, position.x);
 	return angle < 0 ? angle + 2 * M_PI : angle;
@@ -755,6 +773,7 @@ int run_itinerary_unit_tests(void) {
 	check_leg_variants();
 	check_resonant_samples();
 	check_powered_seed_budget_presets();
+	check_powered_seed_share();
 	check_conjunction_times();
 	check_itinerary_files();
 	check_search_rejections();

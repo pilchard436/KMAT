@@ -13,6 +13,7 @@
 
 static _Thread_local int extra_seed_budget;
 static _Thread_local int powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
+static _Thread_local int powered_seed_floor;
 static int seeds_per_departure = POWERED_SEEDS_PER_DEPARTURE;
 static _Thread_local PoweredSeedSearchStats *seed_search_stats;
 
@@ -42,7 +43,30 @@ int find_powered_seed_budget_preset(int seeds) {
 void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
 	extra_seed_budget = POWERED_EXTRA_SEEDS_PER_DEPARTURE;
 	powered_seed_budget = seeds_per_departure;
+	powered_seed_floor = 0;
 	seed_search_stats = stats;
+}
+
+int get_powered_seed_available(void) {
+	int available = powered_seed_budget - powered_seed_floor;
+	return available > 0 ? available : 0;
+}
+
+// Limits the following subtree so that half of the seeds still available stay reserved, split equally for the other `shares`-1 siblings.
+// Returns the previous floor for end_powered_seed_share. Reserving only part keeps deep routes searchable.
+int begin_powered_seed_share(int shares) {
+	int previous = powered_seed_floor;
+	if(shares > 1) {
+		int available = get_powered_seed_available();
+		int share = available - (int)((long long)available * (shares - 1) / (2 * shares));
+		if(share < 1 && available > 0) share = 1;
+		powered_seed_floor = powered_seed_budget - share;
+	}
+	return previous;
+}
+
+void end_powered_seed_share(int previous_floor) {
+	powered_seed_floor = previous_floor;
 }
 
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -196,7 +220,8 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 	struct ItinStep *new_steps[max_new_steps];
 	int counter = 0;
 	int seed_budget = extra_seed_budget > 0 ? 2 : 1;
-	if(seed_budget > powered_seed_budget) seed_budget = powered_seed_budget;
+	int seed_available = get_powered_seed_available();
+	if(seed_budget > seed_available) seed_budget = seed_available;
 	if(seed_budget == 0 && seed_search_stats) seed_search_stats->searches_budget_skipped++;
 	int interval_subdivisions = POWERED_FLYBY_SEED_SUBDIVISIONS;
 	PoweredSeedBucket seed_buckets[POWERED_SEED_BUCKETS] = {0};
