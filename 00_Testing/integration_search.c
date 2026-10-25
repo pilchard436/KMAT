@@ -321,9 +321,12 @@ int run_powered_flyby_objective_regression(CelestSystem *system,
 		.flyby_bodies = flyby_bodies,
 		.num_flyby_bodies = 2
 	};
+	// Force exhaustion so the budget accounting is exercised even with a large default budget.
+	set_powered_seed_budget(64);
 	Itin_Calc_Results results = search_for_itineraries(calc_data);
+	set_powered_seed_budget(POWERED_SEEDS_PER_DEPARTURE);
 	if(results.num_deps <= 0 || results.num_itins <= 0) goto cleanup;
-	if(results.powered_seed_stats.seeds_added > POWERED_SEEDS_PER_DEPARTURE ||
+	if(results.powered_seed_stats.seeds_added > 64 ||
 		results.powered_seed_stats.alternatives_added > POWERED_EXTRA_SEEDS_PER_DEPARTURE ||
 		results.powered_seed_stats.searches_budget_skipped == 0) {
 		fprintf(stderr, "Powered search failed its per-departure budget/exhaustion checks\n");

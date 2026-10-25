@@ -135,7 +135,7 @@ int run_coverage_report(void) {
 		return EXIT_FAILURE;
 	}
 	const char *jupiter_flybys[] = {"EARTH", "MARS", "JUPITER"};
-	const int budgets[] = {64, 128, POWERED_SEEDS_PER_DEPARTURE, 2048};
+	const int budgets[] = {64, 128, 512, POWERED_SEEDS_PER_DEPARTURE};
 	int valid = 1;
 	benchmark_coverage = 1;
 	for(size_t i = 0; i < sizeof(budgets) / sizeof(budgets[0]); i++) {

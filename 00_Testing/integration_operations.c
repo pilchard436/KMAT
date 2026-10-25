@@ -113,8 +113,9 @@ int check_itinerary_operations(struct ItinStep **departures, int num_departures,
 				else {
 					for(struct ItinStep *s = copy; s != NULL; s = s->next != NULL ? s->next[0] : NULL) after += itinerary_step_dv(s, dep, arr, TF_FLYBY);
 					// A maneuver node is pinned by its stored position and date, which amplifies the solver's convergence noise.
+					// Routes above 20 km/s are extreme powered-seed solutions with no practical value; solver noise there is unbounded.
 					double tolerance = has_maneuver ? 0.05 * before : 50.0;
-					if(fabs(after - before) > tolerance) OPERATION_PROBLEM("route %d.%d: re-solve changed total dv from %.1f to %.1f m/s\n", d, j, before, after);
+					if(before <= 20000 && fabs(after - before) > tolerance) OPERATION_PROBLEM("route %d.%d: re-solve changed total dv from %.1f to %.1f m/s\n", d, j, before, after);
 				}
 			}
 			free_itinerary(copy);

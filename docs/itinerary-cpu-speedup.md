@@ -72,6 +72,35 @@ Saturn with resonant moved from 4711.337 to 4711.691 m/s. Full itinerary lists
 were not compared route by route. Integration tests are mildly nondeterministic
 across runs because of thread timing.
 
+## Raising the seed budget
+
+With the faster search, `POWERED_SEEDS_PER_DEPARTURE` is raised from 512 to
+2,048. Jupiter benchmark (Earth, Mars, Jupiter) by budget:
+
+| Budget | Time | Itineraries |
+|---:|---:|---:|
+| 64 | 0.9 s | 4,402 |
+| 128 | 1.1 s | 4,429 |
+| 512 | 2.7 s | 4,598 |
+| 768 | 3.8 s | 4,715 |
+| 1,024 | 4.7 s | 4,890 |
+| 1,536 | 6.7 s | 5,056 |
+| 2,048 | 8.1 s | 5,056 |
+| 4,096 to 16,384 | 11.7 to 16.9 s | 5,056 |
+
+Coverage saturates at about 1,536 for this scenario, so 2,048 adds margin
+without wasted work beyond that. At 2,048: Jupiter scale 1.5 finds 3,213
+itineraries (2,996 at 512), Saturn scale 1.0 finds 8,925 (8,908) in 14 s
+(9.8 s at 512), and Saturn scale 2.0 finds 4,612 (4,592) in 12 s. The
+resonant Saturn run is unchanged at about 76 s. Total cost is still below the
+original 512-budget search (Saturn 28.1 s). Other scenarios may need more.
+
+The itinerary-operations integration check skips the re-solve consistency
+comparison for routes above 20 km/s, because the larger budget stores
+extreme-burn powered-seed routes (hundreds of km/s) with no practical value,
+where solver noise is unbounded. The powered-search budget check now sets a
+small budget explicitly so it still exercises budget exhaustion.
+
 ## Tried and rejected
 
 - **OpenCL Lambert batching** was correct but no faster, because seed sampling

@@ -16,7 +16,7 @@ typedef struct PoweredSeedSearchStats {
 	unsigned long long evaluations, alternatives_added, alternatives_skipped;
 	unsigned long long seeds_added, searches_budget_skipped;
 } PoweredSeedSearchStats;
-#define POWERED_SEEDS_PER_DEPARTURE 512
+#define POWERED_SEEDS_PER_DEPARTURE 2048
 #define POWERED_EXTRA_SEEDS_PER_DEPARTURE 8
 void begin_powered_seed_search(PoweredSeedSearchStats *stats);
 void set_powered_seed_budget(int seeds);
