@@ -259,11 +259,15 @@ static gboolean show_stable_tooltip(gpointer data) {
 	return G_SOURCE_REMOVE;
 }
 
+static void schedule_stable_tooltip(StableTooltip *tip) {
+	if(tip->timer_id == 0 && !gtk_widget_get_visible(tip->popover))
+		tip->timer_id = g_timeout_add(500, show_stable_tooltip, tip);
+}
+
 static gboolean on_stable_tooltip_enter(GtkWidget *widget, GdkEventCrossing *event, gpointer data) {
 	StableTooltip *tip = data;
 	// Grab-related crossings follow a click and must not reopen the tooltip.
-	if(event->mode == GDK_CROSSING_NORMAL && tip->timer_id == 0)
-		tip->timer_id = g_timeout_add(500, show_stable_tooltip, tip);
+	if(event->mode == GDK_CROSSING_NORMAL) schedule_stable_tooltip(tip);
 	return FALSE;
 }
 
@@ -321,6 +325,7 @@ void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double
 	StableTooltip *tip = g_object_get_data(G_OBJECT(widget), "stable-tooltip");
 	GdkRectangle pointing_to = {(gint)x, (gint)y, 1, 1};
 	gtk_popover_set_pointing_to(GTK_POPOVER(tip->popover), &pointing_to);
+	schedule_stable_tooltip(tip);
 }
 
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup) {
