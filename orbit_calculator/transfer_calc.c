@@ -6,10 +6,20 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <limits.h>
 
 static int routes_blocked_by_moons;
 
+int get_num_departure_dates(double jd_min_dep, double jd_max_dep, double step_dep_date) {
+	if(!isfinite(jd_min_dep) || !isfinite(jd_max_dep) || !isfinite(step_dep_date) ||
+		jd_max_dep < jd_min_dep || step_dep_date <= 0) return 0;
+	double intervals = floor((jd_max_dep - jd_min_dep) / step_dep_date + 1e-9);
+	if(intervals >= INT_MAX) return 0;
+	return (int)intervals + 1;
+}
+
 static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *calc_data) {
+	increment_calculation_progress();
 	if(calc_data->seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET &&
 		arrival->body != calc_data->seq_info.to_target.arr_body) return 0;
 	struct PorkchopPoint point = create_porkchop_point(arrival,
@@ -122,7 +132,15 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	double filtering_seconds = 0;
 #endif
 
-	int num_deps = (int) (calc_data.jd_max_dep-calc_data.jd_min_dep+1);
+	if(!isfinite(calc_data.step_dep_date) || calc_data.step_dep_date <= 0)
+		calc_data.step_dep_date = 1;
+	int num_deps = get_num_departure_dates(
+		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.step_dep_date);
+	if(num_deps == 0) {
+		set_moon_assist_enabled(previous_moon_assist);
+		set_moon_aware_flybys_enabled(previous_moon_aware);
+		return results;
+	}
 
 	struct ItinStep **departures = (struct ItinStep**) malloc(num_deps * sizeof(struct ItinStep*));
 	for(int i = 0; i < num_deps; i++) departures[i] = calloc(1, sizeof(struct ItinStep));
@@ -165,23 +183,10 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	thread_args.num_profile_bodies = num_profile_bodies;
 #endif
 
-	int initial_body_count = 1;
-	int resonant_samples = 0;
-	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
-		initial_body_count = 0;
-		for(int i = 0; i < calc_data.seq_info.to_target.num_flyby_bodies; i++) {
-			if(calc_data.seq_info.to_target.flyby_bodies[i] != calc_data.seq_info.to_target.dep_body)
-				initial_body_count++;
-			else if(calc_data.seq_info.to_target.allow_resonant)
-				resonant_samples = resonant_departure_sample_count();
-		}
-	}
 	thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
-		.jd_min_dep = calc_data.jd_min_dep,
-		.jd_max_dep = calc_data.jd_max_dep,
-		.total_initial_samples = num_deps * (initial_body_count * NUM_INITIAL_TRANSFERS_PER_BODY + resonant_samples),
-		.has_post_processing = calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET,
-		.search_start_time = progress_clock()
+		.num_departures = num_deps,
+		.phase = TRANSFER_PROGRESS_SEARCH,
+		.phase_transfer_type = calc_data.dv_filter.last_transfer_type
 	};
 	printf("Search window: departure JD %.2f..%.2f, max arrival JD %.2f, max duration %.2f days\n",
 		calc_data.jd_min_dep, calc_data.jd_max_dep, calc_data.jd_max_arr, calc_data.max_duration);
@@ -245,7 +250,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	printf("Recursive search: %.3f summed worker-seconds, %llu Lambert solves\n",
 		recursive_search_seconds, recursive_lambert_calls);
 	for(int body_index = 0; body_index < num_profile_bodies; body_index++)
-		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++)
+		for(int departure_index = 0; departure_index < num_deps; departure_index++)
 			flyby_search_seconds += profiles[departure_index].flyby_stats[body_index].search_seconds;
 	double recursive_route_expansion_seconds = recursive_search_seconds -
 		recursive_end_node_seconds - recursive_dv_pruning_seconds - flyby_search_seconds;
@@ -257,7 +262,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		unsigned long long left_evaluations = 0;
 		unsigned long long right_evaluations = 0;
 		double search_seconds = 0;
-		for(int departure_index = 0; departure_index < (int)(calc_data.jd_max_dep - calc_data.jd_min_dep + 1); departure_index++) {
+		for(int departure_index = 0; departure_index < num_deps; departure_index++) {
 			ItinFlybyProfileStats stats = profiles[departure_index].flyby_stats[body_index];
 			searches += stats.searches;
 			left_evaluations += stats.left_evaluations;
@@ -277,13 +282,15 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	phase_start = progress_clock();
 #endif
+	set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING, TF_FLYBY, 0, num_deps);
 	int valid_departures = 0;
 	for(int i = 0; i < num_deps; i++) {
 		if(departures[i] == NULL || departures[i]->num_next_nodes == 0) {
 			free_itinerary(departures[i]);
-			continue;
+		} else {
+			departures[valid_departures++] = departures[i];
 		}
-		departures[valid_departures++] = departures[i];
+		set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING, TF_FLYBY, i + 1, num_deps);
 	}
 	num_deps = valid_departures;
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
@@ -292,6 +299,8 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	int shared_num_deps = num_deps;
 	struct ItinStep **capture_departures = NULL;
 	if(calculate_both_modes && shared_num_deps > 0) {
+		set_calculation_progress_phase(
+			TRANSFER_PROGRESS_PREPARING_CAPTURE, TF_CAPTURE, 0, shared_num_deps);
 		capture_departures = calloc((size_t)shared_num_deps, sizeof(*capture_departures));
 		if(capture_departures == NULL) {
 			results.capture_calculation_failed = 1;
@@ -305,6 +314,8 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 					results.capture_calculation_failed = 1;
 					break;
 				}
+				set_calculation_progress_phase(
+					TRANSFER_PROGRESS_PREPARING_CAPTURE, TF_CAPTURE, i + 1, shared_num_deps);
 			}
 		}
 	}
@@ -357,14 +368,18 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 		phase_start = progress_clock();
 #endif
+		set_calculation_progress_phase(
+			TRANSFER_PROGRESS_FILTERING, TF_FLYBY, 0, itineraries_before_prune + num_deps);
 		valid_departures = 0;
 		routes_blocked_by_moons = 0;
 		for(int i = 0; i < num_deps; i++) {
 			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
 				free_itinerary(departures[i]);
+				increment_calculation_progress();
 				continue;
 			}
 			departures[valid_departures++] = departures[i];
+			increment_calculation_progress();
 		}
 		num_deps = valid_departures;
 		int itineraries_after_prune = 0;
@@ -391,13 +406,21 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		}
 
 		routes_blocked_by_moons = 0;
+		int capture_itineraries_before_prune = 0;
+		for(int i = 0; i < shared_num_deps; i++)
+			capture_itineraries_before_prune += get_number_of_itineraries(capture_departures[i]);
+		set_calculation_progress_phase(
+			TRANSFER_PROGRESS_FILTERING, TF_CAPTURE, 0,
+			capture_itineraries_before_prune + shared_num_deps);
 		int capture_valid_departures = 0;
 		for(int i = 0; i < shared_num_deps; i++) {
 			if(!prune_invalid_route_leaves(capture_departures[i], &capture_calc_data)) {
 				free_itinerary(capture_departures[i]);
+				increment_calculation_progress();
 				continue;
 			}
 			capture_departures[capture_valid_departures++] = capture_departures[i];
+			increment_calculation_progress();
 		}
 		shared_num_deps = capture_valid_departures;
 		if(shared_num_deps == 0) {
@@ -406,6 +429,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		}
 	}
 
+	set_calculation_progress_phase(TRANSFER_PROGRESS_FINALIZING, TF_BOTH, 0, 0);
 	for(int i = 0; i < num_deps; i++)
 		cache_arrival_dvs_in_tree(departures[i], calc_data.dv_filter.dep_periapsis,
 			calc_data.dv_filter.arr_periapsis);

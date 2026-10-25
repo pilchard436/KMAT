@@ -13,6 +13,25 @@ GObject *lb_mw_msg;
 static gint64 progress_started_at;
 static gint64 last_console_progress_at;
 
+static const char *transfer_progress_mode_name(int transfer_type) {
+	return transfer_type == TF_CAPTURE ? "Capture" :
+		transfer_type == TF_FLYBY ? "Fly-By" : "combined";
+}
+
+static const char *transfer_progress_phase_verb(Transfer_Progress_Phase phase) {
+	switch(phase) {
+		case TRANSFER_PROGRESS_SEARCH: return "Searching";
+		case TRANSFER_PROGRESS_PREPARING:
+		case TRANSFER_PROGRESS_PREPARING_CAPTURE: return "Preparing";
+		case TRANSFER_PROGRESS_SCORING: return "Scoring";
+		case TRANSFER_PROGRESS_REPAIRING: return "Repairing";
+		case TRANSFER_PROGRESS_REFINING: return "Refining";
+		case TRANSFER_PROGRESS_FILTERING: return "Filtering";
+		case TRANSFER_PROGRESS_FINALIZING: return "Finalizing";
+	}
+	return "Working";
+}
+
 
 void init_info_windows(GtkBuilder *builder) {
 	prog_window = gtk_builder_get_object(builder, "progress_window");
@@ -33,30 +52,46 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 	struct Transfer_Calc_Status calc_status = get_current_transfer_calc_status();
 	gint64 now = g_get_monotonic_time();
 	double elapsed_seconds = (double)(now - progress_started_at) / G_USEC_PER_SEC;
-	gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
+	if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING)
+		gtk_progress_bar_pulse(GTK_PROGRESS_BAR(tf_prog_bar));
+	else
+		gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(tf_prog_bar), calc_status.progress);
 	char progress_text[32];
-	g_snprintf(progress_text, sizeof(progress_text), "%.0f%%", calc_status.progress * 100);
+	if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING)
+		g_snprintf(progress_text, sizeof(progress_text), "Finishing");
+	else
+		g_snprintf(progress_text, sizeof(progress_text), "%d%%", (int)(calc_status.progress * 100));
 	gtk_progress_bar_set_text(GTK_PROGRESS_BAR(tf_prog_bar), progress_text);
 	char s[256];
-	if(get_thread_counter(3) != 0)
-		sprintf(s, "Ending calculations: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
-			elapsed_seconds,
-			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
-	else if(calc_status.post_processing)
-		sprintf(s, "Scoring and refining routes: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
-			elapsed_seconds,
-			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
-	else
-		sprintf(s, "Search active: %.1f s\nDeparture dates: %d / %d complete\nItineraries found: %d",
-			elapsed_seconds,
-			calc_status.num_deps, (int) calc_status.jd_diff, calc_status.num_itins);
+	if(get_thread_counter(3) != 0) {
+		g_snprintf(s, sizeof(s),
+			"Cancellation requested; finishing active work: %.1f s\n%d workers active; %d itineraries found",
+			elapsed_seconds, calc_status.num_deps_active, calc_status.num_itins);
+	} else if(calc_status.phase == TRANSFER_PROGRESS_SEARCH) {
+		g_snprintf(s, sizeof(s),
+			"Searching transfers: %d / %d departure dates complete\nElapsed: %.1f s; %d workers active; %d itineraries found",
+			calc_status.phase_done, calc_status.phase_total, elapsed_seconds,
+			calc_status.num_deps_active, calc_status.num_itins);
+	} else if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING) {
+		g_snprintf(s, sizeof(s),
+			"Finalizing results; route checks and data preparation are still running\nElapsed: %.1f s; %d workers active; %d itineraries found",
+			elapsed_seconds, calc_status.num_deps_active, calc_status.num_itins);
+	} else {
+		g_snprintf(s, sizeof(s), "%s %s routes: %d / %d complete\nElapsed: %.1f s; departure dates: %d / %d; %d itineraries found",
+			transfer_progress_phase_verb(calc_status.phase),
+			transfer_progress_mode_name(calc_status.phase_transfer_type),
+			calc_status.phase_done, calc_status.phase_total, elapsed_seconds,
+			calc_status.num_deps, calc_status.total_departures, calc_status.num_itins);
+	}
 	gtk_label_set_text(GTK_LABEL(lb_prog_info), s);
 	if(now - last_console_progress_at >= G_USEC_PER_SEC) {
 		char console_status[160];
-		g_snprintf(console_status, sizeof(console_status),
-			"Search %.0f s: %d/%d dates complete, %d active",
-			elapsed_seconds, calc_status.num_deps, (int)calc_status.jd_diff,
-			calc_status.num_deps_active);
+		if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING)
+			g_snprintf(console_status, sizeof(console_status), "Finalizing results");
+		else
+			g_snprintf(console_status, sizeof(console_status), "%s: %d/%d complete",
+				transfer_progress_phase_verb(calc_status.phase),
+				calc_status.phase_done, calc_status.phase_total);
 		show_progress(console_status, calc_status.progress, 1);
 		last_console_progress_at = now;
 	}
@@ -66,6 +101,7 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 
 void init_sc_ic_progress_window() {
 	gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(tf_prog_bar), TRUE);
+	gtk_progress_bar_set_pulse_step(GTK_PROGRESS_BAR(tf_prog_bar), 0.05);
 	progress_started_at = g_get_monotonic_time();
 	last_console_progress_at = progress_started_at;
 	gtk_widget_set_visible(GTK_WIDGET(prog_window), 1);
@@ -110,4 +146,3 @@ G_MODULE_EXPORT gboolean on_hide_msg_window() {
 G_MODULE_EXPORT void on_msg_window_ok() {
 	gtk_widget_set_visible(GTK_WIDGET(msg_window), 0);
 }
-

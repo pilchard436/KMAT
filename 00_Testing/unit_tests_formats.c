@@ -1,4 +1,7 @@
 #include "unit_tests.h"
+#include "orbit_calculator/transfer_calc.h"
+#include "orbit_calculator/transfer_search_internal.h"
+#include "tools/thread_pool.h"
 
 void run_formats_tests(void) {
     const double pi = 3.14159265358979323846;
@@ -22,6 +25,36 @@ void run_formats_tests(void) {
     check_true("date format accepts an ISO day of the right shape", is_string_valid_date_format("2024-02-30", DATE_ISO) == 1);
     check_true("date format accepts Kerbal 3-042", is_string_valid_date_format("3-042", DATE_KERBAL) == 1);
     check_true("date format rejects slashes in ISO", is_string_valid_date_format("2024/02/29", DATE_ISO) == 0);
+    double kerbin_start = convert_date_JD((Datetime) {1, 0, 1, 0, 0, 0, DATE_KERBAL});
+    double kerbin_end = convert_date_JD((Datetime) {2, 0, 2, 0, 0, 0, DATE_KERBAL});
+    expect_int("Kerbin departure range samples every calendar day",
+        get_num_departure_dates(kerbin_start, kerbin_end, 0.25), 428);
+    expect_datetime("Kerbin departure grid includes the selected end date",
+        convert_JD_date(kerbin_start + 427 * 0.25, DATE_KERBAL),
+        (Datetime) {2, 0, 2, 0, 0, 0, DATE_KERBAL}, tolerance);
+    expect_int("Earth-day departure range keeps daily sampling",
+        get_num_departure_dates(100, 102, 1), 3);
+
+    prepare_thread_pool_counters();
+    thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info) {
+        .num_departures = 10
+    };
+    incr_thread_counter_by_amount(1, 4);
+    Transfer_Calc_Status progress_status = get_current_transfer_calc_status();
+    expect_near("search progress tracks completed departure dates",
+        progress_status.progress, 0.4, tolerance);
+    set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING, TF_CAPTURE, 3, 8);
+    progress_status = get_current_transfer_calc_status();
+    expect_near("scoring progress tracks completed routes",
+        progress_status.progress, 0.375, tolerance);
+    expect_int("scoring progress reports the Capture mode",
+        progress_status.phase_transfer_type, TF_CAPTURE);
+    set_calculation_progress_phase(TRANSFER_PROGRESS_FINALIZING, TF_BOTH, 0, 0);
+    progress_status = get_current_transfer_calc_status();
+    expect_int("finalization is reported as a separate progress phase",
+        progress_status.phase, TRANSFER_PROGRESS_FINALIZING);
+    thread_progress_and_prop_info = (struct Thread_Progress_and_Prop_Info){0};
+    prepare_thread_pool_counters();
 
     Body departure_body = {.name = "Earth"};
     Body arrival_body = {.name = "Mars"};

@@ -36,7 +36,9 @@ calculator's search configuration:
 - **System and bodies:** the selected system/central body, departure body,
   arrival body, and allowed intermediate flyby bodies.
 - **Departure window:** the earliest and latest departure dates are converted
-  to Julian dates. The search uses one-day increments through this range.
+  to Julian dates. The search advances by one day in the selected calendar:
+  one Earth day for ISO dates, and one Kerbin day (six hours, or 0.25 Earth
+  days) for Kerbin dates.
 - **Arrival/time limit:** the radio selection determines which limit is used:
   - With **maximum arrival date**, that date is the arrival cutoff. The maximum
     duration is derived from the earliest departure date to that cutoff.
@@ -108,7 +110,12 @@ backward-compatible with earlier `.itin` files.
 
 After preparing the inputs, the GUI disables the Itinerary Calculator window,
 initializes progress tracking, and starts a worker thread. A progress window
-reports search progress while the worker performs the calculation.
+reports search progress while the worker performs the calculation. The progress
+bar tracks the current phase's completed work (departure dates, scored routes,
+refined routes, or filtered routes). The percentage restarts when the phase
+changes; the status text names the active phase and its completed/total count.
+Final result preparation is shown as an indeterminate animation because its
+remaining duration cannot be measured reliably.
 
 For each departure date, the search:
 

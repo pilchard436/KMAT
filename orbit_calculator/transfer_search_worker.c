@@ -28,7 +28,9 @@ void *calc_itins_from_departure(void *args) {
 	struct ItinStep **departures = thread_args->departures;
 	struct Dv_Filter dv_filter = calc_data->dv_filter;
 	double jd_min_dep = calc_data->jd_min_dep;
-	double jd_max_dep = calc_data->jd_max_dep;
+	double step_dep_date = calc_data->step_dep_date;
+	int total_departures = get_num_departure_dates(
+		calc_data->jd_min_dep, calc_data->jd_max_dep, step_dep_date);
 	double max_total_duration = calc_data->max_duration;
 
 	enum ItinSequenceInfoType itin_seq_type = calc_data->seq_info.to_target.type;
@@ -62,16 +64,14 @@ void *calc_itins_from_departure(void *args) {
 
 	// index in departure array (iterated over)
 	int index = get_incr_thread_counter(0);
-	double jd_diff = jd_max_dep - jd_min_dep + 1;
-
-	double jd_dep = jd_min_dep + index;
 	struct ItinStep *curr_step;
 	OSV osv_body0, osv_body1;
 
-	while(jd_dep <= jd_max_dep && get_thread_counter(3) == 0) {
+	while(index < total_departures && get_thread_counter(3) == 0) {
+		double jd_dep = jd_min_dep + index * step_dep_date;
 		begin_powered_seed_search(&thread_args->seed_stats[index]);
 		incr_thread_counter_by_amount(4, 1);
-		show_departure_progress(jd_diff);
+		show_departure_progress(total_departures);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 		Itin_Search_Profile *profile = &thread_args->profiles[index];
 		itin_search_profile_tls = profile;
@@ -98,7 +98,6 @@ void *calc_itins_from_departure(void *args) {
 		Body *next_step_body;
 		int num_next_bodies = itin_seq_type == ITIN_SEQ_INFO_TO_TARGET ? num_flyby_bodies : 1;
 		int next_step_id = 0;
-		int pending_progress_samples = 0;
 
 		for(int i = 0; i < num_next_bodies && !itinerary_search_cancelled(NULL); i++) {
 			if(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET) {
@@ -149,10 +148,6 @@ void *calc_itins_from_departure(void *args) {
 #endif
 				Lambert3 tf = calc_leg_variant_lambert(system->cb, osv_body0.r, osv_body1.r,
 					(jd_arr - jd_dep) * 86400, leg_variant, itinerary_search_cancelled, NULL);
-				if(++pending_progress_samples >= 10) {
-					incr_thread_counter_by_amount(INITIAL_SAMPLE_PROGRESS_COUNTER, pending_progress_samples);
-					pending_progress_samples = 0;
-				}
 				if(itinerary_search_cancelled(NULL)) break;
 				if(resonant_leg && (tf.success == LAMBERT_FAIL_NAN || tf.success == LAMBERT_FAIL_ECC ||
 					tf.success == LAMBERT_MAX_ITERATIONS)) continue;
@@ -194,10 +189,6 @@ void *calc_itins_from_departure(void *args) {
 				curr_step->num_next_nodes = 0;
 
 				next_step_id++;
-			}
-			if(pending_progress_samples > 0) {
-				incr_thread_counter_by_amount(INITIAL_SAMPLE_PROGRESS_COUNTER, pending_progress_samples);
-				pending_progress_samples = 0;
 			}
 		}
 
@@ -243,9 +234,8 @@ void *calc_itins_from_departure(void *args) {
 		incr_thread_counter_by_amount(2, get_number_of_itineraries(get_first(curr_step)));
 		if(get_thread_counter(3) == 0) get_incr_thread_counter(1);
 		incr_thread_counter_by_amount(4, -1);
-		show_departure_progress(jd_diff);
+		show_departure_progress(total_departures);
 		index = get_incr_thread_counter(0);
-		jd_dep = jd_min_dep + index;
 	}
 	begin_powered_seed_search(NULL);
 	set_moon_assist_enabled(previous_moon_assist);

@@ -1,5 +1,6 @@
 #include "powered_route.h"
 #include "search_cancel.h"
+#include "transfer_search_internal.h"
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -227,15 +228,23 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		calc_data->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET) return 0;
 	if(itinerary_search_cancelled(NULL)) return 0;
 	int num_itineraries = 0;
-	for(int i = 0; i < num_departures && !itinerary_search_cancelled(NULL); i++)
+	set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING,
+		calc_data->dv_filter.last_transfer_type, 0, num_departures * 2);
+	for(int i = 0; i < num_departures && !itinerary_search_cancelled(NULL); i++) {
 		num_itineraries += get_number_of_itineraries(departures[i]);
+		set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING,
+			calc_data->dv_filter.last_transfer_type, i + 1, num_departures * 2);
+	}
 	if(itinerary_search_cancelled(NULL)) return 0;
 	if(num_itineraries <= 0) return 0;
 	struct ItinStep **arrivals = malloc((size_t)num_itineraries * sizeof(*arrivals));
 	if(arrivals == NULL) return 0;
 	int arrival_count = 0;
-	for(int i = 0; i < num_departures; i++)
+	for(int i = 0; i < num_departures; i++) {
 		store_itineraries_in_array(departures[i], arrivals, &arrival_count);
+		set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING,
+			calc_data->dv_filter.last_transfer_type, num_departures + i + 1, num_departures * 2);
+	}
 
 	PoweredRouteCandidate **candidates = calloc((size_t)POWERED_ROUTE_REFINEMENT_LIMIT +
 		POWERED_CHALLENGE_SLOTS, sizeof(*candidates));
@@ -252,12 +261,12 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 	int routes_considered = 0;
 	int routes_valid = 0;
 	objective_calls = 0;
-	int progress_total = arrival_count + POWERED_REFINE_PROGRESS_WEIGHT *
-		(POWERED_REPAIR_SLOTS + route_limit + POWERED_CHALLENGE_SLOTS);
-	incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, progress_total);
+	set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING,
+		calc_data->dv_filter.last_transfer_type, 0, arrival_count);
 	double exact_scoring_start = wall_seconds();
 	for(int point_index = 0; point_index < arrival_count && !itinerary_search_cancelled(NULL); point_index++) {
-		if((point_index & 255) == 255) incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, 256);
+		set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING,
+			calc_data->dv_filter.last_transfer_type, point_index, arrival_count);
 		if(get_num_of_itin_layers(get_first(arrivals[point_index])) < 3) continue;
 		routes_considered++;
 		PoweredRouteCandidate *candidate = calloc(1, sizeof(*candidate));
@@ -289,15 +298,22 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 			&top_count, candidates, top_costs, &excluded))
 			retain_excluded(&excluded, candidate);
 	}
+	if(!itinerary_search_cancelled(NULL))
+		set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING,
+			calc_data->dv_filter.last_transfer_type, arrival_count, arrival_count);
 	free(arrivals);
 
 	/* Repaired routes compete by full-mission cost; user limits are enforced by evaluate_route. */
 	if(stats != NULL) stats->initial_rejections = repair_pool->total;
+	int repair_count = 0;
+	for(int slot = 0; slot < POWERED_REPAIR_SLOTS; slot++)
+		if(repair_pool->slots[slot] != NULL) repair_count++;
+	set_calculation_progress_phase(TRANSFER_PROGRESS_REPAIRING,
+		calc_data->dv_filter.last_transfer_type, 0, repair_count);
 	for(int slot = 0; slot < POWERED_REPAIR_SLOTS && !itinerary_search_cancelled(NULL); slot++) {
 		PoweredRouteCandidate *candidate = repair_pool->slots[slot];
 		if(candidate == NULL) continue;
 		repair_pool->slots[slot] = NULL;
-		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats != NULL) stats->repairs_attempted++;
 		objective_budget = POWERED_REPAIR_OBJECTIVES_PER_ROUTE - 1;
 		repair_candidate_timing(candidate, calc_data, &repair_pool->random);
@@ -310,6 +326,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		objective_budget = -1;
 		if(!isfinite(verified) || verified >= DBL_MAX) {
 			destroy_candidate(candidate);
+			increment_calculation_progress();
 			continue;
 		}
 		candidate->best_total_dv = candidate->original_total_dv = verified;
@@ -320,6 +337,7 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 			if(stats != NULL && verified < stats->best_initial_total_dv)
 				stats->best_initial_total_dv = verified;
 		} else retain_excluded(&excluded, candidate);
+		increment_calculation_progress();
 	}
 	for(int slot = 0; slot < POWERED_REPAIR_SLOTS; slot++)
 		destroy_candidate(repair_pool->slots[slot]);
@@ -347,14 +365,8 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 
 	int improvements = 0;
 	int candidate_index = 0;
-	// Replace the early estimate with the work that is actually left: fewer routes may have reached refinement than
-	// the limit allows, and deep-space maneuver searches cost many times a plain refinement.
-	int dsm_progress_units = POWERED_REFINE_PROGRESS_WEIGHT * POWERED_DSM_OBJECTIVES_PER_ROUTE / POWERED_OBJECTIVES_PER_ROUTE;
-	int planned_dsm_routes = calc_data->allow_dsm ? (top_count < POWERED_DSM_ROUTE_LIMIT ? top_count : POWERED_DSM_ROUTE_LIMIT) : 0;
-	int planned_total = get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) + POWERED_REFINE_PROGRESS_WEIGHT * top_count +
-		dsm_progress_units * planned_dsm_routes;
-	progress_total = planned_total;
-	incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, planned_total - get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER));
+	set_calculation_progress_phase(TRANSFER_PROGRESS_REFINING,
+		calc_data->dv_filter.last_transfer_type, 0, top_count);
 	double timing_refinement_start = wall_seconds();
 	int multi_start_routes = 0;
 	int resonant_dsm_routes = 0;
@@ -376,7 +388,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 		multi_start_routes += extra_starts;
 		objective_budget = POWERED_OBJECTIVES_PER_ROUTE;
 		int optimized = optimize_candidate(candidate, calc_data, timing_start_count);
-		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, POWERED_REFINE_PROGRESS_WEIGHT);
 		if(stats && objective_budget == 0) stats->refinement_budgets_exhausted++;
 		objective_budget = -1;
 		// Resonant routes need a maneuver to be useful but rarely rank in the overall top, so they get extra slots.
@@ -390,11 +401,6 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 			objective_budget = POWERED_DSM_OBJECTIVES_PER_ROUTE;
 			optimize_candidate_dsm(candidate, calc_data);
 			objective_budget = -1;
-			incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER, dsm_progress_units);
-			if(candidate_index >= POWERED_DSM_ROUTE_LIMIT) {
-				incr_thread_counter_by_amount(POWERED_PROGRESS_TOTAL_COUNTER, dsm_progress_units);
-				progress_total += dsm_progress_units;
-			}
 			if(stats != NULL) {
 				stats->dsm_routes_optimized++;
 				if(candidate->dsms != NULL) {
@@ -424,13 +430,14 @@ int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departur
 					stats->best_delta_v_saving = saving;
 			}
 		}
+		set_calculation_progress_phase(TRANSFER_PROGRESS_REFINING,
+			calc_data->dv_filter.last_transfer_type, candidate_index + 1, top_count);
 	}
+	set_calculation_progress_phase(TRANSFER_PROGRESS_FINALIZING,
+		calc_data->dv_filter.last_transfer_type, 0, 0);
 	for(int i = 0; i < top_count; i++)
 		destroy_candidate(candidates[i]);
 	free(candidates);
-	if(progress_total > get_thread_counter(POWERED_PROGRESS_DONE_COUNTER))
-		incr_thread_counter_by_amount(POWERED_PROGRESS_DONE_COUNTER,
-			progress_total - get_thread_counter(POWERED_PROGRESS_DONE_COUNTER));
 	if(stats != NULL) {
 		stats->routes_improved = improvements;
 		stats->timing_refinement_seconds = wall_seconds() - timing_refinement_start;

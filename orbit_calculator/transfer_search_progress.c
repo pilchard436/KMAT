@@ -25,52 +25,44 @@ void show_departure_progress(double total_departures) {
 	show_progress(status, calc_status.progress, 1);
 }
 
+void set_calculation_progress_phase(Transfer_Progress_Phase phase, int transfer_type,
+		int phase_done, int phase_total) {
+	thread_progress_and_prop_info.phase = phase;
+	thread_progress_and_prop_info.phase_transfer_type = transfer_type;
+	thread_progress_and_prop_info.phase_done = phase_done;
+	thread_progress_and_prop_info.phase_total = phase_total;
+}
+
+void increment_calculation_progress(void) {
+	if(thread_progress_and_prop_info.phase_done < thread_progress_and_prop_info.phase_total)
+		thread_progress_and_prop_info.phase_done++;
+}
+
 struct Transfer_Calc_Status get_current_transfer_calc_status() {
-	double jd_diff = thread_progress_and_prop_info.jd_max_dep-thread_progress_and_prop_info.jd_min_dep+1;
+	int total_departures = thread_progress_and_prop_info.num_departures;
 	int num_deps = get_thread_counter(1);
 	int num_deps_started = get_thread_counter(0);
 	int num_deps_active = get_thread_counter(4);
-	int initial_samples = get_thread_counter(INITIAL_SAMPLE_PROGRESS_COUNTER);
-	if(jd_diff > 0 && num_deps_started > jd_diff) num_deps_started = (int)jd_diff;
-	double completed_date_progress = jd_diff > 0 ? fmin(1, (double)num_deps / jd_diff) : 0;
-	double initial_sample_progress = thread_progress_and_prop_info.total_initial_samples > 0 ?
-		fmin(1, (double)initial_samples / thread_progress_and_prop_info.total_initial_samples) :
-		completed_date_progress;
-	double progress = 0.75 * initial_sample_progress + 0.25 * completed_date_progress;
-	if(completed_date_progress >= 1) progress = 1;
-	int post_processing = thread_progress_and_prop_info.has_post_processing && completed_date_progress >= 1;
-	if(thread_progress_and_prop_info.has_post_processing) {
-		// Share of the bar for scoring/refinement, predicted from the route count and elapsed search time.
-		double now = progress_clock();
-		if(post_processing && thread_progress_and_prop_info.search_end_time == 0)
-			thread_progress_and_prop_info.search_end_time = now;
-		double search_fraction = post_processing ? 1 : fmax(progress, 0.05);
-		double search_seconds = (post_processing ? thread_progress_and_prop_info.search_end_time : now) -
-			thread_progress_and_prop_info.search_start_time;
-		double predicted_post_seconds = ((double)get_thread_counter(2) / search_fraction +
-			POWERED_PROGRESS_REFINE_UNITS) * POWERED_PROGRESS_SECONDS_PER_UNIT;
-		double predicted_search_seconds = search_seconds / search_fraction;
-		double post_share = predicted_post_seconds / (predicted_search_seconds + predicted_post_seconds);
-		if(post_processing) {
-			int post_total = get_thread_counter(POWERED_PROGRESS_TOTAL_COUNTER);
-			double post_progress = post_total > 0 ?
-				fmin(1, (double)get_thread_counter(POWERED_PROGRESS_DONE_COUNTER) / post_total) : 0;
-			progress = (1 - post_share) + post_share * post_progress;
-		} else {
-			progress *= 1 - post_share;
-		}
-		// Estimates shift as the search proceeds; the bar must never move backwards.
-		progress = fmax(progress, thread_progress_and_prop_info.max_progress);
-		thread_progress_and_prop_info.max_progress = progress;
-	}
+	if(total_departures > 0 && num_deps_started > total_departures) num_deps_started = total_departures;
+	Transfer_Progress_Phase phase = thread_progress_and_prop_info.phase;
+	int phase_done = phase == TRANSFER_PROGRESS_SEARCH ? num_deps :
+		thread_progress_and_prop_info.phase_done;
+	int phase_total = phase == TRANSFER_PROGRESS_SEARCH ? total_departures :
+		thread_progress_and_prop_info.phase_total;
+	double progress = phase_total > 0 ?
+		fmin(1, (double)phase_done / phase_total) :
+		phase == TRANSFER_PROGRESS_FINALIZING ? 0 : 1;
 
 	return (struct Transfer_Calc_Status) {
 		.num_itins = get_thread_counter(2),
 		.num_deps = num_deps,
 		.num_deps_started = num_deps_started,
 		.num_deps_active = num_deps_active,
-		.jd_diff = jd_diff,
-		.progress = progress,
-		.post_processing = post_processing
+		.total_departures = total_departures,
+		.phase = phase,
+		.phase_done = phase_done,
+		.phase_total = phase_total,
+		.phase_transfer_type = thread_progress_and_prop_info.phase_transfer_type,
+		.progress = progress
 	};
 }

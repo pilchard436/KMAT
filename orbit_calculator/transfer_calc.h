@@ -36,6 +36,8 @@ typedef struct Itin_Calc_Data {
 	ItinSearchOptions search_options;
 } Itin_Calc_Data;
 
+int get_num_departure_dates(double jd_min_dep, double jd_max_dep, double step_dep_date);
+
 typedef struct Itin_Calc_Results {
 	struct ItinStep **departures;
 	int num_deps, num_nodes, num_itins;
@@ -56,14 +58,28 @@ typedef struct Itin_Calc_Results {
 	Itin_Rejection_Counts rejections;
 } Itin_Calc_Results;
 
+typedef enum Transfer_Progress_Phase {
+	TRANSFER_PROGRESS_SEARCH,
+	TRANSFER_PROGRESS_PREPARING,
+	TRANSFER_PROGRESS_PREPARING_CAPTURE,
+	TRANSFER_PROGRESS_SCORING,
+	TRANSFER_PROGRESS_REPAIRING,
+	TRANSFER_PROGRESS_REFINING,
+	TRANSFER_PROGRESS_FILTERING,
+	TRANSFER_PROGRESS_FINALIZING
+} Transfer_Progress_Phase;
+
 typedef struct Transfer_Calc_Status {
 	int num_itins;
 	int num_deps;
 	int num_deps_started;
 	int num_deps_active;
-	double jd_diff;
+	int total_departures;
+	Transfer_Progress_Phase phase;
+	int phase_done;
+	int phase_total;
+	int phase_transfer_type;
 	double progress;
-	int post_processing;
 } Transfer_Calc_Status;
 
 Itin_Calc_Results search_for_itineraries(Itin_Calc_Data calc_data);

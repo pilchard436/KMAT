@@ -96,7 +96,8 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.calc_acc.fb_finder = 1;
 
 	ic_calc_data.num_deps_per_date = 500;
-	ic_calc_data.step_dep_date = 1;
+	ic_calc_data.step_dep_date =
+		get_settings_datetime_type() == DATE_KERBAL ? 0.25 : 1;
 	ic_calc_data.max_num_waiting_orbits = 0;
 
 	// Make sure arrival body is a fly-by body
