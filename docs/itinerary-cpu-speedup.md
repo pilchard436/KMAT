@@ -112,6 +112,15 @@ small budget explicitly so it still exercises budget exhaustion.
   7% typical), and trimming it would change which seeds are chosen.
 - **Worker load balancing**: CPU utilization was 84% over a full run, so at
   most about 16% could be recovered.
+- **Burn-ranked seed spending**: once under a quarter of a departure's budget
+  was left, skipping seeds whose burn exceeded 3x the cheapest seen plus
+  200 m/s raised Saturn coverage from 8,982 to 10,903 itineraries, but the
+  full Earth to Saturn run took 47 s instead of 21 s, best delta-v got worse
+  in one scaled case, and the integration tests lost most of their distinct
+  body sequences. Reverted.
+- **Equal split of the budget over every child node** (instead of over
+  bodies) starved deep routes: distinct body sequences fell from 300 to 33 in
+  one integration test. The body-level reserve is used instead.
 
 ## Remaining options
 
