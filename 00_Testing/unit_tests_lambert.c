@@ -26,6 +26,23 @@ static void run_orbit_propagation_tests(void) {
     }
     expect_near("elliptic propagation reaches the requested time since periapsis", worst_time_error, 0, 1e-2);
     expect_near("elliptic propagation over one period returns the true anomaly", worst_period_error, 0, 1e-6);
+
+    struct CelestSystem system = {.ut0 = 0};
+    sun.system = &system;
+    double worst_position_error = 0, worst_velocity_error = 0;
+    for(int e_index = 0; e_index < 6; e_index++) {
+        Orbit orbit = constr_orbit_from_elements(2.279e11, eccentricities[e_index], 0.03, 0.8, 5.0, 1.0, &sun);
+        for(int day = -300; day <= 3000; day += 17) {
+            OSV fast = osv_from_elements(orbit, day);
+            OSV reference = osv_from_orbit(propagate_orbit_time(orbit, day * 86400.0));
+            double position_error = mag_vec3(subtract_vec3(fast.r, reference.r)) / mag_vec3(reference.r);
+            double velocity_error = mag_vec3(subtract_vec3(fast.v, reference.v)) / mag_vec3(reference.v);
+            if(position_error > worst_position_error) worst_position_error = position_error;
+            if(velocity_error > worst_velocity_error) worst_velocity_error = velocity_error;
+        }
+    }
+    expect_near("osv_from_elements matches propagated orbit position", worst_position_error, 0, 1e-5);
+    expect_near("osv_from_elements matches propagated orbit velocity", worst_velocity_error, 0, 1e-5);
 }
 
 void run_lambert_tests(void) {
