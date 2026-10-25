@@ -13,6 +13,7 @@ void set_stable_tooltip(GtkWidget *widget, const char *text);
 // Anchor the tooltip to widget-local pointer coordinates.
 void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double y);
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup);
+void set_stable_tooltip_for_entry_icon(GtkEntry *entry, GtkEntryIconPosition icon_position, const char *text);
 
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry);
 void remove_combobox_last_entry(GtkComboBox *combo_box);

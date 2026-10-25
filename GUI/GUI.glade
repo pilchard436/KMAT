@@ -659,7 +659,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_minus_year">
                                     <property name="label" translatable="yes">-y</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one year</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -667,7 +666,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_minus_month">
                                     <property name="label" translatable="yes">-1mo</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one month</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -675,7 +673,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_minus_week">
                                     <property name="label" translatable="yes">-w</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one week</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -683,7 +680,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_plus_week">
                                     <property name="label" translatable="yes">+w</property>
-                                    <property name="tooltip-text" translatable="yes">Add one week</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -691,7 +687,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_plus_month">
                                     <property name="label" translatable="yes">+m</property>
-                                    <property name="tooltip-text" translatable="yes">Add one month</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -699,7 +694,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxarr_plus_year">
                                     <property name="label" translatable="yes">+y</property>
-                                    <property name="tooltip-text" translatable="yes">Add one year</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -750,7 +744,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_minus_year">
                                     <property name="label" translatable="yes">-y</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one year</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -758,7 +751,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_minus_month">
                                     <property name="label" translatable="yes">-1mo</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one month</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -766,7 +758,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_minus_week">
                                     <property name="label" translatable="yes">-w</property>
-                                    <property name="tooltip-text" translatable="yes">Subtract one week</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -774,7 +765,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_plus_week">
                                     <property name="label" translatable="yes">+w</property>
-                                    <property name="tooltip-text" translatable="yes">Add one week</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -782,7 +772,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_plus_month">
                                     <property name="label" translatable="yes">+m</property>
-                                    <property name="tooltip-text" translatable="yes">Add one month</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -790,7 +779,6 @@ The departure burn is minimized over the orbit.</property>
                                 <child>
                                   <object class="GtkButton" id="btn_ic_maxdep_plus_year">
                                     <property name="label" translatable="yes">+y</property>
-                                    <property name="tooltip-text" translatable="yes">Add one year</property>
                                     <property name="visible">True</property>
                                     <property name="can-focus">True</property>
                                   </object>
@@ -1326,7 +1314,6 @@ The departure burn is minimized over the orbit.</property>
                             <items>
                               <item id="3" translatable="yes">Fly-By + Capture</item>
                             </items>
-                            <property name="tooltip-text" translatable="yes">Both Fly-By and Capture results are calculated together and can be switched in Porkchop Analyzer.</property>
                           </object>
                           <packing>
                             <property name="left-attach">0</property>
@@ -2524,7 +2511,6 @@ The departure burn is minimized over the orbit.</property>
                                 <property name="visible">True</property>
                                 <property name="can-focus">True</property>
                                 <property name="receives-default">True</property>
-                                <property name="tooltip-text" translatable="yes">Adds a small node on the current trajectory that restores the planned encounter periapsis</property>
                                 <signal name="clicked" handler="on_tp_send_ksp_correction" swapped="no"/>
                               </object>
                               <packing>

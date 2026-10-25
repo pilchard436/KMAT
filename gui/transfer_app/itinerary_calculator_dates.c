@@ -93,7 +93,7 @@ void connect_itinerary_date_entry_validation(GtkEntry *entry) {
 	g_signal_connect(entry, "changed", G_CALLBACK(on_date_entry_changed), NULL);
 	g_signal_connect(entry, "focus-out-event", G_CALLBACK(on_date_entry_focus_out), NULL);
 	gtk_entry_set_icon_from_icon_name(entry, GTK_ENTRY_ICON_SECONDARY, "x-office-calendar");
-	gtk_entry_set_icon_tooltip_text(entry, GTK_ENTRY_ICON_SECONDARY, "Select date from calendar");
+	set_stable_tooltip_for_entry_icon(entry, GTK_ENTRY_ICON_SECONDARY, "Select date from calendar");
 	g_signal_connect(entry, "icon-release", G_CALLBACK(gui_date_picker_on_entry_icon_release), NULL);
 	on_date_entry_changed(GTK_EDITABLE(entry), NULL);
 }

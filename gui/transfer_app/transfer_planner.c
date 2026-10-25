@@ -71,6 +71,8 @@ void init_transfer_planner(GtkBuilder *builder) {
 	bt_tp_1m30d10minm = gtk_builder_get_object(builder, "bt_tp_1m30d10minm");
 	bt_tp_1d1minp = gtk_builder_get_object(builder, "bt_tp_1d1minp");
 	bt_tp_1d1minm = gtk_builder_get_object(builder, "bt_tp_1d1minm");
+	set_stable_tooltip(GTK_WIDGET(gtk_builder_get_object(builder, "bt_tp_send_ksp_correction")),
+		"Adds a small node on the current trajectory that restores the planned encounter periapsis");
 	lb_tp_transfer_dv = gtk_builder_get_object(builder, "lb_tp_transfer_dv");
 	lb_tp_total_dv = gtk_builder_get_object(builder, "lb_tp_total_dv");
 	lb_tp_dv_warning = gtk_builder_get_object(builder, "lb_tp_dv_warning");
