@@ -28,9 +28,20 @@ double pa_min_vals[6], pa_max_vals[6];
 
 static GtkWidget *pa_transfer_type_buttons[2];
 static GtkWidget *pa_moon_assist_toggle;
+static GtkWidget *pa_moon_assist_tooltip_anchor;
 static GtkWidget *pa_arrival_filter_label, *pa_duration_filter_label;
 static int pa_setting_transfer_type;
 static int pa_setting_moon_assist;
+static int pa_moon_assist_dv_toggle_available;
+
+static void update_pa_moon_assist_toggle_state(void) {
+	gboolean sensitive = pa_last_transfer_type == TF_CAPTURE &&
+			pa_moon_assist_dv_toggle_available;
+	if(pa_moon_assist_toggle != NULL)
+		gtk_widget_set_sensitive(pa_moon_assist_toggle, sensitive);
+	if(pa_moon_assist_tooltip_anchor != NULL)
+		gtk_event_box_set_above_child(GTK_EVENT_BOX(pa_moon_assist_tooltip_anchor), !sensitive);
+}
 
 enum PaYAxisType pa_yaxis_type = PA_YAXIS_DUR;
 double pa_dep_periapsis = 50e3;
@@ -205,9 +216,14 @@ void pa_set_last_transfer_type(enum LastTransferType type, int locked) {
 	if(pa_moon_assist_toggle != NULL) {
 		pa_setting_moon_assist = 1;
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(pa_moon_assist_toggle), moon_assist_is_active());
-		gtk_widget_set_sensitive(pa_moon_assist_toggle, type == TF_CAPTURE);
 		pa_setting_moon_assist = 0;
 	}
+	update_pa_moon_assist_toggle_state();
+}
+
+void pa_set_moon_assist_dv_toggle_available(int available) {
+	pa_moon_assist_dv_toggle_available = !!available;
+	update_pa_moon_assist_toggle_state();
 }
 
 
@@ -222,12 +238,17 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	pa_dual_capture_num_deps = 0;
 	pa_has_both_modes = 0;
 	pa_porkchop_points = NULL;
+	pa_moon_assist_dv_toggle_available = 0;
 	curr_transfer_pa = NULL;
 	pa_selected_arrival = NULL;
 	reset_pa_porkchop_view();
 	pa_transfer_type_buttons[TF_FLYBY] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_fb"));
 	pa_transfer_type_buttons[TF_CAPTURE] = GTK_WIDGET(gtk_builder_get_object(builder, "rb_pa_cap"));
 	pa_moon_assist_toggle = GTK_WIDGET(gtk_builder_get_object(builder, "cb_pa_moon_assist"));
+	pa_moon_assist_tooltip_anchor =
+			GTK_WIDGET(gtk_builder_get_object(builder, "eb_pa_moon_assist_tooltip"));
+	set_stable_tooltip(pa_moon_assist_tooltip_anchor,
+			"Toggle whether Capture delta-v includes the arrival moon assist saving. This is available only for itineraries calculated with moon assist enabled.");
 	pa_set_last_transfer_type(TF_FLYBY, 0);
 	da_pa_porkchop = gtk_builder_get_object(builder, "da_pa_porkchop");
 	da_pa_preview = gtk_builder_get_object(builder, "da_pa_preview");
@@ -537,6 +558,9 @@ void pa_change_date_type(enum DateType old_date_type, enum DateType new_date_typ
 
 double calc_step_dv_pa(struct ItinStep *step) {
 	if(step == NULL) return 0;
+	if(step->next != NULL && step->num_next_nodes > 0 && step->next[0] != NULL &&
+		step->next[0]->dv_from_prev_valid)
+		return step->next[0]->dv_from_prev;
 	struct ItinStep *departure = get_first(step), *arrival = get_last(step);
 	return itinerary_step_dv(step, departure->body->atmo_alt + pa_dep_periapsis,
 		arrival->body->atmo_alt + pa_arr_periapsis, pa_last_transfer_type);
@@ -544,6 +568,28 @@ double calc_step_dv_pa(struct ItinStep *step) {
 
 double calc_total_dv_pa() {
 	if(curr_transfer_pa == NULL) return 0;
+	struct ItinStep *arrival = get_last(curr_transfer_pa);
+	struct ItinStep *departure = get_first(curr_transfer_pa);
+	if(arrival != NULL && arrival->body != NULL && departure != NULL && departure->body != NULL) {
+		struct ItinArrivalDvCache *cache = &arrival->arrival_dv_cache;
+		struct ItinArrivalDvCache saved_route_values = *cache;
+		double dep_periapsis = departure->body->atmo_alt + pa_dep_periapsis;
+		double arr_periapsis = arrival->body->atmo_alt + pa_arr_periapsis;
+		if(saved_route_values.route_values_valid &&
+			fabs(saved_route_values.dep_periapsis - dep_periapsis) <= 1e-6 &&
+			cache_itinerary_arrival_dvs(arrival, arr_periapsis)) {
+			cache->dv_dep = saved_route_values.dv_dep;
+			cache->dv_dsm = saved_route_values.dv_dsm;
+			cache->dv_flyby = saved_route_values.dv_flyby;
+			cache->dep_periapsis = dep_periapsis;
+			cache->route_values_valid = 1;
+			double total = saved_route_values.dv_dep + saved_route_values.dv_dsm +
+					saved_route_values.dv_flyby;
+			if(pa_last_transfer_type == TF_CAPTURE) total += cache->dv_arr_cap;
+			else if(pa_last_transfer_type == TF_CIRC) total += cache->dv_arr_circ;
+			return total;
+		}
+	}
 	double dv = 0;
 	struct ItinStep *step = get_last(curr_transfer_pa);
 	while(step != NULL) {
@@ -593,8 +639,7 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 	}
 	if(pa_has_both_modes && selected_type != pa_last_transfer_type) {
 		pa_last_transfer_type = selected_type;
-		if(pa_moon_assist_toggle != NULL)
-			gtk_widget_set_sensitive(pa_moon_assist_toggle, selected_type == TF_CAPTURE);
+		update_pa_moon_assist_toggle_state();
 		clear_porkchop_analyzer_analysis();
 		if(selected_type == TF_CAPTURE) {
 			pa_departures = pa_dual_capture_departures;
@@ -604,17 +649,14 @@ G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointe
 			pa_num_deps = pa_dual_flyby_num_deps;
 		}
 		analyze_departure_itins();
-		reset_pa_porkchop_view();
 		update_pa_porkchop_diagram();
 		update_pa_itinerary_preview();
 		return;
 	}
 
 	pa_last_transfer_type = selected_type;
-	if(pa_moon_assist_toggle != NULL)
-		gtk_widget_set_sensitive(pa_moon_assist_toggle, selected_type == TF_CAPTURE);
+	update_pa_moon_assist_toggle_state();
 	if(pa_porkchop_points == NULL) return;
-	reset_pa_porkchop_view();
 	sort_porkchop(pa_porkchop_points, pa_num_itins, pa_last_transfer_type);
 	update_best_itin();
 	update_pa_porkchop_diagram();
@@ -627,20 +669,39 @@ G_MODULE_EXPORT void on_pa_moon_assist_toggled(GtkWidget* widget, gpointer data)
 		pa_last_transfer_type != TF_CAPTURE) return;
 
 	int enabled = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+	if(!pa_moon_assist_dv_toggle_available || pa_porkchop_points == NULL) {
+		fprintf(stderr, "Cannot toggle arrival moon assist: both delta-v values are unavailable\n");
+		pa_setting_moon_assist = 1;
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), moon_assist_is_active());
+		pa_setting_moon_assist = 0;
+		return;
+	}
+	for(int i = 0; i < pa_num_itins; i++) {
+		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
+		if(arrival == NULL || !arrival->arrival_dv_cache.moon_assist_dvs_valid) {
+			fprintf(stderr, "Cannot toggle arrival moon assist: itinerary %d has no cached pair of delta-v values\n", i);
+			pa_setting_moon_assist = 1;
+			gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(widget), moon_assist_is_active());
+			pa_setting_moon_assist = 0;
+			pa_set_moon_assist_dv_toggle_available(0);
+			return;
+		}
+	}
 	if(set_moon_assist_enabled(enabled) == enabled) return;
 	if(pa_analysis_params.calc_data.search_options.known)
 		pa_analysis_params.calc_data.search_options.moon_assist_arrival = enabled;
-	if(pa_porkchop_points == NULL || pa_num_itins <= 0) return;
-
-	int previous_exact_flybys = set_porkchop_exact_flybys(1);
 	for(int i = 0; i < pa_num_itins; i++) {
 		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
-		struct ItinStep *departure = get_first(arrival);
-		pa_porkchop_points[i].data = create_porkchop_point(arrival,
-				departure->body->atmo_alt + pa_dep_periapsis,
-				arrival->body->atmo_alt + pa_arr_periapsis);
+		arrival->arrival_dv_cache.dv_arr_cap = enabled ?
+				arrival->arrival_dv_cache.dv_arr_cap_assisted :
+				arrival->arrival_dv_cache.dv_arr_cap_plain;
+		arrival->arrival_dv_cache.dv_arr_circ = enabled ?
+				arrival->arrival_dv_cache.dv_arr_circ_assisted :
+				arrival->arrival_dv_cache.dv_arr_circ_plain;
+		arrival->arrival_dv_cache.moon_assist_enabled = enabled;
+		pa_porkchop_points[i].data.dv_arr_cap = arrival->arrival_dv_cache.dv_arr_cap;
+		pa_porkchop_points[i].data.dv_arr_circ = arrival->arrival_dv_cache.dv_arr_circ;
 	}
-	set_porkchop_exact_flybys(previous_exact_flybys);
 
 	if(!apply_filter()) {
 		for(int i = 0; i < pa_num_itins; i++) pa_porkchop_points[i].inside_filter = 1;

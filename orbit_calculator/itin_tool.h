@@ -7,9 +7,11 @@
 
 struct ItinArrivalDvCache {
 	double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+	double dv_arr_cap_plain, dv_arr_cap_assisted, dv_arr_circ_plain, dv_arr_circ_assisted;
 	Vector3 incoming_excess;
 	double date, dep_periapsis, arr_periapsis;
 	int moon_assist_enabled;
+	int moon_assist_dvs_valid;
 	int route_values_valid;
 	int valid;
 };
@@ -19,6 +21,8 @@ struct ItinStep {
 	Vector3 r;
 	Vector3 v_arr, v_body, v_dep;
 	double date;
+	double dv_from_prev;
+	int dv_from_prev_valid;
 	struct ItinArrivalDvCache arrival_dv_cache;
 	int num_next_nodes;
 	struct ItinStep *prev;
@@ -93,6 +97,8 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 
 // delta-v of one step of a single itinerary, using the same burns as the itinerary overview texts
 double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type);
+// delta-v for the maneuver from a step to one specific child branch
+double itinerary_transition_dv(struct ItinStep *step, struct ItinStep *next, double dep_periapsis);
 
 // The itinerary modules build on the types above; including this header gives all of them.
 #include "itinerary_tree.h"

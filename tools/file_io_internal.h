@@ -71,6 +71,19 @@ union ItinStepBin {
 		struct ItinStepBinT2 node;
 		double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
 	} t3;
+
+	struct ItinStepBinT4 {
+		struct ItinStepBinT2 node;
+		double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+		double dv_arr_cap_plain, dv_arr_circ_plain;
+	} t4;
+
+	struct ItinStepBinT5 {
+		struct ItinStepBinT2 node;
+		double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+		double dv_arr_cap_plain, dv_arr_circ_plain;
+		double dv_from_prev;
+	} t5;
 };
 
 void store_itin_search_options(FILE *file, const ItinSearchOptions *options);

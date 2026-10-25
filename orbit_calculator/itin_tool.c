@@ -46,7 +46,7 @@ static int arrival_dv_cache_matches(const struct ItinStep *arrival, Vector3 inco
 		cache->incoming_excess.z == incoming_excess.z &&
 		cache->date == arrival->date &&
 		fabs(cache->arr_periapsis - arr_periapsis) <= 1e-6 &&
-		cache->moon_assist_enabled == moon_assist_enabled;
+		(cache->moon_assist_enabled == moon_assist_enabled || cache->moon_assist_dvs_valid);
 }
 
 int cache_itinerary_arrival_dvs(struct ItinStep *arrival, double arr_periapsis) {
@@ -54,26 +54,44 @@ int cache_itinerary_arrival_dvs(struct ItinStep *arrival, double arr_periapsis) 
 
 	Vector3 incoming_excess = subtract_vec3(arrival->v_arr, arrival->v_body);
 	int moon_assist_enabled = moon_assist_is_active();
-	if(arrival_dv_cache_matches(arrival, incoming_excess, arr_periapsis, moon_assist_enabled)) return 1;
+	if(arrival_dv_cache_matches(arrival, incoming_excess, arr_periapsis, moon_assist_enabled)) {
+		if(arrival->arrival_dv_cache.moon_assist_dvs_valid) {
+			arrival->arrival_dv_cache.dv_arr_cap = moon_assist_enabled ?
+					arrival->arrival_dv_cache.dv_arr_cap_assisted :
+					arrival->arrival_dv_cache.dv_arr_cap_plain;
+			arrival->arrival_dv_cache.dv_arr_circ = moon_assist_enabled ?
+					arrival->arrival_dv_cache.dv_arr_circ_assisted :
+					arrival->arrival_dv_cache.dv_arr_circ_plain;
+			arrival->arrival_dv_cache.moon_assist_enabled = moon_assist_enabled;
+		}
+		return 1;
+	}
 
 	double arrival_radius = alt2radius(arrival->body, arr_periapsis);
 	double vinf = mag_vec3(incoming_excess);
-	double dv_arr_cap = dv_capture(arrival->body, arrival_radius, vinf);
-	double dv_arr_circ = dv_circ(arrival->body, arrival_radius, vinf);
+	double dv_arr_cap_plain = dv_capture(arrival->body, arrival_radius, vinf);
+	double dv_arr_circ_plain = dv_circ(arrival->body, arrival_radius, vinf);
+	double dv_arr_cap_assisted = dv_arr_cap_plain;
+	double dv_arr_circ_assisted = dv_arr_circ_plain;
 	if(moon_assist_enabled) {
-		dv_arr_cap = arrival_dv_with_assist(arrival->body, incoming_excess, arrival_radius, 0,
-				dv_arr_cap, arrival->date, NULL);
-		dv_arr_circ = arrival_dv_with_assist(arrival->body, incoming_excess, arrival_radius, 1,
-				dv_arr_circ, arrival->date, NULL);
+		dv_arr_cap_assisted = arrival_dv_with_assist(arrival->body, incoming_excess,
+				arrival_radius, 0, dv_arr_cap_plain, arrival->date, NULL);
+		dv_arr_circ_assisted = arrival_dv_with_assist(arrival->body, incoming_excess,
+				arrival_radius, 1, dv_arr_circ_plain, arrival->date, NULL);
 	}
 
 	arrival->arrival_dv_cache = (struct ItinArrivalDvCache) {
-		.dv_arr_cap = dv_arr_cap,
-		.dv_arr_circ = dv_arr_circ,
+		.dv_arr_cap = moon_assist_enabled ? dv_arr_cap_assisted : dv_arr_cap_plain,
+		.dv_arr_circ = moon_assist_enabled ? dv_arr_circ_assisted : dv_arr_circ_plain,
+		.dv_arr_cap_plain = dv_arr_cap_plain,
+		.dv_arr_cap_assisted = dv_arr_cap_assisted,
+		.dv_arr_circ_plain = dv_arr_circ_plain,
+		.dv_arr_circ_assisted = dv_arr_circ_assisted,
 		.incoming_excess = incoming_excess,
 		.date = arrival->date,
 		.arr_periapsis = arr_periapsis,
 		.moon_assist_enabled = moon_assist_enabled,
+		.moon_assist_dvs_valid = moon_assist_enabled,
 		.valid = 1
 	};
 	return 1;
@@ -83,6 +101,13 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	struct PorkchopPoint pp;
 	pp.arrival = itin;
 	pp.dur = get_itinerary_duration(itin);
+	struct ItinArrivalDvCache saved_route_values = itin->arrival_dv_cache;
+	int reuse_route_values = saved_route_values.route_values_valid &&
+		fabs(saved_route_values.dep_periapsis - dep_periapsis) <= 1e-6;
+	struct ItinStep *first_leg = itin;
+	while(first_leg->prev->prev != NULL)
+		first_leg = first_leg->prev;
+	pp.dep_date = first_leg->prev->date;
 
 	Vector3 arrival_excess = subtract_vec3(itin->v_arr, itin->v_body);
 	if(cache_itinerary_arrival_dvs(itin, arr_periapsis)) {
@@ -95,39 +120,45 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		pp.dv_arr_circ = dv_circ(itin->body, arrival_radius, vinf);
 	}
 
-	pp.dv_dsm = 0;
-	pp.dv_flyby = 0;
-	while(itin->prev->prev != NULL) {
-		if(itin->body == NULL)
-			pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
-		// A DSM right after a flyby must not hide that flyby's burn.
-		if(itin->prev->body != NULL && itin->prev->prev != NULL) {
-			struct ItinStep *flyby = itin->prev;
-			PoweredFlybyResult flyby_result;
-			double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
-			// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
-			int flyby_ok = (porkchop_exact_flybys || moon_aware_flybys_is_active()) ?
-				calculate_flyby_with_moons(flyby->v_arr, itin->v_dep, flyby->v_body, flyby->body,
-					minimum_periapsis, flyby->date, &flyby_result) :
-				calculate_powered_flyby(flyby->v_arr, itin->v_dep, flyby->v_body,
-					flyby->body, minimum_periapsis, &flyby_result);
-			if(flyby_ok)
-				pp.dv_flyby += flyby_result.burn_delta_v;
-			else
-				pp.dv_flyby = HUGE_VAL;
+	if(reuse_route_values) {
+		pp.dv_dep = saved_route_values.dv_dep;
+		pp.dv_dsm = saved_route_values.dv_dsm;
+		pp.dv_flyby = saved_route_values.dv_flyby;
+	} else {
+		pp.dv_dsm = 0;
+		pp.dv_flyby = 0;
+		struct ItinStep *step = itin;
+		while(step->prev->prev != NULL) {
+			if(step->body == NULL)
+				pp.dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+			// A DSM right after a flyby must not hide that flyby's burn.
+			if(step->prev->body != NULL && step->prev->prev != NULL) {
+				struct ItinStep *flyby = step->prev;
+				PoweredFlybyResult flyby_result;
+				double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
+				// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
+				int flyby_ok = (porkchop_exact_flybys || moon_aware_flybys_is_active()) ?
+					calculate_flyby_with_moons(flyby->v_arr, step->v_dep, flyby->v_body, flyby->body,
+						minimum_periapsis, flyby->date, &flyby_result) :
+					calculate_powered_flyby(flyby->v_arr, step->v_dep, flyby->v_body,
+						flyby->body, minimum_periapsis, &flyby_result);
+				if(flyby_ok)
+					pp.dv_flyby += flyby_result.burn_delta_v;
+				else
+					pp.dv_flyby = HUGE_VAL;
+			}
+			step = step->prev;
 		}
-		itin = itin->prev;
-	}
-	// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
-	if(itin->body == NULL && itin->next != NULL && itin->num_next_nodes > 0)
-		pp.dv_dsm += mag_vec3(subtract_vec3(itin->next[0]->v_dep, itin->v_arr));
+		// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
+		if(step->body == NULL && step->next != NULL && step->num_next_nodes > 0)
+			pp.dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
 
-	pp.dep_date = itin->prev->date;
-	Vector3 departure_vinf = subtract_vec3(itin->v_dep, itin->prev->v_body);
-	if(!starting_orbit_departure_dv(itin->prev->body, departure_vinf,
-		alt2radius(itin->prev->body, dep_periapsis), &pp.dv_dep))
-		pp.dv_dep = dv_circ(itin->prev->body, alt2radius(itin->prev->body, dep_periapsis),
-			mag_vec3(departure_vinf));
+		Vector3 departure_vinf = subtract_vec3(step->v_dep, step->prev->v_body);
+		if(!starting_orbit_departure_dv(step->prev->body, departure_vinf,
+			alt2radius(step->prev->body, dep_periapsis), &pp.dv_dep))
+			pp.dv_dep = dv_circ(step->prev->body, alt2radius(step->prev->body, dep_periapsis),
+				mag_vec3(departure_vinf));
+	}
 	pp.arrival->arrival_dv_cache.dv_dep = pp.dv_dep;
 	pp.arrival->arrival_dv_cache.dv_dsm = pp.dv_dsm;
 	pp.arrival->arrival_dv_cache.dv_flyby = pp.dv_flyby;
@@ -329,32 +360,37 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 }
 
 
-double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
-	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
+double itinerary_transition_dv(struct ItinStep *step, struct ItinStep *next, double dep_periapsis) {
+	if(step == NULL || next == NULL) return 0;
 	if(step->body == NULL) {
-		if(step->next == NULL || step->prev == NULL) return 0;
-		return mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+		if(step->prev == NULL) return 0;
+		return mag_vec3(subtract_vec3(next->v_dep, step->v_arr));
 	}
 	if(step->prev == NULL) {
-		Vector3 vinf = subtract_vec3(step->next[0]->v_dep, step->v_body);
+		Vector3 vinf = subtract_vec3(next->v_dep, step->v_body);
 		double departure_dv;
 		if(starting_orbit_departure_dv(step->body, vinf, alt2radius(step->body, dep_periapsis), &departure_dv))
 			return departure_dv;
 		return dv_circ(step->body, alt2radius(step->body, dep_periapsis), mag_vec3(vinf));
 	}
-	if(step->next == NULL) {
-		if(last_transfer_type != TF_CAPTURE && last_transfer_type != TF_CIRC) return 0;
-		if(cache_itinerary_arrival_dvs(step, arr_periapsis))
-			return last_transfer_type == TF_CIRC ?
-					step->arrival_dv_cache.dv_arr_circ : step->arrival_dv_cache.dv_arr_cap;
-		Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
-		double vinf = mag_vec3(excess), radius = alt2radius(step->body, arr_periapsis);
-		return last_transfer_type == TF_CIRC ? dv_circ(step->body, radius, vinf) :
-				dv_capture(step->body, radius, vinf);
-	}
 	PoweredFlybyResult flyby;
 	double minimum_periapsis = flyby_minimum_periapsis(step->body);
-	if(calculate_flyby_with_moons(step->v_arr, step->next[0]->v_dep, step->v_body, step->body, minimum_periapsis, step->date, &flyby))
+	if(calculate_flyby_with_moons(step->v_arr, next->v_dep, step->v_body, step->body, minimum_periapsis, step->date, &flyby))
 		return flyby.burn_delta_v;
 	return HUGE_VAL;
+}
+
+double itinerary_step_dv(struct ItinStep *step, double dep_periapsis, double arr_periapsis, enum LastTransferType last_transfer_type) {
+	if(step == NULL || (step->prev == NULL && step->next == NULL)) return 0;
+	if(step->next != NULL && step->num_next_nodes > 0)
+		return itinerary_transition_dv(step, step->next[0], dep_periapsis);
+	if(step->body == NULL) return 0;
+	if(last_transfer_type != TF_CAPTURE && last_transfer_type != TF_CIRC) return 0;
+	if(cache_itinerary_arrival_dvs(step, arr_periapsis))
+		return last_transfer_type == TF_CIRC ?
+				step->arrival_dv_cache.dv_arr_circ : step->arrival_dv_cache.dv_arr_cap;
+	Vector3 excess = subtract_vec3(step->v_arr, step->v_body);
+	double vinf = mag_vec3(excess), radius = alt2radius(step->body, arr_periapsis);
+	return last_transfer_type == TF_CIRC ? dv_circ(step->body, radius, vinf) :
+			dv_capture(step->body, radius, vinf);
 }

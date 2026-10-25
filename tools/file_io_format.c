@@ -68,7 +68,7 @@ void print_header_data_to_string(ItinStepBinHeaderData header, char *string, siz
 				options.moon_assist_arrival ? "on" : "off",
 				options.allow_resonant ? "on" : "off",
 				options.use_custom_starting_orbit ? "on" : "off");
-		} else if(header.file_type == 8) {
+		} else if(header.file_type >= 8) {
 			append_header_text(string, string_size, "Search options: unavailable\n");
 		}
 

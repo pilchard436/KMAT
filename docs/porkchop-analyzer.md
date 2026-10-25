@@ -27,11 +27,14 @@ boundaries; ordinal calendars also roll from the last day of one year to day
 one of the next. Switching the y-axis between duration and arrival date shows
 the matching filter row; filters in the hidden row are inactive. Switching
 axes preserves the current plot zoom and pan.
+Switching between Fly-By and Capture also preserves the current plot view.
 **Save Selected Itinerary** saves the currently selected route.
 **Select Best in View** selects the lowest-delta-v node in the current plot
 window, considering only results included by the filters and visible itinerary
 groups. Applying a filter resets the plot view to the remaining results.
-When **Capture** is selected, the checkbox below it controls whether available
-arrival moon-assist savings are included in Capture delta-v. Changing the option
-recalculates capture costs and reapplies the current filters.
+When **Capture** is selected, the moon-assist checkbox is available only for
+itinerary files calculated with arrival moon assist enabled. These files retain
+both assisted and unassisted arrival delta-v values, so changing the option
+updates the plot and filters without recalculation. The selected route's
+per-step delta-v preview also uses maneuver values saved in the itinerary file.
 **Reset Porkchop** restores the full result set and its default view.

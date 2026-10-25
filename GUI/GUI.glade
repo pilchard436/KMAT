@@ -1721,16 +1721,23 @@ The departure burn is minimized over the orbit.</property>
                                       </packing>
                                     </child>
                                     <child>
-                                      <object class="GtkCheckButton" id="cb_pa_moon_assist">
-                                        <property name="label" translatable="yes">Include moon-assist DV</property>
+                                      <object class="GtkEventBox" id="eb_pa_moon_assist_tooltip">
                                         <property name="visible">True</property>
-                                        <property name="sensitive">False</property>
-                                        <property name="can-focus">True</property>
-                                        <property name="receives-default">False</property>
-                                        <property name="draw-indicator">True</property>
-                                        <property name="margin-start">20</property>
-                                        <property name="tooltip-text" translatable="yes">Include arrival moon-assist savings in Capture delta-v when available.</property>
-                                        <signal name="toggled" handler="on_pa_moon_assist_toggled" swapped="no"/>
+                                        <property name="can-focus">False</property>
+                                        <property name="visible-window">False</property>
+                                        <property name="above-child">True</property>
+                                        <child>
+                                          <object class="GtkCheckButton" id="cb_pa_moon_assist">
+                                            <property name="label" translatable="yes">Moon assist saving</property>
+                                            <property name="visible">True</property>
+                                            <property name="sensitive">False</property>
+                                            <property name="can-focus">True</property>
+                                            <property name="receives-default">False</property>
+                                            <property name="draw-indicator">True</property>
+                                            <property name="margin-start">20</property>
+                                            <signal name="toggled" handler="on_pa_moon_assist_toggled" swapped="no"/>
+                                          </object>
+                                        </child>
                                       </object>
                                       <packing>
                                         <property name="expand">False</property>

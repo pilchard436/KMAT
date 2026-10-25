@@ -23,6 +23,7 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	gint64 load_started = g_get_monotonic_time();
 	reset_pa_porkchop_view();
 	free_all_porkchop_analyzer_itins();
+	pa_set_moon_assist_dv_toggle_available(0);
 	pa_set_last_transfer_type(TF_FLYBY, 0);
 	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
 	gint64 file_read_finished = g_get_monotonic_time();
@@ -61,6 +62,15 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	if(body_show_status_pa != NULL) free(body_show_status_pa);
 	body_show_status_pa = (int*) calloc(pa_system->num_bodies, sizeof(int));
 	analyze_departure_itins();
+	int moon_assist_dvs_available = pa_num_itins > 0 && pa_porkchop_points != NULL &&
+			pa_analysis_params.calc_data.search_options.known &&
+			pa_analysis_params.calc_data.search_options.moon_assist_arrival;
+	for(int i = 0; moon_assist_dvs_available && i < pa_num_itins; i++) {
+		struct ItinStep *arrival = pa_porkchop_points[i].data.arrival;
+		if(arrival == NULL || !arrival->arrival_dv_cache.moon_assist_dvs_valid)
+			moon_assist_dvs_available = 0;
+	}
+	pa_set_moon_assist_dv_toggle_available(moon_assist_dvs_available);
 	gint64 analysis_finished = g_get_monotonic_time();
 
 	update_pa_porkchop_diagram();

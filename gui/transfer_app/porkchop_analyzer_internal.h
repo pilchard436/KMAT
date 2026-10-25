@@ -55,6 +55,7 @@ void update_pa_selected_itinerary(void);
 void reset_pa_porkchop_view();
 void pa_update_body_show_status();
 void pa_set_last_transfer_type(enum LastTransferType type, int locked);
+void pa_set_moon_assist_dv_toggle_available(int available);
 double calc_step_dv_pa(struct ItinStep *step);
 double calc_total_dv_pa(void);
 double calc_periapsis_height_pa(void);

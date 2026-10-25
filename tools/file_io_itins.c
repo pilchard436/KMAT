@@ -1,4 +1,5 @@
 #include "file_io_internal.h"
+#include "starting_orbit.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,13 +10,16 @@ static void restore_arrival_dv_cache_metadata(struct ItinStep *step, double dep_
 	if(step == NULL) return;
 	if(step->num_next_nodes == 0) {
 		if(step->prev != NULL && step->body != NULL) {
-			step->arrival_dv_cache.incoming_excess = subtract_vec3(step->v_arr, step->v_body);
-			step->arrival_dv_cache.date = step->date;
-			step->arrival_dv_cache.dep_periapsis = dep_periapsis;
-			step->arrival_dv_cache.arr_periapsis = arr_periapsis;
-			step->arrival_dv_cache.moon_assist_enabled = !!moon_assist_enabled;
-			step->arrival_dv_cache.route_values_valid = 1;
-			step->arrival_dv_cache.valid = 1;
+			struct ItinArrivalDvCache *cache = &step->arrival_dv_cache;
+			cache->incoming_excess = subtract_vec3(step->v_arr, step->v_body);
+			cache->date = step->date;
+			cache->dep_periapsis = dep_periapsis;
+			cache->arr_periapsis = arr_periapsis;
+			cache->moon_assist_enabled = !!moon_assist_enabled;
+			cache->moon_assist_dvs_valid =
+					!!moon_assist_enabled && cache->moon_assist_dvs_valid;
+			cache->route_values_valid = 1;
+			cache->valid = 1;
 		}
 		return;
 	}
@@ -23,10 +27,14 @@ static void restore_arrival_dv_cache_metadata(struct ItinStep *step, double dep_
 		restore_arrival_dv_cache_metadata(step->next[i], dep_periapsis, arr_periapsis, moon_assist_enabled);
 }
 
-static void ensure_route_dv_values(struct ItinStep *step, double dep_periapsis, double arr_periapsis) {
+static void ensure_route_dv_values(struct ItinStep *step, double dep_periapsis, double arr_periapsis,
+		int require_dual_moon_assist_dvs) {
 	if(step == NULL) return;
 	if(step->num_next_nodes == 0) {
 		if(step->prev == NULL || step->body == NULL) return;
+		if(require_dual_moon_assist_dvs && moon_assist_is_active() &&
+			!step->arrival_dv_cache.moon_assist_dvs_valid)
+			step->arrival_dv_cache.valid = 0;
 		cache_itinerary_arrival_dvs(step, arr_periapsis);
 		if(!step->arrival_dv_cache.route_values_valid ||
 			fabs(step->arrival_dv_cache.dep_periapsis - dep_periapsis) > 1e-6)
@@ -34,14 +42,25 @@ static void ensure_route_dv_values(struct ItinStep *step, double dep_periapsis, 
 		return;
 	}
 	for(int i = 0; i < step->num_next_nodes; i++)
-		ensure_route_dv_values(step->next[i], dep_periapsis, arr_periapsis);
+		ensure_route_dv_values(step->next[i], dep_periapsis, arr_periapsis,
+				require_dual_moon_assist_dvs);
+}
+
+static void cache_step_dv_values(struct ItinStep *step, double dep_periapsis) {
+	if(step == NULL) return;
+	for(int i = 0; i < step->num_next_nodes; i++) {
+		struct ItinStep *next = step->next[i];
+		next->dv_from_prev = itinerary_transition_dv(step, next, dep_periapsis);
+		next->dv_from_prev_valid = 1;
+		cache_step_dv_values(next, dep_periapsis);
+	}
 }
 
 static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 		Itin_Calc_Data calc_data, CelestSystem *system, char *filepath) {
 	int file_type = get_current_bin_file_type();
 	BinTypes bin_types = get_itins_file_bin_types_from_file_type(file_type);
-	if(bin_types.file_type < 0 || file_type != 8) {
+	if(bin_types.file_type < 0 || file_type != 10) {
 		fprintf(stderr, "Unsupported itinerary file type: %d\n", file_type);
 		return;
 	}
@@ -50,12 +69,43 @@ static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 		fprintf(stderr, "Cannot write itineraries: a result array is missing\n");
 		return;
 	}
+	int previous_moon_assist = moon_assist_is_active();
+	int previous_moon_aware = moon_aware_flybys_is_active();
+	StartingOrbit previous_starting_orbit;
+	Body *previous_starting_orbit_body = NULL;
+	int had_previous_starting_orbit =
+			starting_orbit_get_active(&previous_starting_orbit, &previous_starting_orbit_body);
+	if(calc_data.search_options.known) {
+		set_moon_assist_enabled(calc_data.search_options.moon_assist_arrival);
+		set_moon_aware_flybys_enabled(calc_data.search_options.moon_aware_flybys);
+		if(calc_data.search_options.use_custom_starting_orbit &&
+			calc_data.search_options.starting_orbit_body_id >= 0 &&
+			calc_data.search_options.starting_orbit_body_id < system->num_bodies)
+			starting_orbit_set_active(&calc_data.search_options.starting_orbit,
+					system->bodies[calc_data.search_options.starting_orbit_body_id]);
+		else
+			starting_orbit_set_active(NULL, NULL);
+	}
 	for(int i = 0; i < results.num_deps; i++)
 		ensure_route_dv_values(results.departures[i], calc_data.dv_filter.dep_periapsis,
-			calc_data.dv_filter.arr_periapsis);
+			calc_data.dv_filter.arr_periapsis, calc_data.search_options.known &&
+				calc_data.search_options.moon_assist_arrival);
+	for(int i = 0; i < results.num_deps; i++)
+		cache_step_dv_values(results.departures[i], calc_data.dv_filter.dep_periapsis);
 	for(int i = 0; i < results.capture_num_deps; i++)
 		ensure_route_dv_values(results.capture_departures[i], calc_data.dv_filter.dep_periapsis,
-			calc_data.dv_filter.arr_periapsis);
+			calc_data.dv_filter.arr_periapsis, calc_data.search_options.known &&
+				calc_data.search_options.moon_assist_arrival);
+	for(int i = 0; i < results.capture_num_deps; i++)
+		cache_step_dv_values(results.capture_departures[i], calc_data.dv_filter.dep_periapsis);
+	if(calc_data.search_options.known) {
+		set_moon_assist_enabled(previous_moon_assist);
+		set_moon_aware_flybys_enabled(previous_moon_aware);
+		if(had_previous_starting_orbit)
+			starting_orbit_set_active(&previous_starting_orbit, previous_starting_orbit_body);
+		else
+			starting_orbit_set_active(NULL, NULL);
+	}
 	
 	// Check if the string ends with ".itins"
 	if (strlen(filepath) >= 6 && strcmp(filepath + strlen(filepath) - 6, ".itins") != 0) {
@@ -88,7 +138,7 @@ static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 	fwrite(&file_type, sizeof(int), 1, file);
 
 	printf("Filesize: ~%.3f MB\n",
-		(double)results.num_nodes * sizeof(struct ItinStepBinT3) / 1e6);
+		(double)results.num_nodes * sizeof(struct ItinStepBinT5) / 1e6);
 
 	fwrite(&bin_header, sizeof(bin_header), 1, file);
 

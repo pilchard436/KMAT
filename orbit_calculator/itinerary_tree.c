@@ -163,6 +163,8 @@ void copy_step_body_vectors_and_date(struct ItinStep *orig_step, struct ItinStep
 	step_copy->v_arr = orig_step->v_arr;
 	step_copy->v_dep = orig_step->v_dep;
 	step_copy->date = orig_step->date;
+	step_copy->dv_from_prev = orig_step->dv_from_prev;
+	step_copy->dv_from_prev_valid = orig_step->dv_from_prev_valid;
 	step_copy->arrival_dv_cache = orig_step->arrival_dv_cache;
 }
 

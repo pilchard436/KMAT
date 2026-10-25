@@ -47,6 +47,13 @@ static void check_itinerary_tree(void) {
 	struct ItinStep *second_arrival = make_step(&mars, 350, middle);
 	check_true("a branch adds an itinerary", get_number_of_itineraries(first) == 2);
 	check_true("stored steps include the branch", get_total_number_of_stored_steps(first) == 4);
+	middle->body = NULL;
+	middle->v_arr = vec3(1, 2, 3);
+	last->v_dep = vec3(4, 2, 3);
+	second_arrival->v_dep = vec3(1, 7, 3);
+	check_near("branch-specific DSM cost uses the selected child", itinerary_transition_dv(middle, last, 0), 3, 1e-12);
+	check_near("sibling DSM branch has its own cost", itinerary_transition_dv(middle, second_arrival, 0), 5, 1e-12);
+	middle->body = &venus;
 	struct ItinStep *arrivals[2];
 	int index = 0;
 	store_itineraries_in_array(first, arrivals, &index);
@@ -78,10 +85,14 @@ static void check_itinerary_tree(void) {
 	check_near("changing the copy leaves the original", middle->date, 140, 0);
 	free_itinerary(copy);
 
+	last->dv_from_prev = 42;
+	last->dv_from_prev_valid = 1;
 	struct ItinStep *chain = create_itin_copy_from_arrival(last);
 	check_true("arrival copy rebuilds the single route", get_num_of_itin_layers(get_first(chain)) == 3 &&
 		get_first(chain)->date == 100 && chain->date == 330 && chain->body == &mars);
 	check_true("arrival copy is detached from the original", get_first(chain) != first && chain->num_next_nodes == 0);
+	check_true("arrival copy preserves the selected branch's cached step delta-v",
+		chain->dv_from_prev_valid && chain->dv_from_prev == 42);
 	free_itinerary(get_first(chain));
 
 	struct ItinStep target = {0};
@@ -289,7 +300,7 @@ static void check_itinerary_files(void) {
 	free(maneuver);
 
 	check_true("the field counter counts separators", amt_of_fields("a,b,c") == 3 && amt_of_fields("a") == 1);
-	check_true("dual-mode itineraries are the default", get_current_bin_file_type() == 8);
+	check_true("dual-mode itineraries use the per-step delta-v format", get_current_bin_file_type() == 10);
 
 	ItinSearchOptions search_options = {
 		.known = 1,
@@ -313,14 +324,21 @@ static void check_itinerary_files(void) {
 	struct ItinStep *single_arrival = get_last(route);
 	double single_dep_periapsis = route->body->atmo_alt + 50e3;
 	double single_arr_periapsis = single_arrival->body->atmo_alt + 50e3;
+	double single_arrival_radius = alt2radius(single_arrival->body, single_arr_periapsis);
+	double single_arrival_vinf = mag_vec3(subtract_vec3(single_arrival->v_arr, single_arrival->v_body));
 	int previous_moon_assist = set_moon_assist_enabled(1);
 	single_arrival->arrival_dv_cache = (struct ItinArrivalDvCache) {
 		.dv_arr_cap = 321,
 		.dv_arr_circ = 654,
+		.dv_arr_cap_plain = dv_capture(single_arrival->body, single_arrival_radius, single_arrival_vinf),
+		.dv_arr_cap_assisted = 321,
+		.dv_arr_circ_plain = dv_circ(single_arrival->body, single_arrival_radius, single_arrival_vinf),
+		.dv_arr_circ_assisted = 654,
 		.incoming_excess = subtract_vec3(single_arrival->v_arr, single_arrival->v_body),
 		.date = single_arrival->date,
 		.arr_periapsis = single_arr_periapsis,
 		.moon_assist_enabled = 1,
+		.moon_assist_dvs_valid = 1,
 		.valid = 1
 	};
 	struct PorkchopPoint single_saved_values = create_porkchop_point(single_arrival,
@@ -364,6 +382,26 @@ static void check_itinerary_files(void) {
 		cache_itinerary_arrival_dvs(loaded_arrival, single_arr_periapsis);
 		check_true("enabling arrival moon assist refreshes the capture-cost cache",
 			loaded_arrival->arrival_dv_cache.moon_assist_enabled);
+		loaded_arrival->arrival_dv_cache.route_values_valid = 1;
+		loaded_arrival->arrival_dv_cache.dep_periapsis = single_dep_periapsis;
+		loaded_arrival->arrival_dv_cache.dv_dep = 123456789;
+		loaded_arrival->arrival_dv_cache.dv_dsm = 234567890;
+		loaded_arrival->arrival_dv_cache.dv_flyby = 345678901;
+		struct PorkchopPoint reused_route_values = create_porkchop_point(loaded_arrival,
+			single_dep_periapsis, single_arr_periapsis);
+		check_near("Porkchop analysis reuses saved departure delta-v",
+			reused_route_values.dv_dep, 123456789, 0);
+		check_near("Porkchop analysis reuses saved DSM delta-v",
+			reused_route_values.dv_dsm, 234567890, 0);
+		check_near("Porkchop analysis reuses saved flyby delta-v",
+			reused_route_values.dv_flyby, 345678901, 0);
+		double changed_dep_periapsis = single_dep_periapsis + 10000;
+		struct PorkchopPoint recalculated_route_values = create_porkchop_point(loaded_arrival,
+			changed_dep_periapsis, single_arr_periapsis);
+		check_near("Porkchop analysis recalculates route values for a changed periapsis",
+			loaded_arrival->arrival_dv_cache.dep_periapsis, changed_dep_periapsis, 0);
+		check_true("changed periapsis does not reuse stale departure delta-v",
+			recalculated_route_values.dv_dep != 123456789);
 	}
 	check_true("single-route files preserve search options",
 		loaded.search_options.known && loaded.search_options.allow_dsm &&
@@ -412,11 +450,12 @@ static void check_itinerary_files(void) {
 	int previous_itins_moon_assist = set_moon_assist_enabled(1);
 	struct PorkchopPoint itins_saved_values = create_porkchop_point(arrival,
 		calc_data.dv_filter.dep_periapsis, calc_data.dv_filter.arr_periapsis);
+	struct ItinArrivalDvCache saved_arrival_dvs = arrival->arrival_dv_cache;
 	char dual_path[] = "unit_test_routes_both.itins";
 	store_itineraries_in_bfile_both_modes(both_results, calc_data, system, dual_path);
 	struct ItinsLoadFileResults both_loaded = load_itineraries_from_bfile(dual_path);
 	check_true("dual-mode itinerary results are loaded",
-		both_loaded.header.file_type == 8 && both_loaded.header.calc_data.dv_filter.last_transfer_type == TF_BOTH &&
+		both_loaded.header.file_type == 10 && both_loaded.header.calc_data.dv_filter.last_transfer_type == TF_BOTH &&
 		both_loaded.header.calc_data.search_options.known &&
 		both_loaded.header.calc_data.search_options.allow_dsm &&
 		both_loaded.header.calc_data.search_options.moon_aware_flybys &&
@@ -429,7 +468,8 @@ static void check_itinerary_files(void) {
 		struct ItinStep *loaded_arrival = get_last(both_loaded.departures[0]);
 		check_true("dual-mode files preserve route delta-v results",
 			loaded_arrival->arrival_dv_cache.valid &&
-			loaded_arrival->arrival_dv_cache.moon_assist_enabled);
+			loaded_arrival->arrival_dv_cache.moon_assist_enabled &&
+			loaded_arrival->arrival_dv_cache.moon_assist_dvs_valid);
 		check_near("dual-mode files preserve departure delta-v",
 			loaded_arrival->arrival_dv_cache.dv_dep, itins_saved_values.dv_dep, 1e-9);
 		check_near("dual-mode files preserve DSM delta-v",
@@ -438,13 +478,44 @@ static void check_itinerary_files(void) {
 			loaded_arrival->arrival_dv_cache.dv_flyby, itins_saved_values.dv_flyby, 1e-9);
 		check_near("dual-mode files preserve assisted capture delta-v",
 			loaded_arrival->arrival_dv_cache.dv_arr_cap, itins_saved_values.dv_arr_cap, 1e-9);
+		check_near("dual-mode files preserve unassisted capture delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap_plain,
+			saved_arrival_dvs.dv_arr_cap_plain, 1e-9);
+		check_near("dual-mode files preserve assisted capture delta-v separately",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap_assisted,
+			saved_arrival_dvs.dv_arr_cap_assisted, 1e-9);
 		check_near("dual-mode files preserve assisted circularization delta-v",
 			loaded_arrival->arrival_dv_cache.dv_arr_circ, itins_saved_values.dv_arr_circ, 1e-9);
+		check_near("dual-mode files preserve unassisted circularization delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_circ_plain,
+			saved_arrival_dvs.dv_arr_circ_plain, 1e-9);
+		struct ItinStep *source_step = get_first(route);
+		struct ItinStep *loaded_step = get_first(both_loaded.departures[0]);
+		while(source_step != NULL && source_step->next != NULL &&
+			loaded_step != NULL && loaded_step->next != NULL) {
+			struct ItinStep *source_next = source_step->next[0];
+			struct ItinStep *loaded_next = loaded_step->next[0];
+			check_true("dual-mode file marks cached step delta-v as valid",
+				source_next->dv_from_prev_valid && loaded_next->dv_from_prev_valid);
+			check_true("dual-mode file preserves each step delta-v",
+				loaded_next->dv_from_prev == source_next->dv_from_prev ||
+				(isnan(loaded_next->dv_from_prev) && isnan(source_next->dv_from_prev)));
+			source_step = source_next;
+			loaded_step = loaded_next;
+		}
 		int previous_moon_assist = set_moon_assist_enabled(1);
+		cache_itinerary_arrival_dvs(loaded_arrival, calc_data.dv_filter.arr_periapsis);
+		check_near("enabled moon assist reuses the saved assisted capture delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, saved_arrival_dvs.dv_arr_cap_assisted, 0);
+		set_moon_assist_enabled(0);
+		cache_itinerary_arrival_dvs(loaded_arrival, calc_data.dv_filter.arr_periapsis);
+		check_near("disabled moon assist selects the saved plain capture delta-v",
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, saved_arrival_dvs.dv_arr_cap_plain, 0);
+		set_moon_assist_enabled(1);
 		cache_itinerary_arrival_dvs(loaded_arrival, calc_data.dv_filter.arr_periapsis);
 		set_moon_assist_enabled(previous_moon_assist);
 		check_near("loaded arrival delta-v cache matches route inputs and is reused",
-			loaded_arrival->arrival_dv_cache.dv_arr_cap, 321, 0);
+			loaded_arrival->arrival_dv_cache.dv_arr_cap, saved_arrival_dvs.dv_arr_cap_assisted, 0);
 		free_itinerary(both_loaded.departures[0]);
 		free(both_loaded.departures);
 	}
@@ -455,6 +526,26 @@ static void check_itinerary_files(void) {
 		free(both_loaded.capture_departures);
 	}
 	remove(dual_path);
+
+	Itin_Calc_Data no_assist_calc_data = calc_data;
+	no_assist_calc_data.search_options.moon_assist_arrival = 0;
+	char no_assist_path[] = "unit_test_routes_no_assist.itins";
+	store_itineraries_in_bfile_both_modes(both_results, no_assist_calc_data, system, no_assist_path);
+	struct ItinsLoadFileResults no_assist_loaded = load_itineraries_from_bfile(no_assist_path);
+	check_true("itineraries calculated without moon assist do not expose a dual-cost cache",
+		no_assist_loaded.departures != NULL &&
+		!get_last(no_assist_loaded.departures[0])->arrival_dv_cache.moon_assist_dvs_valid);
+	if(no_assist_loaded.departures != NULL) {
+		free_itinerary(no_assist_loaded.departures[0]);
+		free(no_assist_loaded.departures);
+	}
+	if(no_assist_loaded.capture_departures != NULL) {
+		free_itinerary(no_assist_loaded.capture_departures[0]);
+		free(no_assist_loaded.capture_departures);
+	}
+	if(no_assist_loaded.header.system != NULL) free_celestial_system(no_assist_loaded.header.system);
+	remove(no_assist_path);
+
 	free_itinerary(route);
 	free_celestial_system(system);
 }

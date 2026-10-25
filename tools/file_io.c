@@ -8,7 +8,7 @@
 #include "file_io_internal.h"
 
 
-BinTypes all_itins_file_types[] = {{8, 4, 5, 3, 3}};
+BinTypes all_itins_file_types[] = {{10, 4, 5, 3, 5}};
 const int num_all_itins_file_types = 1;
 const BinTypes *current_itins_file_types = &(all_itins_file_types[0]);
 
