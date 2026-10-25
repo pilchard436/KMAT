@@ -264,7 +264,7 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 			last_dt = dt;
 			if(i == 0) dt = dt1;
 			else dt = root_finder_monot_deriv_next_x(data, right_side ? 1 : 0);
-			if(i > 3 && dt == last_dt) break;	// step size 0 (imprecision)
+			if(i > 3 && fabs(dt - last_dt) < 1) break;	// step below 1 s (imprecision)
 			if(isnan(dt) || isinf(dt)) break;
 		}
 
