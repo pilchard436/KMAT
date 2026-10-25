@@ -58,6 +58,7 @@ typedef struct RepairPool {
 
 typedef struct ExcludedPools {
 	SampleReservoir *challenge;
+	double *challenge_selection_seconds;
 } ExcludedPools;
 
 static inline int is_finite_vector(Vector3 value) {

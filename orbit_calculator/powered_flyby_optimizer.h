@@ -34,7 +34,10 @@ typedef struct PoweredFlybyOptimizationStats {
 	double best_unpowered_seed_total_dv;
 	double best_initial_total_dv;
 	double best_refined_total_dv;
-	double exact_scoring_seconds;
+	double route_scoring_seconds;
+	double global_ranking_seconds;
+	double challenge_selection_seconds;
+	double repair_seconds;
 	double timing_refinement_seconds;
 	unsigned long long objective_evaluations;
 	int refinement_budgets_exhausted;
@@ -48,6 +51,9 @@ typedef struct PoweredFlybyOptimizationStats {
 
 int optimize_powered_flyby_routes(struct ItinStep **departures, int num_departures,
 	const Itin_Calc_Data *calc_data, int max_routes, PoweredFlybyOptimizationStats *stats);
+int optimize_powered_flyby_routes_with_worker_limit(struct ItinStep **departures,
+	int num_departures, const Itin_Calc_Data *calc_data, int max_routes, int max_workers,
+	PoweredFlybyOptimizationStats *stats);
 
 double evaluate_powered_flyby_route_objective(const Itin_Calc_Data *calc_data,
 	Body **bodies, const double *times, size_t num_steps);

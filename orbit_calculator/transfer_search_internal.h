@@ -48,6 +48,9 @@ void show_departure_progress(double total_departures);
 void set_calculation_progress_phase(Transfer_Progress_Phase phase, int transfer_type,
 	int phase_done, int phase_total);
 void increment_calculation_progress(void);
+void begin_combined_optimization_progress(int mode_count);
+void complete_combined_optimization_progress(void);
+void end_combined_optimization_progress(void);
 
 /* transfer_search_worker.c: thread entry that searches the itineraries of departure dates */
 void *calc_itins_from_departure(void *args);

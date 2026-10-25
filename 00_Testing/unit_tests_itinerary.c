@@ -5,13 +5,23 @@
 #include "orbit_calculator/soi_encounter.h"
 #include "tools/file_io.h"
 #include "tools/file_io_internal.h"
+#include "tools/thread_pool.h"
 #include "orbitlib_fileio.h"
 #include "orbitlib_transfer.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
+
+static atomic_int thread_pool_test_calls;
+
+static void *count_thread_pool_test_call(void *args) {
+	(void)args;
+	atomic_fetch_add(&thread_pool_test_calls, 1);
+	return NULL;
+}
 
 static int cancel_requested(void *context) {
 	return *(int *)context;
@@ -634,6 +644,56 @@ static void check_search_rejections(void) {
 	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
 }
 
+static void check_thread_pool_preserves_counters(void) {
+	prepare_thread_pool_counters();
+	incr_thread_counter_by_amount(2, 9);
+	incr_thread_counter_by_amount(3, 1);
+	check_true("the cancellation flag exposes the requested state",
+		get_thread_counter(3) == 1);
+	atomic_store(&thread_pool_test_calls, 0);
+	struct Thread_Pool pool = use_thread_pool32_preserving_counters(
+		count_thread_pool_test_call, NULL);
+	join_thread_pool(pool);
+	check_true("preserving worker pools run all workers",
+		atomic_load(&thread_pool_test_calls) == (int)pool.size);
+	check_true("preserving worker pools retain progress and cancellation counters",
+		get_thread_counter(2) == 9 && get_thread_counter(3) == 1);
+	prepare_thread_pool_counters();
+	check_true("preparing counters clears the cancellation flag",
+		get_thread_counter(3) == 0);
+}
+
+static void check_concurrent_thread_pools_have_independent_handles(void) {
+	atomic_store(&thread_pool_test_calls, 0);
+	struct Thread_Pool first = use_thread_pool32_preserving_counters_with_limit(
+		count_thread_pool_test_call, NULL, 2);
+	struct Thread_Pool second = use_thread_pool32_preserving_counters_with_limit(
+		count_thread_pool_test_call, NULL, 2);
+	check_true("concurrent pools own distinct worker handles",
+		first.size > 0 && second.size > 0 && first.threads[0] != second.threads[0]);
+	join_thread_pool(first);
+	join_thread_pool(second);
+	check_true("limited pools stay within their worker limits",
+		first.size <= 2 && second.size <= 2);
+	check_true("concurrent pools run every worker",
+		atomic_load(&thread_pool_test_calls) == (int)(first.size + second.size));
+}
+
+static void check_thread_pool_worker_limit(void) {
+	set_thread_pool_worker_limit(THREAD_POOL_MAX_WORKERS);
+	size_t default_capacity = get_thread_pool32_worker_capacity();
+	set_thread_pool_worker_limit(1);
+	check_true("the worker cap can select one worker",
+		get_thread_pool32_worker_capacity() == 1);
+	set_thread_pool_worker_limit(3);
+	size_t expected_capacity = default_capacity < 3 ? default_capacity : 3;
+	check_true("the worker cap never exceeds available capacity",
+		get_thread_pool32_worker_capacity() == expected_capacity);
+	set_thread_pool_worker_limit(THREAD_POOL_MAX_WORKERS);
+	check_true("the default worker capacity is restored",
+		get_thread_pool32_worker_capacity() == default_capacity);
+}
+
 static void check_unmodeled_soi_detection(void) {
 	Body sun = {.mu = 1e14};
 	Body planet = {.mu = 1e10, .orbit = {.a = 1e8, .cb = &sun}};
@@ -672,6 +732,9 @@ int run_itinerary_unit_tests(void) {
 	check_conjunction_times();
 	check_itinerary_files();
 	check_search_rejections();
+	check_thread_pool_preserves_counters();
+	check_concurrent_thread_pools_have_independent_handles();
+	check_thread_pool_worker_limit();
 	check_minimum_leg();
 	check_moons_are_saved();
 	check_moon_flybys();

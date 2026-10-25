@@ -1,9 +1,27 @@
 #include "integration_common.h"
+#include "tools/thread_pool.h"
 
 int benchmark_resonant;
 int benchmark_coverage;
 
 int main(int argc, char **argv) {
+	if(argc == 4 && strcmp(argv[1], "--full-profile-worker-scale") == 0) {
+		char *worker_end;
+		char *mask_end;
+		unsigned long worker_limit = strtoul(argv[2], &worker_end, 10);
+		unsigned long option_mask = strtoul(argv[3], &mask_end, 10);
+		if(worker_end == argv[2] || *worker_end != '\0' || worker_limit == 0 ||
+			worker_limit > THREAD_POOL_MAX_WORKERS || mask_end == argv[3] ||
+			*mask_end != '\0' || option_mask >= (1u << 5)) {
+			fprintf(stderr, "Worker scale expects a worker limit in 1..%d and profile mask in 0..31\n",
+				THREAD_POOL_MAX_WORKERS);
+			return EXIT_FAILURE;
+		}
+		set_thread_pool_worker_limit((size_t)worker_limit);
+		fprintf(stderr, "Worker scale: requested %lu, effective capacity %zu\n",
+			worker_limit, get_thread_pool32_worker_capacity());
+		return run_full_profile_config((unsigned int)option_mask);
+	}
 	if(argc > 1 && strcmp(argv[argc - 1], "--resonant") == 0) {
 		benchmark_resonant = 1;
 		argc--;
@@ -35,8 +53,17 @@ int main(int argc, char **argv) {
 		}
 		return run_full_profile_capture_config((unsigned int)option_mask);
 	}
+	if(argc == 3 && strcmp(argv[1], "--full-profile-both-config") == 0) {
+		char *end;
+		unsigned long option_mask = strtoul(argv[2], &end, 10);
+		if(end == argv[2] || *end != '\0' || option_mask >= (1u << 5)) {
+			fprintf(stderr, "Profile option mask must be in the range 0..31\n");
+			return EXIT_FAILURE;
+		}
+		return run_full_profile_both_config((unsigned int)option_mask);
+	}
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--full-profile-config <0..31>|--full-profile-capture-config <0..31>|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--full-profile-config <0..31>|--full-profile-capture-config <0..31>|--full-profile-both-config <0..31>|--full-profile-worker-scale <workers> <0..31>|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 

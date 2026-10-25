@@ -36,6 +36,7 @@ int run_saved_mission_benchmarks(void);
 int run_full_profile(void);
 int run_full_profile_config(unsigned int option_mask);
 int run_full_profile_capture_config(unsigned int option_mask);
+int run_full_profile_both_config(unsigned int option_mask);
 double score_powered_arrival_route(struct ItinStep *arrival, const Itin_Calc_Data *calc_data, Body *flyby_body);
 int run_coverage_report(void);
 int run_coverage_reference(CelestSystem *system, Body *departure_body, Body *flyby_body,

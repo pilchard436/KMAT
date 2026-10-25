@@ -108,6 +108,101 @@ measurements.
 | 30 | D, M, A, C | 55.640 | 117.873 | 8.725 | 182.239 | 195.415 | 1,519 / 3,273 |
 | 31 | R, D, M, A, C | 435.987 | 118.245 | 12.682 | 566.915 | 580.117 | 1,522 / 3,283 |
 
+## Current-branch full-matrix comparison
+
+The two historical matrices above were compared with fresh-process runs of the
+current branch for all 32 masks in both final-transfer modes. Each current
+configuration was run once with search profiling enabled and the default
+15-worker capacity. All 64 runs passed validation, and every itinerary and
+node count matched its corresponding historical result. The capture mask 00
+wrapper did not record its exit-code field, but its output contains both
+`valid=1` and the full-profile validation-success marker.
+
+| ID | Search: old → current (s) | Change | Calculation total: old → current (s) | Change |
+|---:|---:|---:|---:|---:|
+| **Fly-By final** |||||
+| 00 | 38.975 → 29.556 | −24.2% | 58.267 → 31.420 | −46.1% |
+| 01 | 411.932 → 359.677 | −12.7% | 439.183 → 362.181 | −17.5% |
+| 02 | 36.790 → 30.151 | −18.0% | 65.897 → 32.954 | −50.0% |
+| 03 | 410.981 → 361.458 | −12.0% | 447.962 → 364.808 | −18.6% |
+| 04 | 38.168 → 32.427 | −15.0% | 62.541 → 34.954 | −44.1% |
+| 05 | 396.269 → 359.102 | −9.4% | 427.842 → 362.038 | −15.4% |
+| 06 | 37.635 → 31.263 | −16.9% | 76.115 → 34.872 | −54.2% |
+| 07 | 397.025 → 352.919 | −11.1% | 442.569 → 357.021 | −19.3% |
+| 08 | 49.546 → 44.639 | −9.9% | 130.814 → 46.620 | −64.4% |
+| 09 | 407.152 → 364.743 | −10.4% | 496.225 → 367.244 | −26.0% |
+| 10 | 49.576 → 44.704 | −9.8% | 140.254 → 47.501 | −66.1% |
+| 11 | 406.251 → 364.884 | −10.2% | 504.891 → 368.230 | −27.1% |
+| 12 | 51.776 → 46.795 | −9.6% | 138.114 → 49.413 | −64.2% |
+| 13 | 408.921 → 367.789 | −10.1% | 502.362 → 370.772 | −26.2% |
+| 14 | 51.654 → 46.816 | −9.4% | 152.315 → 50.614 | −66.8% |
+| 15 | 408.867 → 367.818 | −10.0% | 516.341 → 371.988 | −28.0% |
+| 16 | 36.717 → 29.927 | −18.5% | 59.415 → 31.961 | −46.2% |
+| 17 | 393.873 → 352.274 | −10.6% | 424.026 → 354.849 | −16.3% |
+| 18 | 36.588 → 29.802 | −18.5% | 70.276 → 32.750 | −53.4% |
+| 19 | 393.865 → 350.200 | −11.1% | 434.947 → 353.699 | −18.7% |
+| 20 | 38.429 → 32.005 | −16.7% | 63.548 → 34.191 | −46.2% |
+| 21 | 395.497 → 353.264 | −10.7% | 428.018 → 356.026 | −16.8% |
+| 22 | 38.162 → 32.012 | −16.1% | 78.822 → 35.492 | −55.0% |
+| 23 | 396.601 → 353.173 | −11.0% | 444.717 → 357.249 | −19.7% |
+| 24 | 50.302 → 45.387 | −9.8% | 117.832 → 47.564 | −59.6% |
+| 25 | 406.832 → 365.620 | −10.1% | 481.909 → 368.260 | −23.6% |
+| 26 | 50.372 → 45.466 | −9.7% | 128.787 → 48.543 | −62.3% |
+| 27 | 408.131 → 365.571 | −10.4% | 494.058 → 369.132 | −25.3% |
+| 28 | 52.453 → 47.538 | −9.4% | 122.264 → 49.889 | −59.2% |
+| 29 | 409.640 → 368.070 | −10.1% | 486.974 → 370.911 | −23.8% |
+| 30 | 52.341 → 47.559 | −9.1% | 137.751 → 51.208 | −62.8% |
+| 31 | 409.432 → 369.491 | −9.8% | 502.207 → 373.607 | −25.6% |
+| **Capture final** |||||
+| 00 | 39.604 → 29.711 | −25.0% | 55.743 → 31.488 | −43.5% |
+| 01 | 418.522 → 349.261 | −16.5% | 440.662 → 351.330 | −20.3% |
+| 02 | 40.171 → 29.218 | −27.3% | 65.936 → 31.802 | −51.8% |
+| 03 | 419.822 → 349.468 | −16.8% | 449.442 → 352.388 | −21.6% |
+| 04 | 41.341 → 31.310 | −24.3% | 60.355 → 33.346 | −44.8% |
+| 05 | 422.008 → 352.170 | −16.5% | 444.793 → 354.538 | −20.3% |
+| 06 | 41.048 → 31.329 | −23.7% | 74.164 → 34.566 | −53.4% |
+| 07 | 420.974 → 352.719 | −16.2% | 457.817 → 356.385 | −22.2% |
+| 08 | 53.236 → 44.730 | −16.0% | 146.997 → 51.471 | −65.0% |
+| 09 | 436.376 → 365.184 | −16.3% | 525.853 → 372.317 | −29.2% |
+| 10 | 53.279 → 44.751 | −16.0% | 171.523 → 54.236 | −68.4% |
+| 11 | 435.802 → 365.493 | −16.1% | 558.011 → 375.338 | −32.7% |
+| 12 | 55.583 → 46.860 | −15.7% | 142.956 → 53.809 | −62.4% |
+| 13 | 437.546 → 368.159 | −15.9% | 528.645 → 375.374 | −29.0% |
+| 14 | 55.176 → 46.956 | −14.9% | 179.030 → 56.965 | −68.2% |
+| 15 | 437.705 → 368.064 | −15.9% | 565.413 → 378.377 | −33.1% |
+| 16 | 40.313 → 29.932 | −25.8% | 60.958 → 31.928 | −47.6% |
+| 17 | 422.820 → 349.734 | −17.3% | 447.326 → 352.060 | −21.3% |
+| 18 | 40.344 → 30.047 | −25.5% | 72.047 → 33.014 | −54.2% |
+| 19 | 421.936 → 350.416 | −17.0% | 457.405 → 353.704 | −22.7% |
+| 20 | 42.256 → 32.311 | −23.5% | 65.695 → 34.604 | −47.3% |
+| 21 | 423.741 → 353.196 | −16.6% | 450.919 → 355.846 | −21.1% |
+| 22 | 42.007 → 32.247 | −23.2% | 81.133 → 35.923 | −55.7% |
+| 23 | 424.352 → 353.911 | −16.6% | 466.961 → 358.050 | −23.3% |
+| 24 | 53.454 → 45.655 | −14.6% | 139.928 → 52.513 | −62.5% |
+| 25 | 436.157 → 366.028 | −16.1% | 527.138 → 373.291 | −29.2% |
+| 26 | 53.721 → 45.594 | −15.1% | 174.515 → 55.331 | −68.3% |
+| 27 | 433.809 → 366.006 | −15.6% | 558.907 → 376.170 | −32.7% |
+| 28 | 56.072 → 47.873 | −14.6% | 144.453 → 54.958 | −62.0% |
+| 29 | 436.498 → 370.058 | −15.2% | 529.106 → 377.449 | −28.7% |
+| 30 | 55.640 → 47.941 | −13.8% | 182.239 → 58.232 | −68.0% |
+| 31 | 435.987 → 369.112 | −15.3% | 566.915 → 379.759 | −33.0% |
+
+Across Fly-By final, search time summed across the matrix fell from 7,170.753
+to 6,392.100 s (10.9%); mean search time fell from 224.086 to 199.753 s.
+Calculation total fell from 9,077.243 to 6,487.961 s (28.5%); its mean fell
+from 283.664 to 202.749 s. Across Capture final, search time fell from
+7,627.300 to 6,365.444 s (16.5%), with mean falling from 238.353 to 198.920
+s. Calculation total fell from 9,792.985 to 6,546.562 s (33.2%), with mean
+falling from 306.031 to 204.580 s.
+
+These are end-to-end comparisons between different implementation points.
+The current branch includes other changes since the historical matrices,
+including parallel refinement and route optimization; therefore the full
+matrix improvements must not be attributed solely to the atomic cancellation
+read. The configuration-00 before/after experiment below is the more focused
+measurement of that change. As with the original tables, each configuration
+has one accepted sample, not repeated medians.
+
 ## Option averages
 
 Each off/on mean averages 16 configurations, with the other four options
@@ -145,6 +240,162 @@ These are summed worker-seconds per configuration, not wall-clock seconds.
 | Mars | 1,842.252 | 1,953.951 |
 | Jupiter | 171.966 | 183.586 |
 | Saturn | 100.568 | 107.438 |
+
+## Selected-candidate refinement parallelization
+
+To measure the refinement worker pool, the same `RelWithDebInfo` build and
+Fly-By profile configuration 00 were run twice sequentially and twice with
+parallel refinement. Configuration 00 has no resonant flybys, DSM, moon-aware
+flybys, moon assist, or custom starting orbit. Each fresh-process run passed
+the full-profile validation and produced 9,233 itineraries and 18,261 nodes.
+The route counts and best refined delta-v were identical across the runs.
+
+| Execution | Refinement run times (s) | Mean refinement (s) | Total calculation times (s) | Mean total (s) |
+|---|---:|---:|---:|---:|
+| Sequential | 10.78, 10.77 | 10.775 | 55.622, 55.948 | 55.785 |
+| Parallel | 0.99, 0.98 | 0.985 | 45.371, 45.408 | 45.390 |
+
+For this scenario, parallel refinement was **10.9x faster** (about 90.9% less
+refinement time). Overall calculation time fell by about **18.6%** (about
+1.23x). These are two samples per mode on one machine, so treat them as an
+indicative scenario measurement rather than a general performance guarantee.
+Global candidate selection and merging remain serial.
+
+## Route scoring parallelization
+
+The same `RelWithDebInfo` build and Fly-By profile configuration 00 were run
+twice with serial scoring and twice with parallel scoring. Each run passed
+full-profile validation and produced the same 9,233 itineraries, 18,261 nodes,
+7,857 valid scored routes, and best initial/refined delta-v (4,723.640 ->
+4,675.650 m/s).
+
+| Execution | Scoring + candidate merge + repair run times (s) | Mean combined time (s) | Total calculation times (s) | Mean total (s) |
+|---|---:|---:|---:|---:|
+| Sequential | 6.95, 6.97 | 6.96 | 46.285, 46.412 | 46.349 |
+| Parallel | 2.77, 2.77 | 2.77 | 42.738, 42.783 | 42.761 |
+
+At the time of this comparison, the optimizer's exact-scoring timer included
+candidate merging and the following repair stage, so these values measure
+**scoring, candidate merge, and repair**, not scoring alone. The combined stage
+was about **2.5x faster** (about 60.2% less time), and overall calculation time
+fell by about **7.7%**. Separate scoring, ranking/merge, challenge-selection,
+and repair timings are reported by the current build. These are two samples per
+mode on one machine, so the results are indicative rather than a general
+performance guarantee. Candidate selection and merging remain serial and
+deterministic.
+
+## Concurrent Fly-By and Capture optimization
+
+The UI-free Earth-to-Saturn scenario was run twice through
+`search_for_itineraries_both_modes` using `KMATSearchIntegration.exe
+--full-profile-both-config 0`, before and after enabling concurrent mode
+optimization. Both modes passed full-profile validation and produced the same
+route metrics: 7,857 valid Fly-By scores, a best Fly-By refined delta-v of
+4,675.650 m/s, 9,233 Fly-By itineraries, and 3,529 nodes / 1,632 itineraries
+for Capture.
+
+| Execution | Total calculation times (s) | Mean total (s) |
+|---|---:|---:|
+| Sequential modes | 45.591, 45.695 | 45.643 |
+| Concurrent modes | 45.005, 45.309 | 45.157 |
+
+Concurrency reduced total time by about **0.49 s (1.1%)** in this scenario.
+The gain is modest because Capture optimization is a smaller portion of this
+workload and the available worker budget is divided between the two modes.
+These are two samples per mode on one machine, not a general performance
+guarantee.
+
+## Rejected-route repair parallelization
+
+Repair timing was separated from exact scoring, then the same both-modes
+configuration 00 was run twice with serial repair attempts and twice with
+parallel repair attempts. Fly-By and Capture optimization were concurrent in
+both comparisons; only the per-mode repair attempts changed.
+
+| Measurement | Serial repair | Parallel repair |
+|---|---:|---:|
+| Fly-By repair time (s, mean) | 2.82, 2.82 (2.82) | 0.48, 0.48 (0.48) |
+| Capture repair time (s, mean) | 2.16, 2.18 (2.17) | 0.43, 0.42 (0.43) |
+| Total calculation time (s, mean) | 45.199, 44.471 (44.835) | 42.321, 42.698 (42.510) |
+
+Repair time fell by about **5.9x for Fly-By** and **5.1x for Capture**. Overall
+calculation time fell by about **5.2%**. Both parallel runs passed full-profile
+validation and matched on valid route counts, best Fly-By refined delta-v,
+itinerary counts, and node counts.
+
+Each repair slot now receives its own deterministic random stream, assigned in
+slot order before workers start. This makes repeated parallel runs independent
+of worker scheduling, but changes the random sequence from the previous shared
+serial stream; in this sample the Capture improved-route count changed from 527
+to 526. Treat the performance and route-selection comparison as scenario
+measurements, not a guarantee that every repaired candidate is identical.
+
+## Global ranking and challenge-selection timing
+
+The both-modes configuration 00 profile was run twice with the current timing
+instrumentation. Both runs passed full-profile validation. Top-candidate
+ranking/merge measures the sorted top-route insertion and replacement work;
+challenge selection measures reservoir sampling and is excluded from the
+ranking/merge figure. Route scoring covers the scoring workers. Repair timing
+still includes repair attempts, verification, and the insertion of recovered
+routes, so these stage timings are not all additive.
+
+| Mode | Route scoring (s, mean) | Top-candidate ranking/merge (s, mean) | Challenge selection (ms, mean) | Repair (s, mean) |
+|---|---:|---:|---:|---:|
+| Fly-By | 0.84, 0.84 (0.84) | 0.0009, 0.0009 (0.0009) | 3.256, 3.098 (3.177) | 0.48, 0.48 (0.48) |
+| Capture | 0.97, 0.97 (0.97) | 0.0002, 0.0002 (0.0002) | 0.577, 0.569 (0.573) | 0.43, 0.43 (0.43) |
+
+Ranking/merge took about **0.9 ms for Fly-By** and **0.2 ms for Capture**;
+challenge selection took about **3.2 ms** and **0.6 ms**, respectively.
+Both costs are negligible beside route scoring, repair, and refinement in this
+scenario, so further parallelizing ranking or challenge selection is not
+recommended.
+
+## Departure-search worker scaling
+
+The single-mode Fly-By profile configuration 00 was run once at each worker
+limit using `KMATSearchIntegration.exe --full-profile-worker-scale <workers> 0`.
+The Windows host reports 8 physical cores and 16 logical processors; KMAT
+reserves one logical processor, so its effective maximum is 15 workers. The
+search-phase profiler was enabled for all runs. Every run passed full-profile
+validation and produced the same 9,233 itineraries and 18,261 nodes.
+
+| Worker limit | Search (s) | Optimization/refinement (s) | Filtering (s) | Calculation total (s) |
+|---:|---:|---:|---:|---:|
+| 1 | 369.647 | 18.062 | 0.383 | 388.094 |
+| 2 | 186.514 | 8.912 | 0.204 | 195.631 |
+| 4 | 95.851 | 4.696 | 0.204 | 100.752 |
+| 8 | 54.807 | 2.884 | 0.226 | 57.918 |
+| 12 | 39.248 | 1.987 | 0.224 | 41.459 |
+| 15 | 38.633 | 1.702 | 0.224 | 40.560 |
+
+Search was about **9.6x faster at 15 workers than at 1**. Gains tapered off
+near the available worker cap: 15 workers reduced search time by only about
+**1.6% compared with 12**. This suggests the default 15-worker cap is already
+near the useful limit for this workload; it does not support raising the cap
+above the machine's logical-processor budget. These are single samples per
+limit, so repeat runs would be needed to distinguish small differences from
+system noise.
+
+## Atomic cancellation-read experiment
+
+The 15-worker, single-mode Fly-By configuration 00 was profiled before and
+after changing cancellation-counter reads from the shared mutex to an atomic
+read. The pre-change baseline is one sample; the post-change result is the
+mean of three fresh-process runs. All runs passed full-profile validation with
+9,233 itineraries and 18,261 nodes.
+
+| Version | Search time (s) | Calculation total (s) |
+|---|---:|---:|
+| Mutex read, before change | 38.633 | 40.560 |
+| Atomic read, after change (mean of 3) | 30.168 | 32.108 |
+
+Search time fell by about **21.9%**, and total calculation time by about
+**20.8%** in this scenario. The atomic change preserves the existing
+cancellation counter API: writes remain synchronized and publish the same
+counter value to lock-free readers. This result supports the shared
+cancellation lock as a significant source of contention, though repeated
+pre-change samples would make the comparison stronger.
 
 ## Interpretation notes
 

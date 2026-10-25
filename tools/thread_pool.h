@@ -1,6 +1,8 @@
 #ifndef KSP_THREAD_POOL_H
 #define KSP_THREAD_POOL_H
 
+#include <stddef.h>
+
 #ifdef _WIN32
 #include <windows.h>
 typedef HANDLE thread_t;  // Use Windows HANDLE for threads
@@ -11,12 +13,13 @@ typedef pthread_t thread_t;  // Use pthread_t for Linux
 typedef pthread_mutex_t thread_mutex_t;  // Use pthread_mutex_t for Linux
 #endif
 
+#define THREAD_POOL_MAX_WORKERS 32
 
 /**
  * @brief Represents a thread pool containing multiple threads and the number of threads in the pool
  */
 struct Thread_Pool {
-	thread_t *threads; /**< Array of threads in the pool */
+	thread_t threads[THREAD_POOL_MAX_WORKERS]; /**< Handles owned by this pool */
 	size_t size;        /**< Size of the thread pool */
 };
 
@@ -29,7 +32,19 @@ struct Thread_Pool {
  * @return A populated Thread_Pool structure with the selected worker count
  */
 struct Thread_Pool use_thread_pool32(void *thread_method(void*), void *thread_args);
+/**
+ * @brief Creates a worker pool without resetting the shared thread counters.
+ *
+ * Use when worker scheduling is owned by the caller and existing cancellation/progress counters
+ * must remain available to the workers and caller.
+ */
+struct Thread_Pool use_thread_pool32_preserving_counters(void *thread_method(void*), void *thread_args);
+struct Thread_Pool use_thread_pool32_preserving_counters_with_limit(
+	void *thread_method(void*), void *thread_args, size_t max_workers);
+/* Caps process-wide worker creation; set before starting any pools. */
+void set_thread_pool_worker_limit(size_t max_workers);
 struct Thread_Pool use_thread_pool01(void *thread_method(void*), void *thread_args);
+size_t get_thread_pool32_worker_capacity(void);
 
 // Initialize/reset counters before exposing thread-pool controls to another thread.
 void prepare_thread_pool_counters(void);

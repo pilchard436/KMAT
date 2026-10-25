@@ -2,8 +2,15 @@
 #include "leg_variants.h"
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 #define POWERED_REPAIR_DATE_BINS 64
+
+static double selection_wall_seconds(void) {
+	struct timeval now;
+	gettimeofday(&now, NULL);
+	return now.tv_sec + now.tv_usec / 1e6;
+}
 
 int initialize_candidate(PoweredRouteCandidate *candidate, struct ItinStep *arrival,
 		struct ItinStep **departures, int num_departures, CelestSystem *system) {
@@ -120,6 +127,12 @@ void reservoir_retain(SampleReservoir *pool, PoweredRouteCandidate *candidate) {
 }
 
 void retain_excluded(ExcludedPools *pools, PoweredRouteCandidate *candidate) {
+	if(pools->challenge_selection_seconds != NULL) {
+		double start = selection_wall_seconds();
+		reservoir_retain(pools->challenge, candidate);
+		*pools->challenge_selection_seconds += selection_wall_seconds() - start;
+		return;
+	}
 	reservoir_retain(pools->challenge, candidate);
 }
 

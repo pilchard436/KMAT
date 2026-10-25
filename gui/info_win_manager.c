@@ -26,6 +26,7 @@ static const char *transfer_progress_phase_verb(Transfer_Progress_Phase phase) {
 		case TRANSFER_PROGRESS_SCORING: return "Scoring";
 		case TRANSFER_PROGRESS_REPAIRING: return "Repairing";
 		case TRANSFER_PROGRESS_REFINING: return "Refining";
+		case TRANSFER_PROGRESS_OPTIMIZING_BOTH: return "Optimizing";
 		case TRANSFER_PROGRESS_FILTERING: return "Filtering";
 		case TRANSFER_PROGRESS_FINALIZING: return "Finalizing";
 	}

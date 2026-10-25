@@ -53,6 +53,24 @@ static void check_top_candidates(void) {
 	destroy_candidate(challenge.samples[0]);
 }
 
+static void check_equal_cost_candidates_preserve_order(void) {
+	PoweredRouteCandidate *candidates[POWERED_ROUTE_REFINEMENT_LIMIT] = {0};
+	double costs[POWERED_ROUTE_REFINEMENT_LIMIT];
+	SampleReservoir challenge = {.random = 11};
+	ExcludedPools excluded = {.challenge = &challenge};
+	int count = 0;
+	PoweredRouteCandidate *first = make_candidate(4, 0);
+	PoweredRouteCandidate *second = make_candidate(4, 1);
+
+	insert_top_candidate(first, 4, 2, &count, candidates, costs, &excluded);
+	insert_top_candidate(second, 4, 2, &count, candidates, costs, &excluded);
+	check_true("equal-cost candidates preserve arrival order",
+		count == 2 && candidates[0] == first && candidates[1] == second);
+
+	for(int i = 0; i < count; i++) destroy_candidate(candidates[i]);
+	for(int i = 0; i < challenge.count; i++) destroy_candidate(challenge.samples[i]);
+}
+
 static void check_reservoir(void) {
 	SampleReservoir reservoir = {.random = 12345};
 	for(int i = 0; i < 4 * POWERED_CHALLENGE_SLOTS; i++) reservoir_retain(&reservoir, make_candidate(i, 0));
@@ -117,6 +135,7 @@ static void check_candidate_lifecycle(void) {
 int run_optimizer_unit_tests(void) {
 	check_random_sequence();
 	check_top_candidates();
+	check_equal_cost_candidates_preserve_order();
 	check_reservoir();
 	check_repair_pool();
 	check_candidate_lifecycle();

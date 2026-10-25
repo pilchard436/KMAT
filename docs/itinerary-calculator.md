@@ -168,6 +168,54 @@ The main search, final route filters, and powered-route optimization are in
 [`transfer_search_worker.c`](../orbit_calculator/transfer_search_worker.c),
 and [`powered_flyby_optimizer.c`](../orbit_calculator/powered_flyby_optimizer.c).
 
+### Parallelizing filtering and optimization
+
+The departure-date search and post-search filtering use worker pools. Filtering
+assigns each departure itinerary tree to one worker; tree pruning stays local to
+that worker, then surviving trees are compacted in their original order on the
+calculation thread. Rejection counts, moon-block counts, and progress increments
+are synchronized, workers apply the configured thread-local moon policies, and
+the pool preserves the search cancellation counter.
+
+- **Filtering is parallelized.** Independent departure trees are filtered
+  concurrently while the final tree ordering and counts remain deterministic.
+- **Route scoring is parallelized before global selection.** Each arrival
+  route is initialized and scored independently in worker-owned storage.
+  Workers use the calculation thread's floating-point environment and the
+  configured thread-local moon policies. Scored candidates and rejected routes
+  are merged on the calculation thread in their original arrival order before
+  updating the shared top-route, repair, and challenge pools.
+- **Selected-candidate refinement is parallelized.** Global ranking and
+  challenge selection remain serial. Once the candidate list is fixed,
+  candidates are refined independently in worker-owned buffers; their results
+  and any DSM improvements are applied to itinerary trees in candidate order on
+  the calculation thread. Workers inherit the calculation thread's floating-
+  point environment because solver results otherwise differ across Windows
+  threads. Objective budgets and call counts remain thread-local.
+- **Rejected-route repair attempts are parallelized.** Each retained repair
+  slot gets a deterministic random stream in slot order and is repaired in
+  worker-owned candidate data. Repaired routes are verified and merged into
+  the global ranking serially in slot order; challenge sampling also remains
+  serial. Route scoring, top-candidate ranking/merge, challenge selection, and
+  repair timings are reported separately.
+- **Fly-By and Capture optimization run concurrently when both modes are
+  requested.** Capture operates on its own copy of the departure trees, and
+  each optimizer keeps its candidates and statistics separate. The two mode
+  workers share a bounded CPU budget with their nested scoring/refinement
+  pools, use the calculation thread's floating-point environment and their
+  own thread-local moon policies, and share the existing cancellation state.
+  Progress reports combined completion while both optimizers run; filtering
+  remains sequential after both finish. If fewer than two workers are
+  available, the modes use the sequential path.
+
+Filtering, route scoring, rejected-route repair, selected-candidate refinement,
+and Fly-By/Capture optimization are parallelized while global ranking and
+result merging remain deterministic. The measured scoring, ranking/merge,
+challenge-selection, repair, refinement, and both-mode results are recorded in
+[`itinerary-profiling-results.md`](./itinerary-profiling-results.md). Actual
+end-to-end gains depend on how much of a search is spent in the parallelized
+stages.
+
 ### Cancellation and incremental refinement
 
 Search workers check the cancellation state while searching departure dates and

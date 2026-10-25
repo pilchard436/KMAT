@@ -49,6 +49,23 @@ void run_formats_tests(void) {
         progress_status.progress, 0.375, tolerance);
     expect_int("scoring progress reports the Capture mode",
         progress_status.phase_transfer_type, TF_CAPTURE);
+    begin_combined_optimization_progress(2);
+    set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING, TF_FLYBY, 5, 10);
+    increment_calculation_progress();
+    progress_status = get_current_transfer_calc_status();
+    expect_int("both-mode optimization exposes a stable combined progress phase",
+        progress_status.phase, TRANSFER_PROGRESS_OPTIMIZING_BOTH);
+    expect_int("internal optimizer progress cannot overwrite the combined phase",
+        progress_status.phase_done, 0);
+    complete_combined_optimization_progress();
+    progress_status = get_current_transfer_calc_status();
+    expect_int("combined optimization advances when a mode finishes",
+        progress_status.phase_done, 1);
+    complete_combined_optimization_progress();
+    progress_status = get_current_transfer_calc_status();
+    expect_int("combined optimization completes after both modes finish",
+        progress_status.phase_done, 2);
+    end_combined_optimization_progress();
     set_calculation_progress_phase(TRANSFER_PROGRESS_FINALIZING, TF_BOTH, 0, 0);
     progress_status = get_current_transfer_calc_status();
     expect_int("finalization is reported as a separate progress phase",

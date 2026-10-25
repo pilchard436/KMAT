@@ -4,11 +4,56 @@
 #include "tools/tool_funcs.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <sys/time.h>
 #include <limits.h>
+#include <fenv.h>
 
-static int routes_blocked_by_moons;
+static atomic_int routes_blocked_by_moons;
+
+typedef struct {
+	struct ItinStep **departures;
+	int num_departures;
+	const Itin_Calc_Data *calc_data;
+	atomic_int next_departure;
+} Itinerary_Filter_Work;
+
+typedef struct {
+	struct ItinStep **departures;
+	int num_departures;
+	const Itin_Calc_Data *calc_data;
+	int max_workers;
+	int improvements;
+	fenv_t calculation_fp_environment;
+	int floating_environment_failed;
+	PoweredFlybyOptimizationStats stats;
+} Powered_Mode_Optimization_Work;
+
+typedef struct {
+	Powered_Mode_Optimization_Work modes[2];
+	atomic_int next_mode;
+} Combined_Mode_Optimization_Work;
+
+static void *optimize_powered_mode(void *args) {
+	Combined_Mode_Optimization_Work *combined_work = args;
+	int mode_index = atomic_fetch_add(&combined_work->next_mode, 1);
+	if(mode_index >= 2) return NULL;
+	Powered_Mode_Optimization_Work *work = &combined_work->modes[mode_index];
+	if(fesetenv(&work->calculation_fp_environment) != 0) {
+		work->floating_environment_failed = 1;
+		return NULL;
+	}
+	int previous_moon_aware = set_moon_aware_flybys_enabled(work->calc_data->moon_aware_flybys);
+	int previous_moon_assist = set_moon_assist_enabled(work->calc_data->moon_assist_arrival);
+	work->improvements = optimize_powered_flyby_routes_with_worker_limit(work->departures,
+		work->num_departures, work->calc_data, POWERED_ROUTE_REFINEMENT_LIMIT,
+		work->max_workers, &work->stats);
+	set_moon_assist_enabled(previous_moon_assist);
+	set_moon_aware_flybys_enabled(previous_moon_aware);
+	complete_combined_optimization_progress();
+	return NULL;
+}
 
 int get_num_departure_dates(double jd_min_dep, double jd_max_dep, double step_dep_date) {
 	if(!isfinite(jd_min_dep) || !isfinite(jd_max_dep) || !isfinite(step_dep_date) ||
@@ -47,7 +92,7 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 		return 0;
 	}
 	if(route_blocked_by_moons(arrival)) {
-		routes_blocked_by_moons++;
+		atomic_fetch_add(&routes_blocked_by_moons, 1);
 		return 0;
 	}
 	int crosses_unmodeled_soi = 0;
@@ -72,6 +117,45 @@ static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Dat
 		else detach_itinerary_child(step, child_index);
 	}
 	return step->num_next_nodes > 0;
+}
+
+static void *filter_itinerary_departures(void *args) {
+	Itinerary_Filter_Work *work = args;
+	set_moon_aware_flybys_enabled(work->calc_data->moon_aware_flybys);
+	set_moon_assist_enabled(work->calc_data->moon_assist_arrival);
+	int departure_index = atomic_fetch_add(&work->next_departure, 1);
+	while(departure_index < work->num_departures) {
+		struct ItinStep *departure = work->departures[departure_index];
+		if(!prune_invalid_route_leaves(departure, work->calc_data)) {
+			free_itinerary(departure);
+			work->departures[departure_index] = NULL;
+		}
+		increment_calculation_progress();
+		departure_index = atomic_fetch_add(&work->next_departure, 1);
+	}
+	return NULL;
+}
+
+static int filter_itinerary_departure_array(struct ItinStep **departures, int num_departures,
+		const Itin_Calc_Data *calc_data) {
+	Itinerary_Filter_Work work = {
+		.departures = departures,
+		.num_departures = num_departures,
+		.calc_data = calc_data
+	};
+	atomic_init(&work.next_departure, 0);
+	if(num_departures > 1) {
+		struct Thread_Pool pool = use_thread_pool32_preserving_counters(
+			filter_itinerary_departures, &work);
+		join_thread_pool(pool);
+	} else if(num_departures == 1) {
+		filter_itinerary_departures(&work);
+	}
+	int valid_departures = 0;
+	for(int i = 0; i < num_departures; i++) {
+		if(departures[i] != NULL) departures[valid_departures++] = departures[i];
+	}
+	return valid_departures;
 }
 
 static void cache_arrival_dvs_in_tree(struct ItinStep *step, double dep_periapsis, double arr_periapsis) {
@@ -319,14 +403,78 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 			}
 		}
 	}
+	Itin_Calc_Data capture_calc_data = calc_data;
+	capture_calc_data.dv_filter.last_transfer_type = TF_CAPTURE;
+	PoweredFlybyOptimizationStats capture_stats = {0};
+	int capture_optimization_completed = 0;
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
 		if(get_thread_counter(3) == 0) {
-			PoweredFlybyOptimizationStats powered_stats;
+			PoweredFlybyOptimizationStats powered_stats = {0};
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 			phase_start = progress_clock();
 #endif
-			optimize_powered_flyby_routes(departures, num_deps, &calc_data,
-				POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+			if(calculate_both_modes && capture_departures != NULL) {
+				size_t worker_capacity = get_thread_pool32_worker_capacity();
+				fenv_t calculation_fp_environment;
+				if(worker_capacity >= 2 && fegetenv(&calculation_fp_environment) == 0) {
+					int nested_worker_capacity = (int)worker_capacity - 2;
+					Combined_Mode_Optimization_Work combined_work = {
+						.modes = {
+						{
+							.departures = departures,
+							.num_departures = num_deps,
+							.calc_data = &calc_data,
+							.max_workers = (nested_worker_capacity + 1) / 2,
+							.calculation_fp_environment = calculation_fp_environment
+						},
+						{
+							.departures = capture_departures,
+							.num_departures = shared_num_deps,
+							.calc_data = &capture_calc_data,
+							.max_workers = nested_worker_capacity / 2,
+							.calculation_fp_environment = calculation_fp_environment
+						}
+						}
+					};
+					atomic_init(&combined_work.next_mode, 0);
+					begin_combined_optimization_progress(2);
+					struct Thread_Pool pool = use_thread_pool32_preserving_counters_with_limit(
+						optimize_powered_mode, &combined_work, 2);
+					join_thread_pool(pool);
+					for(int mode_index = 0; mode_index < 2; mode_index++) {
+						Powered_Mode_Optimization_Work *mode = &combined_work.modes[mode_index];
+						if(!mode->floating_environment_failed) continue;
+						fprintf(stderr, "An optimization worker could not inherit the calculation thread's floating-point environment; finishing that mode on the calculation thread.\n");
+						if(mode_index == 0) {
+							mode->improvements = optimize_powered_flyby_routes(
+								departures, num_deps, &calc_data,
+								POWERED_ROUTE_REFINEMENT_LIMIT, &mode->stats);
+							powered_stats = mode->stats;
+						} else {
+							mode->improvements = optimize_powered_flyby_routes(
+								capture_departures, shared_num_deps, &capture_calc_data,
+								POWERED_ROUTE_REFINEMENT_LIMIT, &mode->stats);
+							capture_stats = mode->stats;
+							capture_optimization_completed = 1;
+						}
+						complete_combined_optimization_progress();
+					}
+					end_combined_optimization_progress();
+					if(!combined_work.modes[0].floating_environment_failed)
+						powered_stats = combined_work.modes[0].stats;
+					if(!combined_work.modes[1].floating_environment_failed) {
+						capture_stats = combined_work.modes[1].stats;
+						capture_optimization_completed = 1;
+					}
+				} else {
+					fprintf(stderr, "Unable to capture the calculation thread's floating-point environment or start two mode workers; optimizing modes sequentially.\n");
+					optimize_powered_flyby_routes(departures, num_deps, &calc_data,
+						POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+				}
+			} else {
+				optimize_powered_flyby_routes(departures, num_deps, &calc_data,
+					POWERED_ROUTE_REFINEMENT_LIMIT, &powered_stats);
+			}
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 			optimization_seconds = progress_clock() - phase_start;
 #endif
@@ -343,11 +491,13 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 			results.best_unpowered_seed_total_dv = powered_stats.best_unpowered_seed_total_dv;
 			results.best_powered_initial_total_dv = powered_stats.best_initial_total_dv;
 			results.best_powered_refined_total_dv = powered_stats.best_refined_total_dv;
-			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best saving %.2f m/s, best full dV %.3f -> %.3f m/s, exact scoring %.2f s, timing refinement %.2f s\n",
+			printf("Powered flyby optimization: %d/%d improved, %d valid, %d SOI-corrected, best saving %.2f m/s, best full dV %.3f -> %.3f m/s, route scoring %.2f s, global ranking/merge %.4f s, challenge selection %.6f s, repair %.2f s, timing refinement %.2f s\n",
 				powered_stats.routes_improved, powered_stats.routes_considered,
 				powered_stats.routes_valid, powered_stats.routes_corrected,
 				powered_stats.best_delta_v_saving, powered_stats.best_initial_total_dv,
-				powered_stats.best_refined_total_dv, powered_stats.exact_scoring_seconds,
+				powered_stats.best_refined_total_dv, powered_stats.route_scoring_seconds,
+				powered_stats.global_ranking_seconds, powered_stats.challenge_selection_seconds,
+				powered_stats.repair_seconds,
 				powered_stats.timing_refinement_seconds);
 			printf("Refinement budget: %llu objective evaluations, %d multi-start routes, %d route budgets exhausted\n",
 				powered_stats.objective_evaluations, powered_stats.multi_start_routes,
@@ -371,17 +521,8 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		set_calculation_progress_phase(
 			TRANSFER_PROGRESS_FILTERING, TF_FLYBY, 0, itineraries_before_prune + num_deps);
 		valid_departures = 0;
-		routes_blocked_by_moons = 0;
-		for(int i = 0; i < num_deps; i++) {
-			if(!prune_invalid_route_leaves(departures[i], &calc_data)) {
-				free_itinerary(departures[i]);
-				increment_calculation_progress();
-				continue;
-			}
-			departures[valid_departures++] = departures[i];
-			increment_calculation_progress();
-		}
-		num_deps = valid_departures;
+		atomic_store(&routes_blocked_by_moons, 0);
+		num_deps = filter_itinerary_departure_array(departures, num_deps, &calc_data);
 		int itineraries_after_prune = 0;
 		for(int i = 0; i < num_deps; i++)
 			itineraries_after_prune += get_number_of_itineraries(departures[i]);
@@ -389,40 +530,41 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 		filtering_seconds += progress_clock() - phase_start;
 #endif
-		if(routes_blocked_by_moons > 0)
+		int moon_blocked = atomic_load(&routes_blocked_by_moons);
+		if(moon_blocked > 0)
 			printf("Moon check removed %d of %d routes (hit a moon or passed inside a moon's sphere of influence)\n",
-				routes_blocked_by_moons, itineraries_before_prune);
+				moon_blocked, itineraries_before_prune);
 	}
 
 	if(calculate_both_modes && capture_departures != NULL) {
 		Itin_Calc_Data capture_calc_data = calc_data;
 		capture_calc_data.dv_filter.last_transfer_type = TF_CAPTURE;
-		if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET && get_thread_counter(3) == 0) {
-			PoweredFlybyOptimizationStats capture_stats;
-			optimize_powered_flyby_routes(capture_departures, shared_num_deps, &capture_calc_data,
-				POWERED_ROUTE_REFINEMENT_LIMIT, &capture_stats);
-			printf("Capture powered-route optimization: %d/%d improved, %d valid\n",
-				capture_stats.routes_improved, capture_stats.routes_considered, capture_stats.routes_valid);
+		if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET &&
+			get_thread_counter(3) == 0 && !capture_optimization_completed) {
+			optimize_powered_flyby_routes(capture_departures, shared_num_deps,
+				&capture_calc_data, POWERED_ROUTE_REFINEMENT_LIMIT, &capture_stats);
+			printf("Capture powered-route optimization: %d/%d improved, %d valid, route scoring %.2f s, global ranking/merge %.4f s, challenge selection %.6f s, repair %.2f s, timing refinement %.2f s\n",
+				capture_stats.routes_improved, capture_stats.routes_considered, capture_stats.routes_valid,
+				capture_stats.route_scoring_seconds, capture_stats.global_ranking_seconds,
+				capture_stats.challenge_selection_seconds, capture_stats.repair_seconds,
+				capture_stats.timing_refinement_seconds);
 		}
+		if(capture_optimization_completed)
+			printf("Capture powered-route optimization: %d/%d improved, %d valid, route scoring %.2f s, global ranking/merge %.4f s, challenge selection %.6f s, repair %.2f s, timing refinement %.2f s\n",
+				capture_stats.routes_improved, capture_stats.routes_considered, capture_stats.routes_valid,
+				capture_stats.route_scoring_seconds, capture_stats.global_ranking_seconds,
+				capture_stats.challenge_selection_seconds, capture_stats.repair_seconds,
+				capture_stats.timing_refinement_seconds);
 
-		routes_blocked_by_moons = 0;
+		atomic_store(&routes_blocked_by_moons, 0);
 		int capture_itineraries_before_prune = 0;
 		for(int i = 0; i < shared_num_deps; i++)
 			capture_itineraries_before_prune += get_number_of_itineraries(capture_departures[i]);
 		set_calculation_progress_phase(
 			TRANSFER_PROGRESS_FILTERING, TF_CAPTURE, 0,
 			capture_itineraries_before_prune + shared_num_deps);
-		int capture_valid_departures = 0;
-		for(int i = 0; i < shared_num_deps; i++) {
-			if(!prune_invalid_route_leaves(capture_departures[i], &capture_calc_data)) {
-				free_itinerary(capture_departures[i]);
-				increment_calculation_progress();
-				continue;
-			}
-			capture_departures[capture_valid_departures++] = capture_departures[i];
-			increment_calculation_progress();
-		}
-		shared_num_deps = capture_valid_departures;
+		shared_num_deps = filter_itinerary_departure_array(
+			capture_departures, shared_num_deps, &capture_calc_data);
 		if(shared_num_deps == 0) {
 			free(capture_departures);
 			capture_departures = NULL;
