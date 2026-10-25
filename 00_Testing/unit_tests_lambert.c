@@ -4,7 +4,32 @@ static int cancel_requested(void *context) {
     return *(int *)context;
 }
 
+static void run_orbit_propagation_tests(void) {
+    Body sun = {.mu = 1.3271244004193938e20};
+    double eccentricities[] = {0, 0.0167, 0.2, 0.6, 0.9, 0.97};
+    double worst_time_error = 0, worst_period_error = 0;
+    for(int e_index = 0; e_index < 6; e_index++) {
+        Orbit orbit = constr_orbit_from_elements(2.279e11, eccentricities[e_index], 0.03, 0.8, 5.0, 1.0, &sun);
+        double period = calc_orbital_period(orbit);
+        double start_time = calc_orbit_time_since_periapsis(orbit);
+        for(int step = -40; step <= 400; step++) {
+            double dt = step * period / 37;
+            double expected = fmod(fmod(start_time + dt, period) + period, period);
+            double actual = calc_orbit_time_since_periapsis(propagate_orbit_time(orbit, dt));
+            double error = fabs(actual - expected);
+            if(error > period / 2) error = period - error;
+            if(error > worst_time_error) worst_time_error = error;
+        }
+        double period_error = fabs(pi_norm(propagate_orbit_time(orbit, period).ta - orbit.ta));
+        if(period_error > M_PI) period_error = 2 * M_PI - period_error;
+        if(period_error > worst_period_error) worst_period_error = period_error;
+    }
+    expect_near("elliptic propagation reaches the requested time since periapsis", worst_time_error, 0, 1e-2);
+    expect_near("elliptic propagation over one period returns the true anomaly", worst_period_error, 0, 1e-6);
+}
+
 void run_lambert_tests(void) {
+    run_orbit_propagation_tests();
     const double pi = 3.14159265358979323846;
     const double tolerance = 1e-12;
     (void)pi;

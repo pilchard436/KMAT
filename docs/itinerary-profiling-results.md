@@ -412,3 +412,26 @@ pre-change samples would make the comparison stronger.
 - One accepted timing sample per configuration means small differences may be
   affected by machine load and run order. The results are useful for comparing
   this scenario, but are not repeated-run performance estimates.
+
+
+## CPU speedup: Kepler solver for orbit propagation
+
+`propagate_orbit_time` (orbitlib `src/orbit.c`) found the true anomaly with a
+step-halving search to a 1 s tolerance. `osv_from_elements` cost about
+2,860 ns per call, while a Lambert solve costs about 100 ns, so target-state
+propagation dominated every flyby evaluation. Elliptic orbits (`0 <= e < 1`)
+now use a Newton solve of Kepler's equation (about 509 ns per call, 5.6x
+faster); the old search remains as a fallback and for `e >= 1`.
+
+| Case | Before | After |
+|---|---|---|
+| Coverage run, total wall time | 88.7 s | 47.7 s |
+| Jupiter, budget 512 | 5.6 s | 3.6 s |
+| Jupiter, budget 2,048 | 14.8 s | 10.7 s |
+| Saturn, budget 512 | 28.1 s | 11.8 s |
+
+Node and itinerary counts moved by at most about 0.2%, because the old
+propagator was only accurate to about 1 s of orbital time. Integration checks
+that were calibrated to that numerical noise (DSM total comparison, resonant
+re-solve cost for maneuver-free routes, and the DSM model date pair) were
+adjusted.
