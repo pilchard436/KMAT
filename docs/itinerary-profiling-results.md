@@ -435,3 +435,30 @@ propagator was only accurate to about 1 s of orbital time. Integration checks
 that were calibrated to that numerical noise (DSM total comparison, resonant
 re-solve cost for maneuver-free routes, and the DSM model date pair) were
 adjusted.
+
+
+## CPU speedup: SOI iteration freeze and golden-section reuse
+
+Profiling at budget 512 showed the per-seed powered flyby optimization
+(`calculate_powered_flyby`, about 4.5 us per call) as the other large cost next to
+the root-finder, and it grows with the seed budget.
+
+- **Golden-section reuse** in `calculate_powered_flyby` (orbitlib): each of the 32
+  refinement steps now evaluates one new periapsis radius instead of two.
+- **SOI iteration freeze** in `powered_route_objective.c`: the periapsis radius
+  and side flipped between near-equal optima, so many routes oscillated until the
+  60-iteration limit (4,544 solves in one integration run). Freezing the choice
+  after four iterations cuts that to 84, and routes that previously failed the
+  convergence check now converge. The "zero-delta-v DSM equals the plain route"
+  check passes on every date pair again.
+
+| Case | After Kepler solver | After both changes |
+|---|---|---|
+| Jupiter, budget 512 | 3.6 s | 2.7 s |
+| Jupiter, budget 2,048 | 10.7 s | 8.2 s |
+| Saturn, budget 512 | 11.8 s | 9.8 s |
+| Coverage run, total wall time | 47.7 s | 37.9 s |
+
+Itinerary counts are unchanged at budget 512 (4,598 Jupiter, 8,908 Saturn). The
+integration test no longer requires rejected-route repairs, because the search
+fixture no longer produces rejections.
