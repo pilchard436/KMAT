@@ -3,7 +3,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <gtk/gtk.h>
+#include "thread_pool.h"
 
 static void restore_arrival_dv_cache_metadata(struct ItinStep *step, double dep_periapsis,
 		double arr_periapsis, int moon_assist_enabled) {
@@ -56,6 +58,51 @@ static void cache_step_dv_values(struct ItinStep *step, double dep_periapsis) {
 	}
 }
 
+typedef struct DvPrepareWork {
+	struct ItinStep **departures;
+	int num_departures;
+	atomic_int next_departure;
+	double dep_periapsis, arr_periapsis;
+	int moon_aware, moon_assist, require_dual_moon_assist_dvs;
+} DvPrepareWork;
+
+// Moon flags are thread-local, so workers apply the saving thread's settings.
+static void *prepare_departure_dv_values(void *args) {
+	DvPrepareWork *work = args;
+	set_moon_assist_enabled(work->moon_assist);
+	set_moon_aware_flybys_enabled(work->moon_aware);
+	int index = atomic_fetch_add(&work->next_departure, 1);
+	while(index < work->num_departures) {
+		ensure_route_dv_values(work->departures[index], work->dep_periapsis, work->arr_periapsis,
+				work->require_dual_moon_assist_dvs);
+		cache_step_dv_values(work->departures[index], work->dep_periapsis);
+		index = atomic_fetch_add(&work->next_departure, 1);
+	}
+	return NULL;
+}
+
+static void prepare_route_dv_values(struct ItinStep **departures, int num_departures,
+		const Itin_Calc_Data *calc_data) {
+	if(num_departures <= 0) return;
+	DvPrepareWork work = {
+		.departures = departures,
+		.num_departures = num_departures,
+		.dep_periapsis = calc_data->dv_filter.dep_periapsis,
+		.arr_periapsis = calc_data->dv_filter.arr_periapsis,
+		.moon_aware = moon_aware_flybys_is_active(),
+		.moon_assist = moon_assist_is_active(),
+		.require_dual_moon_assist_dvs = calc_data->search_options.known &&
+			calc_data->search_options.moon_assist_arrival
+	};
+	atomic_init(&work.next_departure, 0);
+	if(num_departures == 1) {
+		prepare_departure_dv_values(&work);
+		return;
+	}
+	struct Thread_Pool pool = use_thread_pool32_preserving_counters(prepare_departure_dv_values, &work);
+	join_thread_pool(pool);
+}
+
 static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 		Itin_Calc_Data calc_data, CelestSystem *system, char *filepath) {
 	int file_type = get_current_bin_file_type();
@@ -86,18 +133,8 @@ static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 		else
 			starting_orbit_set_active(NULL, NULL);
 	}
-	for(int i = 0; i < results.num_deps; i++)
-		ensure_route_dv_values(results.departures[i], calc_data.dv_filter.dep_periapsis,
-			calc_data.dv_filter.arr_periapsis, calc_data.search_options.known &&
-				calc_data.search_options.moon_assist_arrival);
-	for(int i = 0; i < results.num_deps; i++)
-		cache_step_dv_values(results.departures[i], calc_data.dv_filter.dep_periapsis);
-	for(int i = 0; i < results.capture_num_deps; i++)
-		ensure_route_dv_values(results.capture_departures[i], calc_data.dv_filter.dep_periapsis,
-			calc_data.dv_filter.arr_periapsis, calc_data.search_options.known &&
-				calc_data.search_options.moon_assist_arrival);
-	for(int i = 0; i < results.capture_num_deps; i++)
-		cache_step_dv_values(results.capture_departures[i], calc_data.dv_filter.dep_periapsis);
+	prepare_route_dv_values(results.departures, results.num_deps, &calc_data);
+	prepare_route_dv_values(results.capture_departures, results.capture_num_deps, &calc_data);
 	if(calc_data.search_options.known) {
 		set_moon_assist_enabled(previous_moon_assist);
 		set_moon_aware_flybys_enabled(previous_moon_aware);
