@@ -77,6 +77,11 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 		g_snprintf(s, sizeof(s),
 			"Finalizing results; route checks and data preparation are still running\nElapsed: %.1f s; %d workers active; %d itineraries found",
 			elapsed_seconds, calc_status.num_deps_active, calc_status.num_itins);
+	} else if(calc_status.phase == TRANSFER_PROGRESS_OPTIMIZING_BOTH) {
+		g_snprintf(s, sizeof(s),
+			"Optimizing for Fly-By and Capture\nElapsed: %.1f s; departure dates: %d / %d; %d itineraries found",
+			elapsed_seconds, calc_status.num_deps, calc_status.total_departures,
+			calc_status.num_itins);
 	} else {
 		g_snprintf(s, sizeof(s), "%s %s routes: %d / %d complete\nElapsed: %.1f s; departure dates: %d / %d; %d itineraries found",
 			transfer_progress_phase_verb(calc_status.phase),
@@ -89,6 +94,8 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 		char console_status[160];
 		if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING)
 			g_snprintf(console_status, sizeof(console_status), "Finalizing results");
+		else if(calc_status.phase == TRANSFER_PROGRESS_OPTIMIZING_BOTH)
+			g_snprintf(console_status, sizeof(console_status), "Optimizing for Fly-By and Capture");
 		else
 			g_snprintf(console_status, sizeof(console_status), "%s: %d/%d complete",
 				transfer_progress_phase_verb(calc_status.phase),

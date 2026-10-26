@@ -134,8 +134,10 @@ reports search progress while the worker performs the calculation. The progress
 bar tracks the current phase's completed work (departure dates, scored routes,
 refined routes, or filtered routes). The percentage restarts when the phase
 changes; the status text names the active phase and its completed/total count.
-Final result preparation is shown as an indeterminate animation because its
-remaining duration cannot be measured reliably.
+Concurrent Fly-By and Capture optimization is identified by both mode names
+rather than a completed/total count. Final result preparation is shown as an
+indeterminate animation because its remaining duration cannot be measured
+reliably.
 
 For each departure date, the search:
 
