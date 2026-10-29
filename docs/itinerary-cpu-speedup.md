@@ -183,6 +183,25 @@ small budget explicitly so it still exercises budget exhaustion.
   bodies) starved deep routes: distinct body sequences fell from 300 to 33 in
   one integration test. The body-level reserve is used instead.
 
+### Compiler flags
+
+Measured on the Earth to Saturn profile scenario (config 0, three runs each, GCC
+16.2 MinGW, `-O2` baseline 9.38 s):
+
+| Flags | Config 0 | Config 1 (resonant) | Nodes (config 0) |
+|---|---:|---:|---:|
+| `-O2` | 9.38 s | 54.8 s | 18,404 |
+| `-O3` | 9.54 s | | 18,404 |
+| `-O3 -march=x86-64-v3` | 9.26 s | | 18,405 |
+| `-O2 -flto` | 7.89 s | 51.2 s | 18,404 |
+| `-O3 -march=x86-64-v3 -flto` | 7.44 s | 47.5 s | 18,402 |
+
+LTO is enabled for Release and RelWithDebInfo (`KMAT_ENABLE_LTO`, on by
+default): 16% on the non-resonant search and 6.5% on the resonant one, with
+identical results. `-O3` does not help, and `-march=x86-64-v3` only adds a few
+percent with FMA-induced differences in the search and a CPU requirement
+(AVX2), so neither is used.
+
 ## Remaining options
 
 - A coarser resonant scan step or fewer leg variants would be faster but can
