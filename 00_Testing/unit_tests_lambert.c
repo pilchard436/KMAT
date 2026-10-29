@@ -43,6 +43,50 @@ static void run_orbit_propagation_tests(void) {
     }
     expect_near("osv_from_elements matches propagated orbit position", worst_position_error, 0, 1e-5);
     expect_near("osv_from_elements matches propagated orbit velocity", worst_velocity_error, 0, 1e-5);
+
+    // Elements at an arbitrary epoch, more distinct orbits than the per-thread element cache holds.
+    double worst_after_error = 0;
+    for(int orbit_index = 0; orbit_index < 40; orbit_index++) {
+        Orbit orbit = constr_orbit_from_elements(1.0e11 * (1 + 0.05 * orbit_index), 0.02 * (orbit_index % 9),
+            0.01 * orbit_index, 0.3 * orbit_index, 0.7 * orbit_index, 0.11 * orbit_index, &sun);
+        for(int step = 0; step < 5; step++) {
+            double dt = (step - 2) * 2.3e7;
+            OSV fast = osv_from_elements_after(&orbit, dt);
+            OSV reference = osv_from_orbit(propagate_orbit_time(orbit, dt));
+            double error = mag_vec3(subtract_vec3(fast.r, reference.r)) / mag_vec3(reference.r);
+            if(error > worst_after_error) worst_after_error = error;
+        }
+    }
+    expect_near("osv_from_elements_after propagates from the elements' epoch", worst_after_error, 0, 1e-5);
+
+    // Ephemeris lookup: nearest entry (ties to the later one), then propagation from that entry.
+    Orbit ephem_orbit = constr_orbit_from_elements(1.5e11, 0.1, 0.05, 0.4, 1.2, 0.9, &sun);
+    Ephem ephem_list[12];
+    for(int i = 0; i < 12; i++) {
+        double epoch = 1000 + 30 * i;
+        OSV state = osv_from_elements(ephem_orbit, epoch);
+        ephem_list[i] = (Ephem){.epoch = epoch, .r = state.r, .v = state.v};
+    }
+    double probes[] = {900, 1000, 1014, 1015, 1016, 1157.2, 1330, 1800};
+    int expected_index[] = {0, 0, 0, 1, 1, 5, 11, 11};
+    int nearest_matches = 1;
+    double worst_ephem_error = 0;
+    for(int probe = 0; probe < 8; probe++) {
+        Ephem nearest = get_closest_ephem(ephem_list, 12, probes[probe]);
+        nearest_matches &= nearest.epoch == ephem_list[expected_index[probe]].epoch;
+        OSV from_ephem = osv_from_ephem(ephem_list, 12, probes[probe], &sun);
+        OSV reference = propagate_osv_time((OSV){nearest.r, nearest.v}, &sun, (probes[probe] - nearest.epoch) * 86400);
+        double error = mag_vec3(subtract_vec3(from_ephem.r, reference.r)) / mag_vec3(reference.r);
+        if(error > worst_ephem_error) worst_ephem_error = error;
+    }
+    expect_int("ephemeris lookup picks the nearest entry", nearest_matches, 1);
+    expect_near("osv_from_ephem propagates the nearest entry", worst_ephem_error, 0, 1e-5);
+    // Same entry address with new contents must not reuse the cached elements.
+    OSV before_change = osv_from_ephem(ephem_list, 12, 1157.2, &sun);
+    ephem_list[5].r = scale_vec3(ephem_list[5].r, 1.01);
+    OSV after_change = osv_from_ephem(ephem_list, 12, 1157.2, &sun);
+    expect_int("osv_from_ephem notices changed ephemeris contents",
+        mag_vec3(subtract_vec3(before_change.r, after_change.r)) > 1e6, 1);
 }
 
 void run_lambert_tests(void) {
@@ -130,5 +174,37 @@ void run_lambert_tests(void) {
         &solar_central_body, 2, 0);
     expect_int("multi-revolution Lambert rejects a time below the minimum",
                            too_fast.success != LAMBERT_SUCCESS, 1);
+
+    int pair_matches = 1, pair_solutions = 0;
+    for(int sample_index = 0; sample_index < 120; sample_index++) {
+        int revolutions = 1 + sample_index % 3;
+        double sample_start_radius = 1.5e11 * (1 + (sample_index % 7) * 0.08);
+        double sample_end_radius = sample_start_radius * (0.9 + (sample_index % 5) * 0.1);
+        double transfer_angle = 0.3 + (sample_index % 11) * 0.55;
+        double circular_period = 2 * pi * sqrt(pow(sample_start_radius, 3) / solar_central_body.mu);
+        double sample_duration = circular_period * (revolutions + 0.2 + (sample_index % 9) * 0.12);
+        Vector3 sample_r0 = vec3(sample_start_radius, 0, 0);
+        Vector3 sample_r1 = vec3(sample_end_radius * cos(transfer_angle), sample_end_radius * sin(transfer_angle), 0);
+        Lambert3 pair[2];
+        calc_lambert3_revs_pair_cancellable(sample_r0, sample_r1, sample_duration, &solar_central_body,
+            revolutions, &pair[0], &pair[1], NULL, NULL);
+        for(int branch = 0; branch < 2; branch++) {
+            Lambert3 single = calc_lambert3_revs(sample_r0, sample_r1, sample_duration, &solar_central_body,
+                revolutions, branch);
+            pair_matches &= single.success == pair[branch].success;
+            if(single.success != LAMBERT_SUCCESS) continue;
+            pair_solutions++;
+            pair_matches &= mag_vec3(subtract_vec3(single.v0, pair[branch].v0)) == 0 &&
+                mag_vec3(subtract_vec3(single.v1, pair[branch].v1)) == 0;
+        }
+    }
+    expect_int("paired multi-revolution Lambert equals the single-branch solutions", pair_matches && pair_solutions > 40, 1);
+    Lambert3 pair_direct[2];
+    calc_lambert3_revs_pair_cancellable(vec3(start_radius, 0, 0), vec3(0, end_radius, 0), hohmann_time, &earth_cb,
+        0, &pair_direct[0], &pair_direct[1], NULL, NULL);
+    expect_int("paired solve with zero revolutions gives the direct arc and no right branch",
+        pair_direct[0].success == LAMBERT_SUCCESS &&
+        mag_vec3(subtract_vec3(pair_direct[0].v0, hohmann_transfer.v0)) == 0 &&
+        pair_direct[1].success != LAMBERT_SUCCESS, 1);
 
 }

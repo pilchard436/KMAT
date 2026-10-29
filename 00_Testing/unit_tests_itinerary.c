@@ -203,6 +203,91 @@ static void check_leg_variants(void) {
 		mag_vec3(subtract_vec3(nearest.v0, plain.v0)) == 0);
 	check_true("the variant output is optional", nearest_leg_variant_lambert(&sun, r0, r1, dt, plain.v0, &nearest, NULL));
 	check_true("variant count covers the revolution limit", LEG_VARIANT_COUNT == 1 + 2 * LEG_VARIANT_MAX_REVS);
+
+	// A near-resonant return two years later, where several revolution counts have solutions.
+	Vector3 resonant_r1 = vec3(1.496e11 * cos(0.4), 1.496e11 * sin(0.4), 2e9);
+	double resonant_dt = 2.1 * 365.25 * 86400.0;
+	Lambert3 batch[LEG_VARIANT_COUNT];
+	calc_leg_variant_lamberts(&sun, r0, resonant_r1, resonant_dt, LEG_VARIANT_COUNT, batch, NULL, NULL);
+	int batch_matches = 1, batch_usable = 0;
+	for(int v = 0; v < LEG_VARIANT_COUNT; v++) {
+		Lambert3 single = calc_leg_variant_lambert(&sun, r0, resonant_r1, resonant_dt, v, NULL, NULL);
+		batch_matches &= single.success == batch[v].success;
+		if(!is_usable_lambert(single)) continue;
+		batch_usable++;
+		batch_matches &= mag_vec3(subtract_vec3(single.v0, batch[v].v0)) == 0 &&
+			mag_vec3(subtract_vec3(single.v1, batch[v].v1)) == 0;
+	}
+	check_true("batch leg variants equal the single-variant solutions", batch_matches);
+	check_true("batch leg variants include multi-revolution solutions", batch_usable >= 3);
+	Lambert3 partial[2];
+	calc_leg_variant_lamberts(&sun, r0, resonant_r1, resonant_dt, 2, partial, NULL, NULL);
+	check_true("a partial batch solves only the requested variants",
+		mag_vec3(subtract_vec3(partial[1].v0, batch[1].v0)) == 0 && partial[1].success == batch[1].success);
+}
+
+// Pruning end nodes computes the same route costs as create_porkchop_point and leaves them cached on the node.
+static void check_end_node_pruning(void) {
+	Body sun = {.mu = 1.32712440018e20, .radius = 6.96e8};
+	Body earth = {.name = "E", .mu = 3.986e14, .radius = 6.371e6, .atmo_alt = 1e5};
+	Body venus = {.name = "V", .mu = 3.24859e14, .radius = 6.0518e6, .atmo_alt = 0};
+	Body mars = {.name = "M", .mu = 4.2828e13, .radius = 3.3895e6, .atmo_alt = 0};
+	earth.orbit.a = 1.496e11; earth.orbit.cb = &sun;
+	venus.orbit.a = 1.082e11; venus.orbit.cb = &sun;
+	mars.orbit.a = 2.279e11; mars.orbit.cb = &sun;
+	struct ItinStep *departure = make_step(&earth, 0, NULL);
+	struct ItinStep *first_flyby = make_step(&venus, 150, departure);
+	struct ItinStep *second_flyby = make_step(&earth, 400, first_flyby);
+	struct ItinStep *arrivals[2] = {make_step(&mars, 700, second_flyby), make_step(&mars, 760, second_flyby)};
+	departure->v_body = vec3(0, 29800, 0);
+	first_flyby->v_dep = vec3(2500, 27000, 0);
+	first_flyby->v_body = vec3(-35000, 0, 0);
+	first_flyby->v_arr = add_vec3(first_flyby->v_body, vec3(4000, 1500, 200));
+	second_flyby->v_dep = add_vec3(first_flyby->v_body, vec3(3900, -1800, -300));
+	second_flyby->v_body = vec3(0, -29800, 0);
+	second_flyby->v_arr = add_vec3(second_flyby->v_body, vec3(6000, 2000, 100));
+	for(int i = 0; i < 2; i++) {
+		arrivals[i]->v_dep = add_vec3(second_flyby->v_body, vec3(5800 + 200 * i, 2300, -100 + 50 * i));
+		arrivals[i]->v_body = vec3(24000, 0, 0);
+		arrivals[i]->v_arr = add_vec3(arrivals[i]->v_body, vec3(2500, 1000 * i, 0));
+	}
+	double dep_periapsis = 2e5, arr_periapsis = 1e5;
+	struct Dv_Filter generous = {.max_totdv = 1e9, .max_depdv = 1e9, .max_satdv = 1e9,
+		.dep_periapsis = dep_periapsis, .arr_periapsis = arr_periapsis, .last_transfer_type = TF_FLYBY};
+	struct PorkchopPoint expected[2];
+	for(int i = 0; i < 2; i++) {
+		expected[i] = create_porkchop_point(arrivals[i], dep_periapsis, arr_periapsis);
+		arrivals[i]->arrival_dv_cache = (struct ItinArrivalDvCache){0};
+	}
+	check_true("generous limits keep both end nodes",
+		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &generous) == 2 && second_flyby->num_next_nodes == 2);
+	int cached_match = 1;
+	for(int i = 0; i < 2; i++) {
+		struct ItinArrivalDvCache cache = arrivals[i]->arrival_dv_cache;
+		cached_match &= cache.route_values_valid && fabs(cache.dv_dep - expected[i].dv_dep) < 1e-9 &&
+			fabs(cache.dv_flyby - expected[i].dv_flyby) < 1e-9 && fabs(cache.dv_dsm - expected[i].dv_dsm) < 1e-9 &&
+			fabs(cache.dv_arr_cap - expected[i].dv_arr_cap) < 1e-9;
+	}
+	check_true("pruning stores the route costs create_porkchop_point computes", cached_match);
+	check_true("pruning caches the flyby burns into the ancestors",
+		second_flyby->flyby_burn_cache.valid && first_flyby->flyby_burn_cache.valid == 0 &&
+		arrivals[0]->flyby_burn_cache.valid && arrivals[1]->flyby_burn_cache.valid);
+
+	// A changed velocity at the shared flyby invalidates the cached burn for the next pruning pass.
+	second_flyby->v_dep = add_vec3(first_flyby->v_body, vec3(3600, -2200, 100));
+	arrivals[0]->arrival_dv_cache = (struct ItinArrivalDvCache){0};
+	struct PorkchopPoint changed = create_porkchop_point(arrivals[0], dep_periapsis, arr_periapsis);
+	arrivals[0]->arrival_dv_cache = (struct ItinArrivalDvCache){0};
+	remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &generous);
+	check_near("pruning recomputes a flyby burn whose inputs changed",
+		arrivals[0]->arrival_dv_cache.dv_flyby, changed.dv_flyby, 1e-9);
+	check_true("the changed flyby burn differs from the cached one", fabs(changed.dv_flyby - expected[0].dv_flyby) > 1);
+
+	struct Dv_Filter tight = generous;
+	tight.max_satdv = 1;
+	check_true("a tight satellite limit prunes the powered end nodes",
+		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &tight) == 0 && second_flyby->num_next_nodes == 0);
+	free_itinerary(departure);
 }
 
 static void check_resonant_samples(void) {
@@ -771,6 +856,7 @@ int run_itinerary_unit_tests(void) {
 	check_itinerary_tree();
 	check_flyby_policy();
 	check_leg_variants();
+	check_end_node_pruning();
 	check_resonant_samples();
 	check_powered_seed_budget_presets();
 	check_powered_seed_share();

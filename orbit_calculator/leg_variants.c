@@ -8,6 +8,17 @@ Lambert3 calc_leg_variant_lambert(Body *cb, Vector3 r0, Vector3 r1, double dt, i
 		cancel_check, cancel_context);
 }
 
+void calc_leg_variant_lamberts(Body *cb, Vector3 r0, Vector3 r1, double dt, int count, Lambert3 *legs,
+		LambertCancelCheck cancel_check, void *cancel_context) {
+	if(count <= 0) return;
+	legs[0] = calc_lambert3_cancellable(r0, r1, dt, cb, cancel_check, cancel_context);
+	for(int variant = 1; variant < count; variant += 2) {
+		Lambert3 right;
+		calc_lambert3_revs_pair_cancellable(r0, r1, dt, cb, (variant + 1) / 2, &legs[variant],
+			variant + 1 < count ? &legs[variant + 1] : &right, cancel_check, cancel_context);
+	}
+}
+
 int is_usable_lambert(Lambert3 leg) {
 	return leg.success != LAMBERT_FAIL_NAN && leg.success != LAMBERT_FAIL_ECC &&
 		leg.success != LAMBERT_MAX_ITERATIONS && isfinite(leg.v0.x + leg.v0.y + leg.v0.z) &&

@@ -16,6 +16,14 @@ struct ItinArrivalDvCache {
 	int valid;
 };
 
+// Search-time cache of the plain powered-flyby burn at prev that leads into this node, keyed on the velocities
+// it was computed from. Not persisted; the analyzer-facing dv_from_prev is separate.
+struct ItinFlybyBurnCache {
+	Vector3 v_arr_prev, v_body_prev, v_dep;
+	double burn;
+	int valid;
+};
+
 struct ItinStep {
 	Body *body;
 	Vector3 r;
@@ -24,6 +32,7 @@ struct ItinStep {
 	double dv_from_prev;
 	int dv_from_prev_valid;
 	struct ItinArrivalDvCache arrival_dv_cache;
+	struct ItinFlybyBurnCache flyby_burn_cache;
 	int num_next_nodes;
 	struct ItinStep *prev;
 	struct ItinStep **next;

@@ -22,12 +22,40 @@ seed sampling is only 1-2% of the work.
 | 3 | SOI-correction freeze: after iteration 4 the flyby periapsis radius and side are frozen (`POWERED_FREEZE_ITERATION`), falling back to the free optimum if the frozen choice becomes infeasible | `orbit_calculator/powered_route_objective.c` | Solves that hit the 60-iteration limit fell from 4,544 to 84 in one integration run |
 | 4 | Golden-section search in `calculate_powered_flyby` reuses one interior point per step | orbitlib `src/transfer.c` | One radius evaluation per step instead of two; with #3, 45.7 s to 37.9 s |
 | 5 | Root search in `find_viable_flybys` stops when the step falls below 1 s, instead of only at exactly 0 | `orbit_calculator/flyby_search.c` | About 3% on Saturn |
+| 6 | `osv_from_elements` keeps the perifocal rotation and the mean anomaly at epoch of recently used orbits in a per-thread cache, starts Newton from one step past M, uses `sincos`, and stops once the step is below 1e-8 | orbitlib `src/orbit.c` | 1,900 to 740 cycles per call; agrees with the old path to 1e-15 |
+| 7 | `osv_from_ephem` finds the nearest entry by binary search (the tables hold 1,800 monthly entries) and propagates the cached elements of that entry through the same fast path instead of the state, element, true-anomaly, state round trip | orbitlib `src/ephemeris.c` | About 6,400 to 1,300 cycles per call; propagation fell from 51% to 24% of the flyby search in the ephemeris scenario |
+| 8 | `calculate_powered_flyby` hoists the radius-independent geometry out of the per-radius evaluation, caches the 64-point log grid per body, and searches the radius with a magnitude-only evaluator (the two mirror sides have the same burn), building the full result once at the chosen radius | orbitlib `src/transfer.c` | 45,800 to 26,200 cycles per full call; per-case results identical |
+| 9 | Delta-v pruning accumulates the shared ancestor costs once per parent and caches each node's plain flyby burn (keyed on the velocities it was computed from) for deeper pruning passes; only the search worker that owns the tree uses the cache | `orbit_calculator/itin_tool.c` | Pruning 21.2 to 7.5 worker-seconds (81% of its burns were repeats) |
+| 10 | The resonant scan propagates the target once per sample date and solves all leg variants from it, with both branches of each revolution count sharing geometry and the minimum-time search (`calc_lambert3_revs_pair_cancellable`); multi-revolution solves reject times below N*pi before iterating | `orbit_calculator/resonant_flybys.c`, `leg_variants.c`, orbitlib `src/transfer.c` | Scan propagation 1,400 to 68 Gcyc, scan Lambert 1,266 to about 650 Gcyc on Saturn |
+| 11 | Resonant roots are refined with the Illinois method, and brackets that straddle the transfer-plane flip (transfer angle through 0 or 180 degrees, which every resonant window contains) are split there instead of being bisected onto the discontinuity | `orbit_calculator/resonant_flybys.c` | 62% of brackets were not roots and ran 40 Lambert solves each; refinement fell from 1,852 to about 250 Gcyc on Saturn |
 
 Why the freeze works: the damped SOI fixed point converges geometrically, then
 jumps when the discrete periapsis choice flips between near-equal-cost optima.
 Freezing after iteration 2 locked in bad radii (differences up to 1,197 m/s);
 8 and 12 still failed the zero-DSM consistency check on one date pair; 4 passed
 every check.
+
+Where the time went before changes 6 to 11 (cycle counters inside
+`find_viable_flybys`, Earth to Saturn, 366 departures): propagation 51%, seed
+selection (`calculate_powered_flyby`) 23%, Lambert 12%, root flyby checks 6%,
+root-finder bookkeeping 2%. Each propagation cost about four Lambert solves.
+In the resonant Saturn run the resonant search was 78% of all flyby-search
+time, split into scan propagation 30%, scan Lambert 27% and refinement 40%.
+
+The resonant return is intrinsically near-degenerate: as the body comes back
+through a transfer angle of 0 or 180 degrees, `cross(r0, r1).z` changes sign,
+Lambert's lambda flips sign, and the speed difference jumps. A sign change
+across that jump is not a root, but bisection spent its full 40 iterations
+converging onto it. The scan now records the plane sign per sample, locates
+the flip by bisection on the propagated position (no Lambert), refines the
+smooth sub-intervals on either side, and, when neither holds a root, still
+offers the better side next to the flip to the same `|dv_inf| < 1 m/s` check
+so near-exact-period returns are kept.
+
+The burn-versus-periapsis curve of a powered flyby has a V-shaped minimum
+where the burn nears zero, so the golden-section bracket must shrink to
+roundoff: 20 instead of 32 steps changed sub-metre burns by several m/s and
+was reverted.
 
 The old propagator was only accurate to about 1 s of orbital time, so some
 integration checks calibrated to that noise were adjusted: the DSM total
@@ -61,6 +89,31 @@ With `--resonant`, original `main` against the current branch:
 The resonant search is still the most expensive option: its 6-day scan costs
 about 700 Lambert solves per search for Earth, and Saturn with resonant remains
 the slowest case.
+
+### After changes 6 to 11
+
+Same machine (Ryzen 7 9800X3D, 15 workers), one run per row. The profile
+configurations are the 366-departure Earth to Saturn scenario of
+[`itinerary-profiling-results.md`](./itinerary-profiling-results.md) on the
+ephemeris system; the mission benchmarks use orbital elements.
+
+| Case | Before | After |
+|---|---:|---:|
+| Profile config 0, search wall time | 20.1 s | 9.3 s |
+| Profile config 0, calculation total | 21.0 s | 9.1 s |
+| Profile config 1 (resonant), calculation total | 185 s | 53 s |
+| Jupiter mission benchmark with `--resonant`, search | 16.6 s | 7.3 s |
+| Saturn mission benchmark with `--resonant`, search | 86.4 s | 29.9 s |
+
+Config 0 found the same 9,300 itineraries (18,404 nodes instead of 18,401);
+best full delta-v 4,676.9 instead of 4,676.2 m/s. Config 1 went from 9,321 to
+9,320 itineraries (18,470 to 18,468 nodes). The Saturn resonant benchmark
+kept 9,002 itineraries and 37 resonant routes (18,498 nodes instead of
+18,503); Jupiter went from 4,844 to 4,823 itineraries with the same 121
+resonant routes and best delta-v. Propagation differences are at the 1e-12
+level, the powered-flyby changes are per-case identical, and the resonant root
+dates move by under a second within the existing 1e-3 m/s tolerance; the
+count shifts come from the search amplifying those.
 
 ### Effect on results
 
@@ -105,9 +158,17 @@ small budget explicitly so it still exercises budget exhaustion.
 
 - **OpenCL Lambert batching** was correct but no faster, because seed sampling
   is a small share of the work. It stays on `feature/opencl-itinerary-search`.
-- **Flyby burn cache in delta-v pruning** gave no measurable gain.
-- **Illinois false position for the resonant root refinement** matched
-  bisection within noise; the cost is the scan, not the refinement.
+  Day-wise GPU parallelism was also ruled out: a departure's tree walk is
+  serial, divergent and allocation-heavy, and 400 lanes at GPU scalar FP64
+  rates are fewer core-equivalents than the 15 CPU workers.
+- **Fewer golden-section steps in `calculate_powered_flyby`** (20 instead of
+  32) changed sub-metre burns by several m/s because the minimum is V-shaped.
+- **Flyby burn cache in delta-v pruning** gave no measurable gain when first
+  tried on the end nodes; measuring showed 81% of the burns were ancestor
+  repeats across depths, which the per-node cache of change 9 removes.
+- **Illinois false position for the resonant root refinement** alone matched
+  bisection within noise; the cost was the spurious brackets at the
+  transfer-plane flip, which change 11 handles.
 - **Seed selection** is bounded at 4 buckets x 3 evaluations per search (about
   7% typical), and trimming it would change which seeds are chosen.
 - **Worker load balancing**: CPU utilization was 84% over a full run, so at

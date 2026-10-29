@@ -97,6 +97,55 @@ int cache_itinerary_arrival_dvs(struct ItinStep *arrival, double arr_periapsis) 
 	return 1;
 }
 
+// Burn of the flyby at `flyby` that leads into `next`; HUGE_VAL when no flyby exists. With use_cache the plain
+// powered-flyby burn is kept on `next`, because search pruning walks the same ancestors for every deeper end node.
+// Only the search worker that owns the tree may use the cache; later phases read shared nodes from several threads.
+static double route_flyby_burn(struct ItinStep *flyby, struct ItinStep *next, int use_cache) {
+	PoweredFlybyResult flyby_result;
+	double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
+	// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
+	if(porkchop_exact_flybys || moon_aware_flybys_is_active())
+		return calculate_flyby_with_moons(flyby->v_arr, next->v_dep, flyby->v_body, flyby->body,
+			minimum_periapsis, flyby->date, &flyby_result) ? flyby_result.burn_delta_v : HUGE_VAL;
+	struct ItinFlybyBurnCache *cache = &next->flyby_burn_cache;
+	if(use_cache && cache->valid &&
+		cache->v_arr_prev.x == flyby->v_arr.x && cache->v_arr_prev.y == flyby->v_arr.y && cache->v_arr_prev.z == flyby->v_arr.z &&
+		cache->v_body_prev.x == flyby->v_body.x && cache->v_body_prev.y == flyby->v_body.y && cache->v_body_prev.z == flyby->v_body.z &&
+		cache->v_dep.x == next->v_dep.x && cache->v_dep.y == next->v_dep.y && cache->v_dep.z == next->v_dep.z)
+		return cache->burn;
+	double burn = calculate_powered_flyby(flyby->v_arr, next->v_dep, flyby->v_body,
+		flyby->body, minimum_periapsis, &flyby_result) ? flyby_result.burn_delta_v : HUGE_VAL;
+	if(use_cache)
+		*cache = (struct ItinFlybyBurnCache){.v_arr_prev = flyby->v_arr, .v_body_prev = flyby->v_body,
+			.v_dep = next->v_dep, .burn = burn, .valid = 1};
+	return burn;
+}
+
+// Departure, DSM and flyby delta-v of the route from its departure node up to `step`, which must not be the
+// departure node itself. use_cache is for the search worker owning the tree; see route_flyby_burn.
+static void accumulate_route_dvs(struct ItinStep *step, double dep_periapsis, int use_cache,
+		double *dv_dep, double *dv_dsm, double *dv_flyby) {
+	*dv_dsm = 0;
+	*dv_flyby = 0;
+	while(step->prev->prev != NULL) {
+		if(step->body == NULL)
+			*dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+		// A DSM right after a flyby must not hide that flyby's burn.
+		if(step->prev->body != NULL && step->prev->prev != NULL)
+			*dv_flyby += route_flyby_burn(step->prev, step, use_cache);
+		step = step->prev;
+	}
+	// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
+	if(step->body == NULL && step->next != NULL && step->num_next_nodes > 0)
+		*dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
+
+	Vector3 departure_vinf = subtract_vec3(step->v_dep, step->prev->v_body);
+	if(!starting_orbit_departure_dv(step->prev->body, departure_vinf,
+		alt2radius(step->prev->body, dep_periapsis), dv_dep))
+		*dv_dep = dv_circ(step->prev->body, alt2radius(step->prev->body, dep_periapsis),
+			mag_vec3(departure_vinf));
+}
+
 struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_periapsis, double arr_periapsis) {
 	struct PorkchopPoint pp;
 	pp.arrival = itin;
@@ -125,39 +174,7 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 		pp.dv_dsm = saved_route_values.dv_dsm;
 		pp.dv_flyby = saved_route_values.dv_flyby;
 	} else {
-		pp.dv_dsm = 0;
-		pp.dv_flyby = 0;
-		struct ItinStep *step = itin;
-		while(step->prev->prev != NULL) {
-			if(step->body == NULL)
-				pp.dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
-			// A DSM right after a flyby must not hide that flyby's burn.
-			if(step->prev->body != NULL && step->prev->prev != NULL) {
-				struct ItinStep *flyby = step->prev;
-				PoweredFlybyResult flyby_result;
-				double minimum_periapsis = flyby_minimum_periapsis(flyby->body);
-				// Search nodes skip the moon analysis for speed; the analyzer turns it on so totals match the details.
-				int flyby_ok = (porkchop_exact_flybys || moon_aware_flybys_is_active()) ?
-					calculate_flyby_with_moons(flyby->v_arr, step->v_dep, flyby->v_body, flyby->body,
-						minimum_periapsis, flyby->date, &flyby_result) :
-					calculate_powered_flyby(flyby->v_arr, step->v_dep, flyby->v_body,
-						flyby->body, minimum_periapsis, &flyby_result);
-				if(flyby_ok)
-					pp.dv_flyby += flyby_result.burn_delta_v;
-				else
-					pp.dv_flyby = HUGE_VAL;
-			}
-			step = step->prev;
-		}
-		// The loop stops at the first-leg node, so a DSM on the first leg is counted here.
-		if(step->body == NULL && step->next != NULL && step->num_next_nodes > 0)
-			pp.dv_dsm += mag_vec3(subtract_vec3(step->next[0]->v_dep, step->v_arr));
-
-		Vector3 departure_vinf = subtract_vec3(step->v_dep, step->prev->v_body);
-		if(!starting_orbit_departure_dv(step->prev->body, departure_vinf,
-			alt2radius(step->prev->body, dep_periapsis), &pp.dv_dep))
-			pp.dv_dep = dv_circ(step->prev->body, alt2radius(step->prev->body, dep_periapsis),
-				mag_vec3(departure_vinf));
+		accumulate_route_dvs(itin, dep_periapsis, 0, &pp.dv_dep, &pp.dv_dsm, &pp.dv_flyby);
 	}
 	pp.arrival->arrival_dv_cache.dv_dep = pp.dv_dep;
 	pp.arrival->arrival_dv_cache.dv_dsm = pp.dv_dsm;
@@ -350,15 +367,47 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	double profile_start = itin_search_profile_tls != NULL ? progress_clock() : 0;
 #endif
+	// Every end node shares the route up to curr_step, so its departure, DSM and flyby costs are accumulated once;
+	// only the flyby at curr_step into the end node differs. Ancestor burns come from the per-node cache, since
+	// this worker owns the tree and the same ancestors are walked again for every deeper end node.
+	double prefix_dep = 0, prefix_dsm = 0, prefix_flyby = 0;
+	int has_prefix = curr_step->prev != NULL;
+	if(has_prefix && num_of_end_nodes > 0)
+		accumulate_route_dvs(curr_step, dv_filter->dep_periapsis, 1, &prefix_dep, &prefix_dsm, &prefix_flyby);
 	for(int i = curr_step->num_next_nodes-num_of_end_nodes; i < curr_step->num_next_nodes; i++) {
 		struct ItinStep *next = curr_step->next[i];
-		struct PorkchopPoint porkchop_point = create_porkchop_point(next, dv_filter->dep_periapsis, dv_filter->arr_periapsis);
-			double dv_sat = porkchop_point.dv_dsm;
-		if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
-		if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-			if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
-				porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
-			count_search_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
+		double dv_dep, dv_dsm, dv_flyby, dv_arr_cap, dv_arr_circ;
+		if(has_prefix) {
+			dv_dep = prefix_dep;
+			dv_dsm = prefix_dsm;
+			dv_flyby = prefix_flyby;
+			if(curr_step->body != NULL) dv_flyby += route_flyby_burn(curr_step, next, 1);
+		} else {
+			accumulate_route_dvs(next, dv_filter->dep_periapsis, 1, &dv_dep, &dv_dsm, &dv_flyby);
+		}
+		if(cache_itinerary_arrival_dvs(next, dv_filter->arr_periapsis)) {
+			dv_arr_cap = next->arrival_dv_cache.dv_arr_cap;
+			dv_arr_circ = next->arrival_dv_cache.dv_arr_circ;
+		} else {
+			double vinf = mag_vec3(subtract_vec3(next->v_arr, next->v_body));
+			double arrival_radius = alt2radius(next->body, dv_filter->arr_periapsis);
+			dv_arr_cap = dv_capture(next->body, arrival_radius, vinf);
+			dv_arr_circ = dv_circ(next->body, arrival_radius, vinf);
+		}
+		// Same route values create_porkchop_point would store, so later callers reuse them.
+		next->arrival_dv_cache.dv_dep = dv_dep;
+		next->arrival_dv_cache.dv_dsm = dv_dsm;
+		next->arrival_dv_cache.dv_flyby = dv_flyby;
+		next->arrival_dv_cache.dv_arr_cap = dv_arr_cap;
+		next->arrival_dv_cache.dv_arr_circ = dv_arr_circ;
+		next->arrival_dv_cache.dep_periapsis = dv_filter->dep_periapsis;
+		next->arrival_dv_cache.route_values_valid = 1;
+		double dv_sat = dv_dsm;
+		if(dv_filter->last_transfer_type == 1) dv_sat += dv_arr_cap;
+		if(dv_filter->last_transfer_type == 2) dv_sat += dv_arr_circ;
+			if(dv_sat + dv_flyby > dv_filter->max_satdv ||
+				dv_dep + dv_sat + dv_flyby > dv_filter->max_totdv) {
+			count_search_rejection(dv_sat + dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
 				curr_step->num_next_nodes = 0;
