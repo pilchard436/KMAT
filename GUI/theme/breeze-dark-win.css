@@ -1361,9 +1361,10 @@ radio {
     border: 1px solid @theme_button_decoration_hover_breeze; }
   check:disabled,
   radio:disabled {
-    opacity: 0.4;
-    background-color: @theme_base_color_breeze;
-    border-color: alpha(@insensitive_base_fg_color_breeze,0.33); }
+    opacity: 0.25;
+    background-color: transparent;
+    background-image: none;
+    border-color: alpha(@insensitive_base_fg_color_breeze,0.2); }
   check:active,
   radio:active {
     background: shade(@theme_base_color_breeze, 0.9); }
@@ -1383,8 +1384,8 @@ radio {
     check:indeterminate:disabled, label:disabled selection:indeterminate, check:checked:disabled, label:disabled selection:checked,
     radio:indeterminate:disabled,
     radio:checked:disabled {
-      background-color: alpha(@insensitive_bg_color_breeze,0.33);
-      border-color: @insensitive_bg_color_breeze;
+      background-color: transparent;
+      border-color: alpha(@insensitive_base_fg_color_breeze,0.2);
       color: @insensitive_fg_color_breeze;
       -gtk-icon-effect: none; }
   menu menuitem check, menu menuitem radio {
