@@ -274,3 +274,38 @@ double minimum_leg_days(const CelestSystem *system) {
 	cached_days = days;
 	return days;
 }
+
+static int max_flybys_per_route = MAX_FLYBYS_PER_ROUTE;
+
+int set_max_flybys_per_route(int flybys) {
+	int previous = max_flybys_per_route;
+	if(flybys >= 1) max_flybys_per_route = flybys;
+	return previous;
+}
+
+int get_max_flybys_per_route(void) {
+	return max_flybys_per_route;
+}
+
+int route_flyby_count(const struct ItinStep *step) {
+	int count = 0;
+	for(; step != NULL && step->prev != NULL; step = step->prev) count++;
+	return count;
+}
+
+static double orbital_period_seconds(const Body *body, const CelestSystem *system) {
+	if(body == NULL || !(body->orbit.a > 0) || !(body->orbit.e < 1)) return NAN;
+	return 2 * M_PI * sqrt(body->orbit.a * body->orbit.a * body->orbit.a / system->cb->mu);
+}
+
+double maximum_intermediate_leg_days(double from_radius, const Body *from, const Body *to, const CelestSystem *system) {
+	if(system == NULL || system->cb == NULL || !(system->cb->mu > 0) || from == NULL || to == NULL || from == to ||
+		!(from_radius > 0) || !(to->orbit.a > 0)) return HUGE_VAL;
+	double period_from = orbital_period_seconds(from, system), period_to = orbital_period_seconds(to, system);
+	if(!isfinite(period_from) || !isfinite(period_to)) return HUGE_VAL;
+	double rate_difference = fabs(1 / period_from - 1 / period_to);
+	double synodic = rate_difference > 0 ? 1 / rate_difference : fmax(period_from, period_to);
+	Hohmann hohmann = calc_hohmann_transfer(from_radius, to->orbit.a, system->cb);
+	double seconds = fmax(LEG_HORIZON_SYNODIC_PERIODS * synodic, LEG_HORIZON_HOHMANN_DURATIONS * hohmann.dur);
+	return isfinite(seconds) && seconds > 0 ? seconds / 86400 : HUGE_VAL;
+}

@@ -1,4 +1,5 @@
 #include "integration_common.h"
+#include "orbit_calculator/flyby_policy.h"
 
 int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body,
 		Body *arrival_body, double departure_jd, double hohmann_duration) {
@@ -321,5 +322,82 @@ int check_near_equal_speed_flybys(Body *body) {
 		}
 	}
 	if(valid) printf("Near-equal-speed flyby check passed on %s\n", body->name);
+	return valid;
+}
+
+// Deepest route and longest intermediate leg relative to its window over every route of a result; maneuver nodes do
+// not count as flybys and are skipped when measuring legs.
+static void measure_route_limits(Itin_Calc_Results *results, CelestSystem *system, int *most_flybys, double *worst_leg_ratio, int *routes) {
+	*most_flybys = 0;
+	*worst_leg_ratio = 0;
+	*routes = 0;
+	for(int i = 0; i < results->num_deps; i++) {
+		int count = get_number_of_itineraries(results->departures[i]);
+		struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+		if(leaves == NULL) continue;
+		int stored = 0;
+		store_itineraries_in_array(results->departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			(*routes)++;
+			int flybys = -2;	// neither the departure nor the arrival is a flyby
+			struct ItinStep *to = NULL;
+			for(struct ItinStep *step = leaves[j]; step != NULL; step = step->prev) {
+				if(step->body == NULL) continue;
+				flybys++;
+				if(to != NULL && to != leaves[j] && to->body != step->body) {
+					double window = maximum_intermediate_leg_days(mag_vec3(step->r), step->body, to->body, system);
+					if(isfinite(window)) *worst_leg_ratio = fmax(*worst_leg_ratio, (to->date - step->date) / window);
+				}
+				to = step;
+			}
+			if(flybys > *most_flybys) *most_flybys = flybys;
+		}
+		free(leaves);
+	}
+}
+
+// The search keeps routes within the flyby limit and intermediate legs within their windows, and a higher limit
+// adds deeper routes. The optimizer may move flyby dates slightly after the search.
+#define LIMIT_TEST_LEG_TOLERANCE 1.1
+int check_route_limits_search(CelestSystem *system, Body *departure_body, Body *flyby_body,
+		Body *arrival_body, double departure_jd, double hohmann_duration) {
+	Body *flyby_bodies[] = {flyby_body, departure_body, arrival_body};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd;
+	calc_data.jd_max_arr = departure_jd + 1.5 * hohmann_duration;
+	calc_data.max_duration = calc_data.jd_max_arr - departure_jd;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9, .max_depdv = 1e9, .max_satdv = 1e9,
+		.dep_periapsis = departure_body->atmo_alt + 50000,
+		.arr_periapsis = arrival_body->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure_body,
+		.arr_body = arrival_body, .flyby_bodies = flyby_bodies, .num_flyby_bodies = 3, .allow_resonant = 1
+	};
+	int previous_limit = set_max_flybys_per_route(1);
+	Itin_Calc_Results one_flyby = search_for_itineraries(calc_data);
+	set_max_flybys_per_route(3);
+	Itin_Calc_Results three_flybys = search_for_itineraries(calc_data);
+	set_max_flybys_per_route(previous_limit);
+
+	int most_one, most_three, routes_one, routes_three;
+	double leg_one, leg_three;
+	measure_route_limits(&one_flyby, system, &most_one, &leg_one, &routes_one);
+	measure_route_limits(&three_flybys, system, &most_three, &leg_three, &routes_three);
+	int valid = routes_one > 0 && routes_three > routes_one && most_one <= 1 && most_three <= 3 && most_three > 1 &&
+		leg_one <= LIMIT_TEST_LEG_TOLERANCE && leg_three <= LIMIT_TEST_LEG_TOLERANCE;
+	if(valid)
+		printf("Route limit check passed: %d routes with at most 1 flyby, %d with at most 3 (deepest %d), longest intermediate leg %.2f of its window\n",
+			routes_one, routes_three, most_three, fmax(leg_one, leg_three));
+	else
+		fprintf(stderr, "Route limit check failed: %d/%d routes, deepest %d/%d flybys, longest leg %.3f/%.3f of its window\n",
+			routes_one, routes_three, most_one, most_three, leg_one, leg_three);
+	for(int i = 0; i < one_flyby.num_deps; i++) free_itinerary(one_flyby.departures[i]);
+	free(one_flyby.departures);
+	for(int i = 0; i < three_flybys.num_deps; i++) free_itinerary(three_flybys.departures[i]);
+	free(three_flybys.departures);
 	return valid;
 }

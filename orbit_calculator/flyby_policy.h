@@ -39,6 +39,23 @@ double arrival_dv_with_assist(Body *body, Vector3 incoming_excess, double arriva
 // Shortest leg the search and optimizer accept: 10 days, or an eighth of the shortest body period of
 // a system with faster orbits (moons), so short transfers are not rejected. NULL gives the 10 days.
 double minimum_leg_days(const CelestSystem *system);
+/* Most flybys a route of a target search may contain; deeper nodes only search legs to the target. Every flyby
+   multiplies the route tree by the number of encounters in the remaining window, so routes with more flybys than
+   this cost most of a long-duration search while contributing little. Setters apply to searches started afterwards;
+   values below 1 are ignored, and the previous value is returned. */
+#define MAX_FLYBYS_PER_ROUTE 5
+int set_max_flybys_per_route(int flybys);
+int get_max_flybys_per_route(void);
+// Number of flybys flown before `step`, i.e. the number of legs leading to it minus the departure.
+int route_flyby_count(const struct ItinStep *step);
+/* Longest leg the target search considers between two different bodies when the leg is not the final one: the
+   larger of LEG_HORIZON_SYNODIC_PERIODS synodic periods of the pair (every encounter geometry recurs within one) and
+   LEG_HORIZON_HOHMANN_DURATIONS Hohmann times from the current radius (the first-leg window). Longer windows mainly
+   add encounters on later revolutions whose routes repeat earlier ones with a worse arrival. HUGE_VAL when the
+   bodies are the same (resonant legs are bounded by the revolution count) or an orbit is unknown. */
+#define LEG_HORIZON_SYNODIC_PERIODS 1.5
+#define LEG_HORIZON_HOHMANN_DURATIONS 3.0
+double maximum_intermediate_leg_days(double from_radius, const Body *from, const Body *to, const CelestSystem *system);
 // 1 if moon-aware flybys are enabled and any flyby of the route cannot avoid a moon.
 int route_blocked_by_moons(struct ItinStep *step_in_route);
 int count_flybys_below_min_safe(struct ItinStep *step_in_route);

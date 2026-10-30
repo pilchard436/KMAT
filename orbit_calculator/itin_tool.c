@@ -245,9 +245,13 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 
 int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenceInfoToTarget *seq_info, double jd_max_arr, double max_total_duration, struct Dv_Filter *dv_filter) {
 	if(itinerary_search_cancelled(NULL)) return curr_step->num_next_nodes > 0;
+	// Once the route holds the most flybys allowed, only the final leg to the target is searched from it.
+	int only_target_legs = route_flyby_count(curr_step) >= get_max_flybys_per_route();
 	for(int i = 0; i < seq_info->num_flyby_bodies && !itinerary_search_cancelled(NULL); i++) {
 		if(get_thread_counter(3) > 0) break;
-		if(seq_info->flyby_bodies[i] == curr_step->body) {
+		Body *flyby_body = seq_info->flyby_bodies[i];
+		if(only_target_legs && flyby_body != seq_info->arr_body) continue;
+		if(flyby_body == curr_step->body) {
 			// Only one resonant return per visit, and none once the route has reached its target.
 			if(!seq_info->allow_resonant || curr_step->prev == NULL || curr_step->prev->body == curr_step->body ||
 				curr_step->body == seq_info->arr_body) continue;
@@ -258,9 +262,12 @@ int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenc
 		else
 			jd_max = jd_max_arr;
 		double max_duration = jd_max-curr_step->date;
+		// Legs that do not end the route only look ahead as far as the pair's encounter geometry needs.
+		if(flyby_body != seq_info->arr_body)
+			max_duration = fmin(max_duration, maximum_intermediate_leg_days(mag_vec3(curr_step->r), curr_step->body, flyby_body, seq_info->system));
 		double min_duration = minimum_leg_days(seq_info->system);
 		if(max_duration > min_duration)
-			find_viable_flybys(curr_step, seq_info->system, seq_info->flyby_bodies[i], min_duration*86400, max_duration*86400);
+			find_viable_flybys(curr_step, seq_info->system, flyby_body, min_duration*86400, max_duration*86400);
 	}
 
 

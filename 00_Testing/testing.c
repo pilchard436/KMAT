@@ -92,7 +92,7 @@ int run_tests() {
 			"Earth",
 			"Earth",
 			17335, 8412, // expected num_nodes and num_itins
-			270, 4379, 35 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+			270, 4379, 18 // time budget (s), reference best total dv (m/s), minimum distinct body sequences (routes hold at most MAX_FLYBYS_PER_ROUTE flybys)
 	}; num_tests++;
 
 	// Earth -> Jupiter; 1967-01-01 | 1967-03-01 | 3000; dv_dep = 4500 | Bodies: Venus, Earth, Mars, Jupiter
@@ -109,7 +109,7 @@ int run_tests() {
 			"Earth",
 			"Jupiter",
 			19237, 8539, // expected num_nodes and num_itins
-			840, 7697, 300 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+			840, 7697, 140 // time budget (s), reference best total dv (m/s), minimum distinct body sequences (routes hold at most MAX_FLYBYS_PER_ROUTE flybys)
 	}; num_tests++;
 
 

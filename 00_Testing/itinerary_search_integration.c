@@ -29,6 +29,9 @@ int main(int argc, char **argv) {
 		else benchmark_unpowered = 1;
 		argc--;
 	}
+	if(argc >= 3 && argc <= 6 && strcmp(argv[1], "--replay-itins") == 0)
+		return run_itins_replay(argv[2], argc > 3 ? atof(argv[3]) : 0, argc > 4 ? atoi(argv[4]) : 0,
+			argc > 5 ? atoi(argv[5]) : 0);
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
 		return run_saved_mission_benchmarks();
 	if(argc == 2 && strcmp(argv[1], "--coverage") == 0)
@@ -126,13 +129,15 @@ int main(int argc, char **argv) {
 	int sweep_valid = check_departure_sweep_fixture();
 	int resonant_valid = check_resonant_flybys(system, departure_body, flyby_body, arrival_body,
 		departure_jd, hohmann_duration);
+	int route_limits_valid = check_route_limits_search(system, departure_body, flyby_body, arrival_body,
+		departure_jd, hohmann_duration);
 	int near_equal_valid = check_near_equal_speed_flybys(departure_body);
 	int empty_reason_valid = check_empty_result_reason(system, departure_body, arrival_body, departure_jd,
 		max_arrival_jd);
 
 	free_celestial_system(system);
 	if(!search_valid || !powered_valid || !seeds_valid || !unpowered_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
-		!sweep_valid || !resonant_valid || !near_equal_valid || !empty_reason_valid) {
+		!sweep_valid || !resonant_valid || !route_limits_valid || !near_equal_valid || !empty_reason_valid) {
 		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
 			search_nodes, search_itins);
 		return EXIT_FAILURE;

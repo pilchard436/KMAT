@@ -35,6 +35,7 @@ int check_departure_sweep_fixture(void);
 int check_empty_result_reason(CelestSystem *system, Body *departure_body, Body *arrival_body, double departure_jd, double max_arrival_jd);
 int check_starting_orbit_search(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int run_saved_mission_benchmarks(void);
+int run_itins_replay(const char *path, double max_duration, int num_departures, int max_flybys);
 int run_full_profile(void);
 int run_full_profile_config(unsigned int option_mask);
 int run_full_profile_capture_config(unsigned int option_mask);
@@ -50,6 +51,7 @@ int check_itinerary_operations(struct ItinStep **departures, int num_departures,
 int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int check_dsm_model(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int check_resonant_flybys(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
+int check_route_limits_search(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);
 int check_near_equal_speed_flybys(Body *body);
 
 #endif

@@ -272,6 +272,7 @@ add_executable(KMATSearchIntegration
     00_Testing/integration_operations.c
     00_Testing/integration_flybys.c
     00_Testing/integration_coverage.c
+    00_Testing/integration_replay.c
     orbit_calculator/transfer_calc.c
     orbit_calculator/transfer_search_worker.c
     orbit_calculator/transfer_search_progress.c

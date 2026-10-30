@@ -120,6 +120,26 @@ expensive family (for example Eve) can no longer starve a later one (for
 example Duna). Unused seeds flow on to the next body. On the Earth to Saturn
 benchmark this gave 9,300 instead of 9,238 itineraries in 21 s instead of 20 s.
 
+### Route limits
+
+Two fixed limits keep the search tree from growing exponentially with the
+maximum duration (defined in `orbit_calculator/flyby_policy.h`):
+
+- **Flyby limit:** a route holds at most `MAX_FLYBYS_PER_ROUTE` (5)
+  intermediate flybys. Once a route has reached the limit, only legs to the
+  target body are added. Reference searches showed the cheapest routes use
+  3–4 flybys; longer chains were resonant waiting loops within a few m/s of
+  the best.
+- **Intermediate leg horizon:** a leg to a non-target body may last at most
+  the larger of 1.5 synodic periods of the two bodies and 3 Hohmann transfer
+  times from the current radius (`maximum_intermediate_leg_days`). Legs to the
+  target body still use the full remaining duration.
+
+On the Kerbin to Eeloo search with all options on, these limits cut the
+full-year search at the default duration from about 110 s to 33 s, and a
+1250-day (5000 Kerbin day) duration from infeasible (over 700 s for 15
+departure days) to 79 s for a full year, with the same best delta-v.
+
 New `.itins` search files and `.itin` route files store the search options
 alongside their results. When a saved route is reopened, those settings are
 restored for option-dependent calculations and displays. Older files do not

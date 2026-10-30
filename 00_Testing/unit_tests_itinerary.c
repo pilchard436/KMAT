@@ -797,6 +797,40 @@ static void check_minimum_leg(void) {
 	check_near("a system change is picked up", minimum_leg_days(&solar), 10, 1e-9);
 }
 
+static void check_route_limits(void) {
+	Body sun = {.mu = 1.1723328e18};
+	Body eve = {.orbit = {.a = 9.8327e9}};
+	Body kerbin = {.orbit = {.a = 1.3599840256e10}};
+	Body jool = {.orbit = {.a = 6.8773560320e10}};
+	Body *planets[] = {&eve, &kerbin, &jool};
+	CelestSystem kerbol = {.cb = &sun, .num_bodies = 3, .bodies = planets};
+	double period_eve = 2 * M_PI * sqrt(pow(eve.orbit.a, 3) / sun.mu), period_kerbin = 2 * M_PI * sqrt(pow(kerbin.orbit.a, 3) / sun.mu);
+	double synodic_days = 1 / (1 / period_eve - 1 / period_kerbin) / 86400;
+	double hohmann_days = calc_hohmann_transfer(eve.orbit.a, kerbin.orbit.a, &sun).dur / 86400;
+	double eve_to_kerbin = maximum_intermediate_leg_days(eve.orbit.a, &eve, &kerbin, &kerbol);
+	check_near("a neighbouring pair is limited by its synodic period", eve_to_kerbin, LEG_HORIZON_SYNODIC_PERIODS * synodic_days, 1e-6);
+	check_true("the synodic window exceeds the Hohmann window for neighbours", eve_to_kerbin > LEG_HORIZON_HOHMANN_DURATIONS * hohmann_days);
+	check_true("the window keeps the long leveraging legs that good routes use", eve_to_kerbin > 220);
+	double kerbin_to_jool = maximum_intermediate_leg_days(kerbin.orbit.a, &kerbin, &jool, &kerbol);
+	double hohmann_jool_days = calc_hohmann_transfer(kerbin.orbit.a, jool.orbit.a, &sun).dur / 86400;
+	check_near("a distant pair with a short synodic period is limited by the Hohmann time", kerbin_to_jool, LEG_HORIZON_HOHMANN_DURATIONS * hohmann_jool_days, 1e-6);
+	check_true("the window is measured from the current radius", maximum_intermediate_leg_days(0.5 * kerbin.orbit.a, &kerbin, &jool, &kerbol) < kerbin_to_jool);
+	check_true("resonant legs are not limited", isinf(maximum_intermediate_leg_days(kerbin.orbit.a, &kerbin, &kerbin, &kerbol)));
+	Body unknown = {0};
+	check_true("an unknown orbit is not limited", isinf(maximum_intermediate_leg_days(kerbin.orbit.a, &kerbin, &unknown, &kerbol)));
+	check_true("no system is not limited", isinf(maximum_intermediate_leg_days(kerbin.orbit.a, &kerbin, &jool, NULL)));
+
+	struct ItinStep departure = {.body = &kerbin}, flyby = {.body = &eve, .prev = &departure}, arrival = {.body = &jool, .prev = &flyby};
+	check_true("the departure has no flybys", route_flyby_count(&departure) == 0);
+	check_true("every step after the departure counts as a flyby", route_flyby_count(&flyby) == 1 && route_flyby_count(&arrival) == 2);
+	check_true("no step has no flybys", route_flyby_count(NULL) == 0);
+
+	check_true("the default flyby limit is the preset", get_max_flybys_per_route() == MAX_FLYBYS_PER_ROUTE);
+	check_true("setting the limit returns the previous one", set_max_flybys_per_route(3) == MAX_FLYBYS_PER_ROUTE && get_max_flybys_per_route() == 3);
+	check_true("limits below one are ignored", set_max_flybys_per_route(0) == 3 && get_max_flybys_per_route() == 3);
+	set_max_flybys_per_route(MAX_FLYBYS_PER_ROUTE);
+}
+
 static void check_search_rejections(void) {
 	char text[200];
 	reset_search_rejections();
@@ -918,6 +952,7 @@ int run_itinerary_unit_tests(void) {
 	check_concurrent_thread_pools_have_independent_handles();
 	check_thread_pool_worker_limit();
 	check_minimum_leg();
+	check_route_limits();
 	check_moons_are_saved();
 	check_moon_flybys();
 	check_unmodeled_soi_detection();
