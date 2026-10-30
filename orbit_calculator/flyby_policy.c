@@ -279,7 +279,7 @@ static int max_flybys_per_route = MAX_FLYBYS_PER_ROUTE;
 
 int set_max_flybys_per_route(int flybys) {
 	int previous = max_flybys_per_route;
-	if(flybys >= 1) max_flybys_per_route = flybys;
+	if(flybys >= 1) max_flybys_per_route = flybys > MAX_FLYBYS_PER_ROUTE ? MAX_FLYBYS_PER_ROUTE : flybys;
 	return previous;
 }
 

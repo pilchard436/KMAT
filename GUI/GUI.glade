@@ -948,7 +948,7 @@ The departure burn is minimized over the orbit.</property>
                       </packing>
                     </child>
                     <child>
-                      <!-- n-columns=1 n-rows=5 -->
+                      <!-- n-columns=1 n-rows=6 -->
                       <object class="GtkGrid">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
@@ -1130,6 +1130,61 @@ The departure burn is minimized over the orbit.</property>
                               <property name="top-attach">4</property>
                             </packing>
                           </child>
+                        <child>
+                            <object class="GtkBox">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                              <property name="orientation">horizontal</property>
+                              <property name="spacing">6</property>
+                              <child>
+                                <object class="GtkLabel">
+                                  <property name="visible">True</property>
+                                  <property name="can-focus">False</property>
+                                  <property name="label" translatable="yes">Maximum flybys per route:</property>
+                                </object>
+                              </child>
+                              <child>
+                                <object class="GtkComboBoxText" id="cb_ic_max_flybys">
+                                  <property name="visible">True</property>
+                                  <property name="can-focus">False</property>
+                                  <property name="active">4</property>
+                                  <items>
+                                    <item translatable="yes">1</item>
+                                    <item translatable="yes">2</item>
+                                    <item translatable="yes">3</item>
+                                    <item translatable="yes">4</item>
+                                    <item translatable="yes">5 (default)</item>
+                                  </items>
+                                </object>
+                              </child>
+                            </object>
+                            <packing>
+                              <property name="left-attach">0</property>
+                              <property name="top-attach">5</property>
+                            </packing>
+                          </child>
+                          <child>
+                            <object class="GtkEventBox" id="eb_ic_info_max_flybys">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="visible-window">True</property>
+                            <property name="valign">center</property>
+                            <property name="width-request">24</property>
+                            <property name="height-request">24</property>
+                            <child>
+                              <object class="GtkLabel">
+                                <property name="visible">True</property>
+                                <property name="can-focus">False</property>
+                                <property name="use-markup">True</property>
+                                <property name="label">&lt;span size=&quot;x-large&quot;&gt;&lt;b&gt;&#x24D8;&lt;/b&gt;&lt;/span&gt;</property>
+                              </object>
+                            </child>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">5</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="left-attach">0</property>

@@ -26,6 +26,7 @@ GtkWidget *cb_ic_allow_dsm;
 GtkWidget *cb_ic_allow_resonant;
 GtkWidget *cb_ic_moon_aware_flybys;
 GtkWidget *cb_ic_moon_assist_arrival;
+GtkWidget *cb_ic_max_flybys;
 GObject *tf_ic_depdv;
 GObject *tf_ic_satdv;
 GtkWidget *lb_ic_date_warning;
@@ -150,6 +151,12 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		set_stable_tooltip(eb_ic_info_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear. Makes the search about 10% slower.");
 	}
 	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
+	cb_ic_max_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_max_flybys"));
+	GtkWidget *eb_ic_info_max_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_max_flybys"));
+	if(eb_ic_info_max_flybys != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_max_flybys);
+		set_stable_tooltip(eb_ic_info_max_flybys, "Maximum number of intermediate flybys in this search. Lower values can shorten long searches but may exclude routes that need more flybys.");
+	}
 	GtkWidget *eb_ic_info_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_resonant"));
 	if(eb_ic_info_resonant != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_resonant);

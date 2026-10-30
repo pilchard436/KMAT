@@ -4,6 +4,7 @@
 #include "tools/itinerary_date_limits.h"
 #include "tools/itinerary_dv_limit.h"
 #include "gui/css_loader.h"
+#include "orbit_calculator/flyby_policy.h"
 #include <math.h>
 
 struct Itin_Calc_Data ic_calc_data;
@@ -82,6 +83,8 @@ static void prepare_ic_calc_data_from_widgets() {
 	ic_calc_data.dv_filter.last_transfer_type = TF_BOTH;
 	ic_calc_data.disable_powered_flybys = cb_ic_allow_powered_flybys != NULL &&
 		!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_powered_flybys));
+	int max_flybys_selection = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_max_flybys));
+	set_max_flybys_per_route(max_flybys_selection >= 0 ? max_flybys_selection + 1 : MAX_FLYBYS_PER_ROUTE);
 	ic_calc_data.allow_dsm = !ic_calc_data.disable_powered_flybys && cb_ic_allow_dsm != NULL &&
 		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
 	ic_calc_data.moon_aware_flybys = cb_ic_moon_aware_flybys != NULL &&

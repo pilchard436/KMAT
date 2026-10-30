@@ -122,14 +122,15 @@ benchmark this gave 9,300 instead of 9,238 itineraries in 21 s instead of 20 s.
 
 ### Route limits
 
-Two fixed limits keep the search tree from growing exponentially with the
-maximum duration (defined in `orbit_calculator/flyby_policy.h`):
+Two limits keep the search tree from growing exponentially with the maximum
+duration (defined in `orbit_calculator/flyby_policy.h`):
 
-- **Flyby limit:** a route holds at most `MAX_FLYBYS_PER_ROUTE` (5)
-  intermediate flybys. Once a route has reached the limit, only legs to the
-  target body are added. Reference searches showed the cheapest routes use
-  3–4 flybys; longer chains were resonant waiting loops within a few m/s of
-  the best.
+- **Flyby limit:** the Itinerary Calculator lets you select 1–5 intermediate
+  flybys per route (default 5). Values above 5 are capped. Once a route has
+  reached the selected limit, only legs to the target body are added.
+  Reference searches showed the cheapest routes use 3–4 flybys; longer
+  chains were resonant waiting loops within a few m/s of the best. The choice
+  applies to the search started from the calculator.
 - **Intermediate leg horizon:** a leg to a non-target body may last at most
   the larger of 1.5 synodic periods of the two bodies and 3 Hohmann transfer
   times from the current radius (`maximum_intermediate_leg_days`). Legs to the

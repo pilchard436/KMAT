@@ -828,6 +828,8 @@ static void check_route_limits(void) {
 	check_true("the default flyby limit is the preset", get_max_flybys_per_route() == MAX_FLYBYS_PER_ROUTE);
 	check_true("setting the limit returns the previous one", set_max_flybys_per_route(3) == MAX_FLYBYS_PER_ROUTE && get_max_flybys_per_route() == 3);
 	check_true("limits below one are ignored", set_max_flybys_per_route(0) == 3 && get_max_flybys_per_route() == 3);
+	check_true("limits above the preset are capped", set_max_flybys_per_route(MAX_FLYBYS_PER_ROUTE + 1) == 3 &&
+		get_max_flybys_per_route() == MAX_FLYBYS_PER_ROUTE);
 	set_max_flybys_per_route(MAX_FLYBYS_PER_ROUTE);
 }
 

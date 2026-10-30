@@ -31,6 +31,7 @@ extern GtkWidget *cb_ic_allow_dsm;
 extern GtkWidget *cb_ic_allow_resonant;
 extern GtkWidget *cb_ic_moon_aware_flybys;
 extern GtkWidget *cb_ic_moon_assist_arrival;
+extern GtkWidget *cb_ic_max_flybys;
 extern GObject *tf_ic_depdv;
 extern GObject *tf_ic_satdv;
 extern GtkWidget *lb_ic_date_warning;

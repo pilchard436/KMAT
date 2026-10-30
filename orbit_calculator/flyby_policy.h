@@ -42,7 +42,7 @@ double minimum_leg_days(const CelestSystem *system);
 /* Most flybys a route of a target search may contain; deeper nodes only search legs to the target. Every flyby
    multiplies the route tree by the number of encounters in the remaining window, so routes with more flybys than
    this cost most of a long-duration search while contributing little. Setters apply to searches started afterwards;
-   values below 1 are ignored, and the previous value is returned. */
+   values below 1 are ignored, values above MAX_FLYBYS_PER_ROUTE are capped, and the previous value is returned. */
 #define MAX_FLYBYS_PER_ROUTE 5
 int set_max_flybys_per_route(int flybys);
 int get_max_flybys_per_route(void);
