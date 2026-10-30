@@ -23,9 +23,9 @@ the first recorded matrix (2026-10-21) to current `main` (2026-10-29):
 Going back to the legacy Lambert solver, the same base scenario (no options) on
 the parent repository's `main` takes 43.6 s of search with no optimization
 stage; current `main` does more work (powered-flyby seeds and route
-optimization) in 7.7 s, about 5.7× faster end to end. With the new
-**Allow powered flybys** option off, which matches the parent's unpowered-only
-search, the same scenario takes 3.5 s, about 12.6× faster than the parent (see
+optimization) in 7.7 s, about 5.7× faster end to end. With **Allow powered
+flybys** off, which matches the parent's unpowered-only search, the same
+scenario takes 3.5 s, about 12.6× faster than the parent (see
 [Progress on the base scenario](#progress-on-the-base-scenario)).
 
 The largest steps were the parallel optimizer stages (config 00 −46%), the
@@ -89,7 +89,7 @@ trend but were not all produced by one script.
 | 10-25 after the Kepler solver, solve changes and seed budget 2,048 | 21.0 s | The budget raise adds work that the faster code absorbs | `itinerary-cpu-speedup.md` |
 | 10-29 after hot-spot work | 9.1 s | – | `itinerary-cpu-speedup.md` |
 | 10-29 current (LTO) | 7.69 s | 9,300 itineraries / 18,404 nodes | Matrix |
-| 10-30 current, powered flybys off (new option) | 3.46 s | 9,211 itineraries / 18,196 nodes; unpowered flybys only and no optimization stage, like the parent run | Runner with `--unpowered` |
+| 10-30 current, powered flybys off | 3.46 s | 9,211 itineraries / 18,196 nodes; unpowered flybys only and no optimization stage, like the parent run | Runner with `--unpowered` |
 
 Current `main` does more work than the parent run: it adds powered-flyby seeds,
 route scoring, repair and refinement, and uses a larger seed budget. The 5.7×
@@ -243,11 +243,10 @@ balanced across their on/off states (calculation seconds, off → on):
 
 ### Powered flybys off
 
-The **Allow powered flybys** option (on in every matrix above) was added on
-2026-10-30. Off, the search keeps only unpowered gravity assists (excess speed
-unchanged within 1 m/s) and skips the optimization stage, which also removes the
-deep-space maneuver pass. The table compares the two settings from the same
-build (LTO, no search profiling, so a few tenths of a second off the matrix
+The **Allow powered flybys** option is on in every matrix above. Off, the search
+keeps only unpowered gravity assists (excess speed unchanged within 1 m/s) and
+skips the optimization stage, which also removes the deep-space maneuver pass.
+The table compares the two settings from the same build (LTO, no search profiling, so a few tenths of a second off the matrix
 rows), one sample each, passing the runner's validation (`--unpowered` appended
 to the same command; the DSM bit has no effect when off):
 
