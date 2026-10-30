@@ -104,6 +104,15 @@ void run_formats_tests(void) {
     expect_contains("header formats legacy unbounded duration", header_text, "Max duration: Unbounded");
     expect_contains("header includes itinerary body names", header_text, "  - Venus");
 
+    ItinStepBinHeaderData options_header = header;
+    options_header.file_type = 10;
+    options_header.calc_data.search_options.known = 1;
+    print_header_data_to_string(options_header, header_text, sizeof(header_text), DATE_ISO);
+    expect_contains("header shows powered flybys on by default", header_text, "Search options: powered flybys on");
+    options_header.calc_data.search_options.disable_powered_flybys = 1;
+    print_header_data_to_string(options_header, header_text, sizeof(header_text), DATE_ISO);
+    expect_contains("header shows powered flybys off", header_text, "Search options: powered flybys off");
+
     char short_header[12];
     print_header_data_to_string(header, short_header, sizeof(short_header), DATE_ISO);
     check_true("truncated header text stays terminated", memchr(short_header, '\0', sizeof(short_header)) != NULL);

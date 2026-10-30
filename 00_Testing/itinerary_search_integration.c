@@ -2,6 +2,7 @@
 #include "tools/thread_pool.h"
 
 int benchmark_resonant;
+int benchmark_unpowered;
 int benchmark_coverage;
 
 int main(int argc, char **argv) {
@@ -22,8 +23,10 @@ int main(int argc, char **argv) {
 			worker_limit, get_thread_pool32_worker_capacity());
 		return run_full_profile_config((unsigned int)option_mask);
 	}
-	if(argc > 1 && strcmp(argv[argc - 1], "--resonant") == 0) {
-		benchmark_resonant = 1;
+	// Trailing modifiers, in either order: --resonant (mission benchmarks) and --unpowered (powered flybys off).
+	while(argc > 1 && (strcmp(argv[argc - 1], "--resonant") == 0 || strcmp(argv[argc - 1], "--unpowered") == 0)) {
+		if(strcmp(argv[argc - 1], "--resonant") == 0) benchmark_resonant = 1;
+		else benchmark_unpowered = 1;
 		argc--;
 	}
 	if(argc == 2 && strcmp(argv[1], "--mission-benchmarks") == 0)
@@ -63,7 +66,7 @@ int main(int argc, char **argv) {
 		return run_full_profile_both_config((unsigned int)option_mask);
 	}
 	if(argc != 1) {
-		fprintf(stderr, "Usage: %s [--full-profile|--full-profile-config <0..31>|--full-profile-capture-config <0..31>|--full-profile-both-config <0..31>|--full-profile-worker-scale <workers> <0..31>|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi]\n", argv[0]);
+		fprintf(stderr, "Usage: %s [--full-profile|--full-profile-config <0..31>|--full-profile-capture-config <0..31>|--full-profile-both-config <0..31>|--full-profile-worker-scale <workers> <0..31>|--mission-benchmarks|--coverage|--coverage-reference|--coverage-multi] [--resonant] [--unpowered]\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -112,6 +115,8 @@ int main(int argc, char **argv) {
 		flyby_body, arrival_body, departure_jd, hohmann_duration);
 	int seeds_valid = check_speed_changing_seed_generation(system, departure_body,
 		flyby_body, arrival_body, departure_jd);
+	int unpowered_valid = check_unpowered_flyby_search(system, departure_body, flyby_body,
+		arrival_body, departure_jd, hohmann_duration);
 	int starting_valid = check_starting_orbit_search(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
 	int dsm_model_valid = check_dsm_model(system, departure_body, flyby_body,
@@ -126,7 +131,7 @@ int main(int argc, char **argv) {
 		max_arrival_jd);
 
 	free_celestial_system(system);
-	if(!search_valid || !powered_valid || !seeds_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
+	if(!search_valid || !powered_valid || !seeds_valid || !unpowered_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
 		!sweep_valid || !resonant_valid || !near_equal_valid || !empty_reason_valid) {
 		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
 			search_nodes, search_itins);

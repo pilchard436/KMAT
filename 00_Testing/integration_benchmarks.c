@@ -27,6 +27,7 @@ static int run_saved_mission_benchmark(CelestSystem *system, const char *label,
 	}
 
 	Itin_Calc_Data calc_data = {0};
+	calc_data.disable_powered_flybys = benchmark_unpowered;
 	calc_data.jd_min_dep = jd_min_dep;
 	calc_data.jd_max_dep = jd_max_dep;
 	calc_data.jd_max_arr = jd_max_arr;
@@ -205,7 +206,8 @@ static int run_full_profile_configuration(CelestSystem *system, unsigned int opt
 	}
 
 	Itin_Calc_Data calc_data = {0};
-	calc_data.allow_dsm = (option_mask & FULL_PROFILE_DSM) != 0;
+	calc_data.disable_powered_flybys = benchmark_unpowered;
+	calc_data.allow_dsm = !benchmark_unpowered && (option_mask & FULL_PROFILE_DSM) != 0;
 	calc_data.moon_aware_flybys = (option_mask & FULL_PROFILE_MOON_AWARE) != 0;
 	calc_data.moon_assist_arrival = (option_mask & FULL_PROFILE_MOON_ASSIST) != 0;
 	calc_data.jd_min_dep = 2461325.50;
@@ -241,17 +243,23 @@ static int run_full_profile_configuration(CelestSystem *system, unsigned int opt
 		starting_orbit_set_active(NULL, NULL);
 	}
 
-	printf("\nPROFILE_CONFIG|%02u|transfer=%s|resonant=%d|dsm=%d|moon_aware=%d|moon_assist=%d|custom_orbit=%d\n",
+	calc_data.search_options.disable_powered_flybys = benchmark_unpowered;
+	printf("\nPROFILE_CONFIG|%02u|transfer=%s|resonant=%d|dsm=%d|moon_aware=%d|moon_assist=%d|custom_orbit=%d|powered=%d\n",
 		option_mask,
 		both_modes ? "both" : last_transfer_type == TF_CAPTURE ? "capture" : "flyby",
 		(option_mask & FULL_PROFILE_RESONANT) != 0,
 		calc_data.allow_dsm, calc_data.moon_aware_flybys,
-		calc_data.moon_assist_arrival, (option_mask & FULL_PROFILE_CUSTOM_ORBIT) != 0);
+		calc_data.moon_assist_arrival, (option_mask & FULL_PROFILE_CUSTOM_ORBIT) != 0,
+		!benchmark_unpowered);
 	double calculation_start = benchmark_wall_seconds();
 	Itin_Calc_Results results = both_modes ?
 		search_for_itineraries_both_modes(calc_data) : search_for_itineraries(calc_data);
 	double calculation_seconds = benchmark_wall_seconds() - calculation_start;
-	int valid = results.num_itins > 0 && results.powered_routes_corrected > 0 &&
+	// Without powered flybys the search keeps its unpowered routes unchanged, so there is nothing to optimize or repair.
+	int valid = benchmark_unpowered ?
+		results.num_itins > 0 && results.powered_routes_corrected == 0 &&
+			results.powered_seed_stats.seeds_added == 0 && results.powered_repairs_attempted == 0 :
+		results.num_itins > 0 && results.powered_routes_corrected > 0 &&
 		results.powered_itineraries_pruned * 100 <= results.num_itins &&
 		results.powered_repairs_attempted > 0 && results.powered_repairs_attempted <= POWERED_REPAIR_SLOTS &&
 		results.powered_repairs_recovered <= results.powered_repairs_attempted &&

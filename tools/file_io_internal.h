@@ -29,6 +29,12 @@ struct ItinStepBinHeaderT4 {
 	struct CalcDataBinT2 calc_data;
 };
 
+/* Bits of ItinSearchOptionsBin.known. The record keeps its original layout so existing files still load: older
+ * files only ever hold 0 or 1 here, which reads as "powered flybys on", and older programs read any non-zero
+ * value as "known". */
+#define ITIN_OPTIONS_BIN_KNOWN 1
+#define ITIN_OPTIONS_BIN_POWERED_FLYBYS_DISABLED 2
+
 typedef struct ItinSearchOptionsBin {
 	int known;
 	int allow_dsm;

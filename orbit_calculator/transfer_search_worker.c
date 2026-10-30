@@ -24,6 +24,7 @@ void *calc_itins_from_departure(void *args) {
 	Itin_Calc_Data *calc_data = thread_args->calc_data;
 	int previous_moon_aware = set_moon_aware_flybys_enabled(calc_data->moon_aware_flybys);
 	int previous_moon_assist = set_moon_assist_enabled(calc_data->moon_assist_arrival);
+	int previous_powered_flybys = set_powered_flybys_enabled(!calc_data->disable_powered_flybys);
 
 	struct ItinStep **departures = thread_args->departures;
 	struct Dv_Filter dv_filter = calc_data->dv_filter;
@@ -238,6 +239,7 @@ void *calc_itins_from_departure(void *args) {
 		index = get_incr_thread_counter(0);
 	}
 	begin_powered_seed_search(NULL);
+	set_powered_flybys_enabled(previous_powered_flybys);
 	set_moon_assist_enabled(previous_moon_assist);
 	set_moon_aware_flybys_enabled(previous_moon_aware);
 	return NULL;

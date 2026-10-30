@@ -16,6 +16,8 @@ typedef struct ItinSearchOptions {
 	int use_custom_starting_orbit;
 	int starting_orbit_body_id;
 	StartingOrbit starting_orbit;
+	// Zero (the default) keeps powered flybys on, so older files and zero-initialized settings behave as before.
+	int disable_powered_flybys;
 } ItinSearchOptions;
 
 
@@ -27,6 +29,9 @@ typedef struct Itin_Calc_Data {
 	int allow_dsm;
 	int moon_aware_flybys;
 	int moon_assist_arrival;
+	/* Search only unpowered gravity assists: no powered-flyby seeds, no route optimization (which also runs the
+	 * deep-space maneuver pass, so allow_dsm has no effect). */
+	int disable_powered_flybys;
 	double step_dep_date;
 	int num_deps_per_date;
 	int max_num_waiting_orbits;

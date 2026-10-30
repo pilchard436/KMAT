@@ -722,6 +722,56 @@ static void check_moons_are_saved(void) {
 	free_celestial_system(system);
 }
 
+static void check_search_options_storage(void) {
+	char path[] = "unit_test_options.bin";
+	FILE *file = fopen(path, "w+b");
+	check_true("the search options file opens", file != NULL);
+	if(file == NULL) return;
+
+	ItinSearchOptions defaults = {.known = 1, .allow_dsm = 1, .allow_resonant = 1, .last_transfer_type = TF_BOTH};
+	ItinSearchOptions unpowered = defaults;
+	unpowered.disable_powered_flybys = 1;
+	ItinSearchOptionsBin raw;
+	ItinSearchOptions loaded;
+
+	store_itin_search_options(file, &defaults);
+	rewind(file);
+	check_true("default options are stored with the known bit only",
+		fread(&raw, sizeof(raw), 1, file) == 1 && raw.known == ITIN_OPTIONS_BIN_KNOWN);
+	rewind(file);
+	check_true("default options load with powered flybys on",
+		load_itin_search_options(file, &loaded) && loaded.known && !loaded.disable_powered_flybys &&
+		loaded.allow_dsm && loaded.allow_resonant && loaded.last_transfer_type == TF_BOTH);
+
+	rewind(file);
+	store_itin_search_options(file, &unpowered);
+	rewind(file);
+	check_true("powered flybys off adds its own bit to the stored flag",
+		fread(&raw, sizeof(raw), 1, file) == 1 &&
+		raw.known == (ITIN_OPTIONS_BIN_KNOWN | ITIN_OPTIONS_BIN_POWERED_FLYBYS_DISABLED));
+	rewind(file);
+	check_true("powered flybys off survives a save and load",
+		load_itin_search_options(file, &loaded) && loaded.known && loaded.disable_powered_flybys &&
+		loaded.allow_dsm && loaded.allow_resonant && loaded.last_transfer_type == TF_BOTH);
+
+	// A record written before the option existed holds exactly 1 in the flag and must read as powered flybys on.
+	ItinSearchOptionsBin legacy = {.known = 1, .allow_dsm = 1, .moon_aware_flybys = 1, .last_transfer_type = TF_CAPTURE};
+	rewind(file);
+	fwrite(&legacy, sizeof(legacy), 1, file);
+	rewind(file);
+	check_true("a record from before the option loads with powered flybys on",
+		load_itin_search_options(file, &loaded) && loaded.known && !loaded.disable_powered_flybys &&
+		loaded.allow_dsm && loaded.moon_aware_flybys && loaded.last_transfer_type == TF_CAPTURE);
+
+	rewind(file);
+	store_itin_search_options(file, NULL);
+	rewind(file);
+	check_true("missing options load as unknown with powered flybys on",
+		load_itin_search_options(file, &loaded) && !loaded.known && !loaded.disable_powered_flybys);
+	fclose(file);
+	remove(path);
+}
+
 static void check_minimum_leg(void) {
 	Body sun = {.mu = 1.32712440018e20};
 	Body mercury = {.orbit = {.a = 5.79e10, .e = 0.2}};
@@ -862,6 +912,7 @@ int run_itinerary_unit_tests(void) {
 	check_powered_seed_share();
 	check_conjunction_times();
 	check_itinerary_files();
+	check_search_options_storage();
 	check_search_rejections();
 	check_thread_pool_preserves_counters();
 	check_concurrent_thread_pools_have_independent_handles();

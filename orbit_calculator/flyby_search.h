@@ -20,6 +20,8 @@ typedef struct PoweredSeedSearchStats {
 #define POWERED_EXTRA_SEEDS_PER_DEPARTURE 8
 #define POWERED_SEED_BUDGET_PRESET_COUNT 5
 void begin_powered_seed_search(PoweredSeedSearchStats *stats);
+/* Whether find_viable_flybys may add seeds that need a flyby burn; on by default. Per thread; returns the previous value. */
+int set_powered_flybys_enabled(int enabled);
 // Seeds the current subtree may still use (the budget left above the active share floor).
 int get_powered_seed_available(void);
 // Limits the next subtree so that half of the seeds still available stay reserved for the other `shares`-1 siblings.

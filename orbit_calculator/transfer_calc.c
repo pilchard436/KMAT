@@ -407,8 +407,13 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	capture_calc_data.dv_filter.last_transfer_type = TF_CAPTURE;
 	PoweredFlybyOptimizationStats capture_stats = {0};
 	int capture_optimization_completed = 0;
+	// Unpowered routes keep the dates and velocities of the search; the optimizer (and the deep-space maneuver pass
+	// inside it) only applies when flybys may be powered.
+	int run_powered_optimization = !calc_data.disable_powered_flybys;
 	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
-		if(get_thread_counter(3) == 0) {
+		if(!run_powered_optimization)
+			printf("Powered flybys off: unpowered gravity assists only, route optimization skipped\n");
+		if(get_thread_counter(3) == 0 && run_powered_optimization) {
 			PoweredFlybyOptimizationStats powered_stats = {0};
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 			phase_start = progress_clock();
@@ -540,7 +545,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		Itin_Calc_Data capture_calc_data = calc_data;
 		capture_calc_data.dv_filter.last_transfer_type = TF_CAPTURE;
 		if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET &&
-			get_thread_counter(3) == 0 && !capture_optimization_completed) {
+			get_thread_counter(3) == 0 && run_powered_optimization && !capture_optimization_completed) {
 			optimize_powered_flyby_routes(capture_departures, shared_num_deps,
 				&capture_calc_data, POWERED_ROUTE_REFINEMENT_LIMIT, &capture_stats);
 			printf("Capture powered-route optimization: %d/%d improved, %d valid, route scoring %.2f s, global ranking/merge %.4f s, challenge selection %.6f s, repair %.2f s, timing refinement %.2f s\n",

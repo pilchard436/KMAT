@@ -72,13 +72,23 @@ as intermediate-body checkboxes.
 
 The following checkboxes alter the search or route evaluation:
 
+- **Allow powered flybys** (on by default): allows flybys that need a burn at
+  the flyby body and optimizes the best routes (dates, flyby burns,
+  sphere-of-influence corrections, rejected-route repair). Turning it off
+  searches only unpowered gravity assists, as earlier KMAT versions did: no
+  burn-requiring flybys are added and the optimization stage is skipped. On the
+  Earth-to-Saturn benchmark that takes the search from 7.8 s to 3.5 s (2.3×)
+  and the all-options search from 62.7 s to 38.6 s (1.6×), with about 1% fewer
+  routes and none with optimized dates or burns. Deep-space maneuvers are
+  optimized in the same stage, so
+  turning this off also unchecks and disables **Allow deep-space maneuvers**.
 - **Allow resonant flybys:** considers returns to the same body after one or
   more revolutions, such as an Earth-to-Earth leg. This expands the search and
   can make it several times slower.
 - **Allow deep-space maneuvers:** enables an additional optimization pass to
   search for a maneuver between bodies on selected routes. DSM delta-v counts
   toward the satellite delta-v limit; a zero satellite limit therefore
-  excludes routes that need a DSM.
+  excludes routes that need a DSM. It requires powered flybys.
 - **Moon-aware flybys:** checks for flybys that hit a moon or pass too close to
   one. It can reject or re-plan routes and makes searching slower.
 - **Allow moon assist on arrival:** checks whether a moon flyby can reduce the
@@ -113,7 +123,9 @@ benchmark this gave 9,300 instead of 9,238 itineraries in 21 s instead of 20 s.
 New `.itins` search files and `.itin` route files store the search options
 alongside their results. When a saved route is reopened, those settings are
 restored for option-dependent calculations and displays. Older files do not
-contain this provenance, so those settings cannot be recovered from them.
+contain this provenance, so those settings cannot be recovered from them (files
+saved before **Allow powered flybys** existed read as powered flybys on, which
+is how they were searched).
 
 Dual-mode `.itins` files store the five calculated delta-v components for each
 completed route: departure, DSM, flyby, capture, and circularization. Arrival
@@ -161,7 +173,9 @@ than shown individually as each candidate is generated.
 ## 5. Routes are optimized and filtered
 
 For the regular to-target itinerary search, surviving routes are passed
-through powered-flyby optimization unless the search has been cancelled. This
+through powered-flyby optimization unless the search has been cancelled or
+**Allow powered flybys** is off, in which case the routes keep the dates and
+velocities found by the search and go straight to filtering. This
 stage checks and refines promising routes, including their flyby burns and
 timings. It can also correct relevant sphere-of-influence issues.
 
@@ -289,7 +303,9 @@ The integration runner accepts `--full-profile-config <0..31>` to run one
 flyby-final configuration, or `--full-profile-capture-config <0..31>` to run
 the same configuration with capture as the final transfer. The five mask bits
 represent resonant flybys, deep-space maneuvers, moon-aware flybys, moon assist
-on arrival, and custom starting orbit, respectively. Running each mask in a
+on arrival, and custom starting orbit, respectively. Appending `--unpowered`
+runs the same configuration with powered flybys off (the deep-space maneuver
+bit then has no effect). Running each mask in a
 separate process avoids carrying thread-local caches between configurations.
 The output includes wall-clock time for initialization, search, powered-route
 optimization/refinement, and route filtering. Search timings are also reported

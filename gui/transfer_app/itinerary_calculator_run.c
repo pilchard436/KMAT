@@ -80,7 +80,9 @@ static void prepare_ic_calc_data_from_widgets() {
 	// Departure burn is capped by its own limit and every later burn by the satellite limit.
 	ic_calc_data.dv_filter.max_totdv = ic_calc_data.dv_filter.max_depdv + ic_calc_data.dv_filter.max_satdv;
 	ic_calc_data.dv_filter.last_transfer_type = TF_BOTH;
-	ic_calc_data.allow_dsm = cb_ic_allow_dsm != NULL &&
+	ic_calc_data.disable_powered_flybys = cb_ic_allow_powered_flybys != NULL &&
+		!gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_powered_flybys));
+	ic_calc_data.allow_dsm = !ic_calc_data.disable_powered_flybys && cb_ic_allow_dsm != NULL &&
 		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm));
 	ic_calc_data.moon_aware_flybys = cb_ic_moon_aware_flybys != NULL &&
 		gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_moon_aware_flybys));
@@ -120,6 +122,7 @@ static void prepare_ic_calc_data_from_widgets() {
 		custom_orbit_body == seq_info.dep_body;
 	ic_calc_data.search_options = (ItinSearchOptions) {
 		.known = 1,
+		.disable_powered_flybys = ic_calc_data.disable_powered_flybys,
 		.allow_dsm = ic_calc_data.allow_dsm,
 		.moon_aware_flybys = ic_calc_data.moon_aware_flybys,
 		.moon_assist_arrival = ic_calc_data.moon_assist_arrival,

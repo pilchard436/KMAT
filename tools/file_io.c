@@ -20,7 +20,8 @@ void store_itin_search_options(FILE *file, const ItinSearchOptions *options) {
 	ItinSearchOptionsBin bin = {0};
 	if(options != NULL) {
 		bin = (ItinSearchOptionsBin) {
-			.known = !!options->known,
+			.known = (options->known ? ITIN_OPTIONS_BIN_KNOWN : 0) |
+				(options->disable_powered_flybys ? ITIN_OPTIONS_BIN_POWERED_FLYBYS_DISABLED : 0),
 			.allow_dsm = !!options->allow_dsm,
 			.moon_aware_flybys = !!options->moon_aware_flybys,
 			.moon_assist_arrival = !!options->moon_assist_arrival,
@@ -39,7 +40,8 @@ int load_itin_search_options(FILE *file, ItinSearchOptions *options) {
 	if(fread(&bin, sizeof(bin), 1, file) != 1) return 0;
 	if(options != NULL) {
 		*options = (ItinSearchOptions) {
-			.known = !!bin.known,
+			.known = !!(bin.known & ITIN_OPTIONS_BIN_KNOWN),
+			.disable_powered_flybys = !!(bin.known & ITIN_OPTIONS_BIN_POWERED_FLYBYS_DISABLED),
 			.allow_dsm = !!bin.allow_dsm,
 			.moon_aware_flybys = !!bin.moon_aware_flybys,
 			.moon_assist_arrival = !!bin.moon_assist_arrival,

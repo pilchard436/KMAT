@@ -14,6 +14,7 @@
 static _Thread_local int extra_seed_budget;
 static _Thread_local int powered_seed_budget = POWERED_SEEDS_PER_DEPARTURE;
 static _Thread_local int powered_seed_floor;
+static _Thread_local int powered_flybys_enabled = 1;
 static int seeds_per_departure = POWERED_SEEDS_PER_DEPARTURE;
 static _Thread_local PoweredSeedSearchStats *seed_search_stats;
 
@@ -45,6 +46,12 @@ void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
 	powered_seed_budget = seeds_per_departure;
 	powered_seed_floor = 0;
 	seed_search_stats = stats;
+}
+
+int set_powered_flybys_enabled(int enabled) {
+	int previous = powered_flybys_enabled;
+	powered_flybys_enabled = !!enabled;
+	return previous;
 }
 
 int get_powered_seed_available(void) {
@@ -222,7 +229,9 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 	int seed_budget = extra_seed_budget > 0 ? 2 : 1;
 	int seed_available = get_powered_seed_available();
 	if(seed_budget > seed_available) seed_budget = seed_available;
-	if(seed_budget == 0 && seed_search_stats) seed_search_stats->searches_budget_skipped++;
+	// Without powered flybys only the roots above are kept; nothing is sampled or counted as skipped.
+	if(!powered_flybys_enabled) seed_budget = 0;
+	else if(seed_budget == 0 && seed_search_stats) seed_search_stats->searches_budget_skipped++;
 	int interval_subdivisions = POWERED_FLYBY_SEED_SUBDIVISIONS;
 	PoweredSeedBucket seed_buckets[POWERED_SEED_BUCKETS] = {0};
 	double seed_time_range = max_dt - min_dt;

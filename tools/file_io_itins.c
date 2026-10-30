@@ -296,6 +296,7 @@ ItinStepBinHeaderData get_itins_bfile_header(FILE *file) {
 			header_data.calc_data.allow_dsm = header_data.calc_data.search_options.allow_dsm;
 			header_data.calc_data.moon_aware_flybys = header_data.calc_data.search_options.moon_aware_flybys;
 			header_data.calc_data.moon_assist_arrival = header_data.calc_data.search_options.moon_assist_arrival;
+			header_data.calc_data.disable_powered_flybys = header_data.calc_data.search_options.disable_powered_flybys;
 			if(calc_type4 == ITIN_SEQ_INFO_TO_TARGET)
 				header_data.calc_data.seq_info.to_target.allow_resonant =
 					header_data.calc_data.search_options.allow_resonant;

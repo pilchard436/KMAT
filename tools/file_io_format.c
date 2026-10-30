@@ -62,7 +62,8 @@ void print_header_data_to_string(ItinStepBinHeaderData header, char *string, siz
 			append_header_text(string, string_size, "Last transfer type: Capture\n");
 		if(header.calc_data.search_options.known) {
 			ItinSearchOptions options = header.calc_data.search_options;
-			append_header_text(string, string_size, "Search options: DSM %s, moon-aware flybys %s, arrival moon assist %s, resonant flybys %s, custom starting orbit %s\n",
+			append_header_text(string, string_size, "Search options: powered flybys %s, DSM %s, moon-aware flybys %s, arrival moon assist %s, resonant flybys %s, custom starting orbit %s\n",
+				options.disable_powered_flybys ? "off" : "on",
 				options.allow_dsm ? "on" : "off",
 				options.moon_aware_flybys ? "on" : "off",
 				options.moon_assist_arrival ? "on" : "off",

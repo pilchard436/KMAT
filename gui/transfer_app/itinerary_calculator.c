@@ -21,6 +21,7 @@ GtkWidget *box_ic_maxarrdate;
 GObject *tf_ic_maxdur;
 GObject *rb_ic_maxarrdate;
 GObject *rb_ic_maxdur;
+GtkWidget *cb_ic_allow_powered_flybys;
 GtkWidget *cb_ic_allow_dsm;
 GtkWidget *cb_ic_allow_resonant;
 GtkWidget *cb_ic_moon_aware_flybys;
@@ -96,6 +97,14 @@ void ic_initialize_date_defaults(void) {
 }
 
 
+// Deep-space maneuvers are optimized together with powered flybys, so they need the option too.
+static void on_ic_powered_flybys_toggled(GtkToggleButton *button, gpointer user_data) {
+	(void)user_data;
+	gboolean powered = gtk_toggle_button_get_active(button);
+	if(!powered) gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(cb_ic_allow_dsm), FALSE);
+	gtk_widget_set_sensitive(cb_ic_allow_dsm, powered);
+}
+
 void init_itinerary_calculator(GtkBuilder *builder) {
 	tf_ic_window = gtk_builder_get_object(builder, "window");
 	lb_ic_ksp_note = GTK_WIDGET(gtk_builder_get_object(builder, "lb_ic_ksp_note"));
@@ -127,6 +136,14 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	connect_date_adjust_buttons(builder, "ic_maxarr", GTK_ENTRY(tf_ic_maxarrdate));
 	update_month_adjust_button_labels(get_settings_datetime_type());
 	cb_ic_allow_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_dsm"));
+	cb_ic_allow_powered_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_powered_flybys"));
+	GtkWidget *eb_ic_info_powered_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_powered_flybys"));
+	if(eb_ic_info_powered_flybys != NULL) {
+		setup_ic_info_icon_hover(eb_ic_info_powered_flybys);
+		set_stable_tooltip(eb_ic_info_powered_flybys, "Allows flybys that need a burn and optimizes the best routes. Turning it off searches only unpowered gravity assists, which makes the search about 2.3 times faster but skips route optimization and deep-space maneuvers.");
+	}
+	if(cb_ic_allow_powered_flybys != NULL)
+		g_signal_connect(cb_ic_allow_powered_flybys, "toggled", G_CALLBACK(on_ic_powered_flybys_toggled), NULL);
 	GtkWidget *eb_ic_info_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_dsm"));
 	if(eb_ic_info_dsm != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_dsm);

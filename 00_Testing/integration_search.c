@@ -661,3 +661,108 @@ int check_empty_result_reason(CelestSystem *system, Body *departure_body, Body *
 	printf("Empty search result names its limit: %s\n", reason);
 	return 1;
 }
+
+// Powered-flybys-off mode: no powered seeds from the flyby search and no optimizer stage, so every flyby keeps the
+// excess speed (within the 1 m/s root tolerance) while the default mode still adds speed-changing seeds.
+int check_unpowered_flyby_search(CelestSystem *system, Body *departure, Body *flyby, Body *target,
+		double departure_jd, double hohmann_duration) {
+	OSV dep = osv_from_elements(departure->orbit, departure_jd);
+	struct ItinStep root = {.body = departure, .date = departure_jd};
+	int powered_nodes = 0, unpowered_nodes = 0, unpowered_speed_changes = 0;
+	PoweredSeedSearchStats powered_stats = {0}, unpowered_stats = {0};
+	for(int days = 120; days <= 600; days += 120) {
+		OSV encounter = osv_from_elements(flyby->orbit, departure_jd + days);
+		Lambert3 inbound = calc_lambert3(dep.r, encounter.r, days * 86400.0, system->cb);
+		if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
+			inbound.success == LAMBERT_MAX_ITERATIONS) continue;
+		for(int powered = 0; powered <= 1; powered++) {
+			struct ItinStep step = {.body = flyby, .date = departure_jd + days,
+				.r = encounter.r, .v_arr = inbound.v1, .v_body = encounter.v, .prev = &root};
+			PoweredSeedSearchStats *stats = powered ? &powered_stats : &unpowered_stats;
+			begin_powered_seed_search(stats);
+			int previous = set_powered_flybys_enabled(powered);
+			find_viable_flybys(&step, system, target, 100 * 86400.0, 1000 * 86400.0);
+			set_powered_flybys_enabled(previous);
+			begin_powered_seed_search(NULL);
+			for(int i = 0; i < step.num_next_nodes; i++) {
+				struct ItinStep *next = step.next[i];
+				double difference = fabs(mag_vec3(subtract_vec3(step.v_arr, step.v_body)) -
+					mag_vec3(subtract_vec3(next->v_dep, step.v_body)));
+				if(!powered && difference >= 1.0) unpowered_speed_changes++;
+				free_itinerary(next);
+			}
+			(powered ? &powered_nodes : &unpowered_nodes)[0] += step.num_next_nodes;
+			free(step.next);
+		}
+	}
+	int seeds_valid = powered_stats.seeds_added > 0 && powered_nodes > unpowered_nodes &&
+		unpowered_stats.seeds_added == 0 && unpowered_stats.alternatives_added == 0 &&
+		unpowered_stats.evaluations == 0 && unpowered_stats.searches_budget_skipped == 0 &&
+		unpowered_speed_changes == 0;
+	if(!seeds_valid)
+		fprintf(stderr, "Flyby search without powered flybys: %d nodes vs %d powered, %d speed-changing, %llu seeds, %llu evaluations\n",
+			unpowered_nodes, powered_nodes, unpowered_speed_changes, unpowered_stats.seeds_added, unpowered_stats.evaluations);
+
+	// Whole search: the optimizer stage and its statistics are skipped, and the default is unchanged.
+	Body *mars = get_body_by_name("MARS", system);
+	Body *flyby_bodies[] = {flyby, departure, mars, target};
+	Itin_Calc_Data calc_data = {0};
+	calc_data.jd_min_dep = departure_jd;
+	calc_data.jd_max_dep = departure_jd + 20;
+	calc_data.step_dep_date = 1;
+	calc_data.jd_max_arr = departure_jd + 20 + 2.5 * hohmann_duration;
+	calc_data.max_duration = 2.5 * hohmann_duration;
+	calc_data.allow_dsm = 1;
+	calc_data.dv_filter = (struct Dv_Filter) {
+		.max_totdv = 1e9, .max_depdv = 1e9, .max_satdv = 1e9,
+		.dep_periapsis = departure->atmo_alt + 50000, .arr_periapsis = target->atmo_alt + 50000,
+		.last_transfer_type = TF_FLYBY
+	};
+	calc_data.seq_info.to_target = (struct ItinSequenceInfoToTarget) {
+		.type = ITIN_SEQ_INFO_TO_TARGET, .system = system, .dep_body = departure, .arr_body = target,
+		.flyby_bodies = flyby_bodies, .num_flyby_bodies = 4
+	};
+	Itin_Calc_Results powered_results = search_for_itineraries(calc_data);
+	calc_data.disable_powered_flybys = 1;
+	Itin_Calc_Results unpowered_results = search_for_itineraries(calc_data);
+	int unpowered_flybys = 0, unpowered_routes_ok = 1;
+	for(int i = 0; i < unpowered_results.num_deps; i++) {
+		int count = get_number_of_itineraries(unpowered_results.departures[i]);
+		struct ItinStep **leaves = malloc((size_t)(count > 0 ? count : 1) * sizeof(*leaves));
+		int stored = 0;
+		if(leaves == NULL) { unpowered_routes_ok = 0; continue; }
+		store_itineraries_in_array(unpowered_results.departures[i], leaves, &stored);
+		for(int j = 0; j < stored; j++) {
+			for(struct ItinStep *step = leaves[j]->prev; step != NULL && step->prev != NULL; step = step->prev) {
+				// step is a flyby; its outgoing leg starts at the next node of the route.
+				struct ItinStep *outgoing = NULL;
+				for(struct ItinStep *later = leaves[j]; later != step; later = later->prev) outgoing = later;
+				if(outgoing == NULL || outgoing->prev != step) continue;
+				unpowered_flybys++;
+				double difference = fabs(mag_vec3(subtract_vec3(step->v_arr, step->v_body)) -
+					mag_vec3(subtract_vec3(outgoing->v_dep, step->v_body)));
+				if(difference >= 1.0) unpowered_routes_ok = 0;
+			}
+		}
+		free(leaves);
+	}
+	int search_valid = powered_results.num_itins > 0 && powered_results.powered_seed_stats.seeds_added > 0 &&
+		powered_results.powered_routes_corrected > 0 &&
+		unpowered_results.num_itins > 0 && unpowered_results.powered_seed_stats.seeds_added == 0 &&
+		unpowered_results.powered_routes_corrected == 0 && unpowered_results.powered_repairs_attempted == 0 &&
+		unpowered_results.powered_dsm_routes_optimized == 0 && unpowered_flybys > 0 && unpowered_routes_ok;
+	if(!search_valid)
+		fprintf(stderr, "Search without powered flybys: %d itineraries (%d corrected, %d seeds, %d DSM routes), %d flybys checked%s; default %d itineraries, %d seeds, %d corrected\n",
+			unpowered_results.num_itins, unpowered_results.powered_routes_corrected,
+			(int)unpowered_results.powered_seed_stats.seeds_added, unpowered_results.powered_dsm_routes_optimized,
+			unpowered_flybys, unpowered_routes_ok ? "" : " (speed changed)", powered_results.num_itins,
+			(int)powered_results.powered_seed_stats.seeds_added, powered_results.powered_routes_corrected);
+	for(int i = 0; i < powered_results.num_deps; i++) free_itinerary(powered_results.departures[i]);
+	free(powered_results.departures);
+	for(int i = 0; i < unpowered_results.num_deps; i++) free_itinerary(unpowered_results.departures[i]);
+	free(unpowered_results.departures);
+	if(seeds_valid && search_valid)
+		printf("Powered flybys off: %d of %d flyby nodes kept; %d itineraries searched without optimization, %d flybys with unchanged speed\n",
+			unpowered_nodes, powered_nodes, unpowered_results.num_itins, unpowered_flybys);
+	return seeds_valid && search_valid;
+}
