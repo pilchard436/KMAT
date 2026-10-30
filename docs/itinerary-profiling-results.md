@@ -1,12 +1,105 @@
 # Itinerary profiling results
 
+This document records how much faster the itinerary search has become, how each
+speedup was achieved, and the measurements behind them. It has the optimization
+history, the 32-configuration option matrices (baseline, an intermediate point,
+and current), and the experiments behind individual changes. The CPU-side
+changes of October 2026 and the ideas that were tried and rejected are described
+in detail in [`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md).
+
+## Summary
+
+On the Earth-to-Saturn profile scenario (366 daily departures), measured from
+the first recorded matrix (2026-10-21) to current `main` (2026-10-29):
+
+| Configuration | Baseline | Current | Speedup |
+|---|---:|---:|---:|
+| Fly-By, all five options on (mask 31) | 502.2 s | 62.6 s | 8.0× |
+| Capture, all five options on (mask 31) | 566.9 s | 63.9 s | 8.9× |
+| Fly-By, no options (mask 00) | 58.3 s | 7.7 s | 7.6× |
+| Fly-By, resonant flybys only (mask 01) | 439.2 s | 49.1 s | 8.9× |
+| All 64 configurations, summed | 18,870 s | 2,279 s | 8.3× |
+
+Going back to the legacy Lambert solver, the same base scenario (no options) on
+the parent repository's `main` takes 43.6 s of search with no optimization
+stage; current `main` does more work (powered-flyby seeds and route
+optimization) in 7.7 s, about 5.7× faster end to end (see
+[Progress on the base scenario](#progress-on-the-base-scenario)).
+
+The largest steps were the parallel optimizer stages (config 00 −46%), the
+Kepler solver with its companion changes (coverage run −57%), and the October 29
+hot-spot work (config 00 −57%, resonant config 01 −71%). Single Lambert solves
+are about 16× faster since the Izzo solver replaced the legacy one.
+
+## Optimization history
+
+### 2023–2025: original solver and threading
+
+These effects are quoted from commit messages. No shared benchmark existed at
+the time, so they cannot be multiplied together or compared with the 2026
+measurements below.
+
+| Date | Commit | Optimization | How | Stated effect |
+|---|---|---|---|---|
+| 2023-08-16 | `03a38ea` | Launch-profile parameter calculation (launch calculator) | Runs in threads | ~4–5× |
+| 2023-12-03 | `01d85c9` | Porkchop size reduction | Multi-threaded | ~2× |
+| 2023-12-05 | `09d0e71` | Final porkchop generation | Multi-threaded | ~3× in a first test |
+| 2023-12-12 | `e20196d` | Orbit propagation | Starts from a better guess instead of the origin point | ~4× overall |
+| 2023-12-12 | `c7a7e6b` | Transfer orbit calculation | Larger initial step size | 2–3× |
+| 2023-12-14 | `b92aaa1` | Porkchop generation | Thread pool with per-thread reduction instead of many ad hoc threads | 30–50% |
+| 2024-01-27 | `c36b2ba` | Double swing-by search (later removed) | dθ instead of dt | 17% |
+| 2024-01-28 | `9d85ff3` | Double swing-by search | Algorithm cleanup | Up to 20–30× |
+| 2024-01-29 | `b291da7` | Double swing-by search | Gradient descent for the minimum | ~5× |
+| 2024-02-18 | `c98f2de` | Lambert's problem | New algorithm | 3× over the original |
+| 2024-03-17 | `a31bd1a` | Transfer search | One thread per departure date | Not stated |
+| 2025-03-20 to 04-01 | `3b2b19c`, `e7fe159`, `a95ecf2`, `f53b319` | Threading and large porkchops | Cross-platform threads, quicksort fix for large porkchops, thread count cut to 32 for a responsive cancel, sequence calculation forced to one thread after multithreading problems | Not stated (the last one trades speed for correctness) |
+
+orbitlib's Lambert solver was introduced on 2025-08-28 (orbitlib `6fc6898`) and
+remained the search's solver until October 2026; the following sections call it
+the legacy solver.
+
+### October 2026: measured steps
+
+| Date | Commit | Optimization | How | Measured effect |
+|---|---|---|---|---|
+| 10-13 to 10-16 | orbitlib `4563fc4`, `b5cf08c`, `b279cbf`; KMAT `72e870a` | Izzo Lambert solver replaces the legacy solver | The Izzo formulation, with a cancellable and a multi-revolution API, becomes the only solver; the legacy solver and its setting are removed | Legacy 0.27 s vs Izzo 0.017 s per 96,000 solves, 15.1–16.9× per solve (three runs, single thread, rebuilt from history on 10-29 at orbitlib `0ead08e`). In that benchmark the legacy solver's largest propagated endpoint miss was 0.24 against 5.6e-6 for Izzo. End-to-end effect not measured |
+| 10-16 | `7c7ae27` | Resonant search | Stall bail-out in the flyby iteration, no resonance from the arrival body, fewer roots, coarser sampling | Not benchmarked |
+| 10-21 | `4eb887f` | Option matrix recorded | – | Baseline: [matrices below](#matrix-results) |
+| 10-25 | `50bc3ee` | Parallel optimizer stages, lock-free cancellation reads | Selected-candidate refinement, route scoring and rejected-route repair run in worker pools; Fly-By and Capture optimization run concurrently; the cancellation counter is read atomically instead of under a mutex | Config 00: 58.3 s → 31.4 s. All options: Fly-By 502.2 s → 373.6 s, Capture 566.9 s → 379.8 s. Per-stage figures in [Experiments](#experiments) |
+| 10-25 | `a1f9da6`, `cba6d70`, orbitlib `eea3508` | Kepler solver | Newton iteration on Kepler's equation for elliptic orbits; `osv_from_elements` stays in eccentric anomaly instead of round-tripping through the true anomaly | 5.6× per propagation call (about 2,860 ns → 509 ns); coverage run 88.7 s → 47.7 s → 45.7 s |
+| 10-25 | `bc11951`, `55f69fb`, `a8301c1` | Powered-flyby solves and root search | The SOI correction freezes the periapsis choice after iteration 4; the golden-section search reuses one interior point; the root search stops when the step is below 1 s | Coverage run 45.7 s → 37.9 s; solves hitting the 60-iteration limit 4,544 → 84 in one run; about 3% more on Saturn |
+| 10-25 | `68af5b6`, `7e3bb25` | Seed budget 512 → 2,048, shared per body | Deliberately adds work for coverage; the faster code pays for it | Jupiter 2.7 s → 8.1 s at the new budget; Saturn at 2,048 takes 14 s against 28.1 s for the original 512-budget search |
+| 10-24 / 10-25 | `e54d006`, `d991abc` | Cached per-step Porkchop delta-v values; parallel delta-v preparation when saving | Analyzer and file I/O paths, not the search | Not benchmarked |
+| 10-29 | `94a1ecd`, orbitlib `f36116f` | Cheaper propagation, powered flyby, pruning and resonant scan | Cached per-orbit constants and `sincos` in `osv_from_elements`; binary search plus cached elements in `osv_from_ephem`; radius-independent geometry hoisted and a magnitude-only radius search in `calculate_powered_flyby`; delta-v pruning shares ancestor costs and caches flyby burns; the resonant scan propagates once per date, solves both multi-revolution branches together, refines with the Illinois method and splits brackets at the transfer-plane flip | Config 00: 21.0 s → 9.1 s. Config 01: 185 s → 53 s. Saturn resonant mission benchmark search: 86.4 s → 29.9 s. Per-change figures in [`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md#changes) |
+| 10-29 | `fc6ed4a` | Link-time optimization | `-flto` for Release and RelWithDebInfo; `-O3` and `-march=x86-64-v3` measured and rejected | Config 00: 9.4 s → 7.9 s (−16%). Config 01: 54.8 s → 51.2 s (−6.5%). Results identical |
+
+### Progress on the base scenario
+
+Earth to Saturn, 366 daily departures, no options, Fly-By final. Each row is one
+sample from the benchmark named in its last column, so rows are comparable as a
+trend but were not all produced by one script.
+
+| State | Base time | Notes | Source |
+|---|---:|---|---|
+| Parent repository `main` (Zange10/KMAT `09bb2a3`, 2026-04-17): legacy Lambert solver, step-halving propagator, unpowered flybys only | 43.56 s | Search only, no optimization stage; 9,348 itineraries / 18,455 nodes; mean of 43.48, 43.57 and 43.63 s | Same scenario run through the parent's search API, built `-O2` |
+| 10-21 baseline (Izzo solver, powered-flyby search and optimizer) | 58.27 s | 38.98 s search + 18.67 s optimization; 9,233 itineraries | Matrix |
+| 10-25 after parallel stages and lock-free cancellation | 31.42 s | Same itineraries | Matrix |
+| 10-25 after the Kepler solver, solve changes and seed budget 2,048 | 21.0 s | The budget raise adds work that the faster code absorbs | `itinerary-cpu-speedup.md` |
+| 10-29 after hot-spot work | 9.1 s | – | `itinerary-cpu-speedup.md` |
+| 10-29 current (LTO) | 7.69 s | 9,300 itineraries / 18,404 nodes | Matrix |
+
+Current `main` does more work than the parent run: it adds powered-flyby seeds,
+route scoring, repair and refinement, and uses a larger seed budget. The 5.7×
+end-to-end gain therefore understates the speedup per unit of work.
+
 ## Scenario and method
 
-Both matrices use the same UI-free Earth-to-Saturn scenario with Earth, Mars,
-Jupiter, and Saturn as candidate bodies (Vesta and Ceres excluded). The search
+All matrices use the same UI-free Earth-to-Saturn scenario with Earth, Mars,
+Jupiter and Saturn as candidate bodies (Vesta and Ceres excluded). The search
 uses 366 daily departures from JD 2461325.50 through 2461690.50, an arrival
 cutoff of JD 2466097.50, a maximum duration of 4407 days, and 7282 m/s
-departure, satellite, and total delta-v limits.
+departure, satellite and total delta-v limits on the ephemeris system
+(`solar_system_ephem.cfg`).
 
 The five option bits are:
 
@@ -19,213 +112,137 @@ The five option bits are:
 | C | Custom starting orbit |
 
 The custom orbit is circular at Earth radius plus atmospheric altitude plus
-50 km. Each mask is run in a fresh process. Each reported configuration has one
-accepted run; the timing measurements are not repeated medians.
+50 km. The Fly-By matrix uses `TF_FLYBY` and the Capture matrix `TF_CAPTURE`
+(arrival capture delta-v counts toward the limits).
 
-`Search`, `Optimization/refinement`, `Filtering`, and `Calculation total` are
-wall-clock seconds. Initialization was 0.000 s in all runs. `Outer process`
-includes work outside the calculation timer, including validation. It should
-not be treated as the calculation wall time.
+Every figure is wall-clock seconds from one fresh process, not a median of
+repeated runs, so small differences can be affected by machine load and run
+order. All runs used the default 15-worker limit on an AMD Ryzen 7 9800X3D
+(8 cores, 16 logical processors; KMAT reserves one) under Windows with GCC
+MinGW, search profiling enabled, and passed full-profile validation. Baseline and
+Oct 25 builds are `RelWithDebInfo`; the current build adds LTO and uses GCC 16.2.
+`Calculation total` covers search, optimization/refinement and filtering;
+initialization is 0.000 s throughout.
 
-## Flyby-final matrix
+To reproduce a row, configure with `-DKMAT_ENABLE_SEARCH_PROFILE=ON` and run, from
+a directory directly under the repository root (the runner opens
+`../Celestial_Systems/solar_system_ephem.cfg`),
+`KMATSearchIntegration.exe --full-profile-config <mask>` for Fly-By or
+`--full-profile-capture-config <mask>` for Capture, where `<mask>` is 0 to 31.
 
-All 32 configurations passed validation.
+## Matrix results
 
-| ID | Enabled | Search (s) | Optimization/refinement (s) | Filtering (s) | Calculation total (s) | Outer process (s) | Itineraries / nodes |
-|---:|---|---:|---:|---:|---:|---:|---:|
-| 00 | — | 38.975 | 18.671 | 0.620 | 58.267 | 58.796 | 9,233 / 18,261 |
-| 01 | R | 411.932 | 18.798 | 8.452 | 439.183 | 439.740 | 9,237 / 18,286 |
-| 02 | D | 36.790 | 28.458 | 0.649 | 65.897 | 66.451 | 9,233 / 18,261 |
-| 03 | R, D | 410.981 | 28.546 | 8.435 | 447.962 | 448.527 | 9,237 / 18,286 |
-| 04 | M | 38.168 | 22.676 | 1.696 | 62.541 | 63.083 | 9,190 / 18,143 |
-| 05 | R, M | 396.269 | 22.155 | 9.417 | 427.842 | 428.383 | 9,194 / 18,170 |
-| 06 | D, M | 37.635 | 36.792 | 1.689 | 76.115 | 76.708 | 9,190 / 18,143 |
-| 07 | R, D, M | 397.025 | 36.149 | 9.395 | 442.569 | 443.111 | 9,194 / 18,170 |
-| 08 | A | 49.546 | 47.608 | 33.660 | 130.814 | 131.362 | 9,233 / 18,261 |
-| 09 | R, A | 407.152 | 47.628 | 41.445 | 496.225 | 496.774 | 9,237 / 18,286 |
-| 10 | D, A | 49.576 | 57.023 | 33.654 | 140.254 | 140.800 | 9,233 / 18,261 |
-| 11 | R, D, A | 406.251 | 57.250 | 41.389 | 504.891 | 505.441 | 9,237 / 18,286 |
-| 12 | M, A | 51.776 | 51.710 | 34.628 | 138.114 | 138.657 | 9,190 / 18,143 |
-| 13 | R, M, A | 408.921 | 51.039 | 42.402 | 502.362 | 502.902 | 9,194 / 18,170 |
-| 14 | D, M, A | 51.654 | 65.860 | 34.801 | 152.315 | 152.858 | 9,190 / 18,143 |
-| 15 | R, D, M, A | 408.867 | 65.092 | 42.382 | 516.341 | 516.885 | 9,194 / 18,170 |
-| 16 | C | 36.717 | 21.353 | 1.345 | 59.415 | 61.338 | 5,870 / 11,775 |
-| 17 | R, C | 393.873 | 21.095 | 9.058 | 424.026 | 425.953 | 5,878 / 11,810 |
-| 18 | D, C | 36.588 | 32.369 | 1.319 | 70.276 | 72.196 | 5,870 / 11,776 |
-| 19 | R, D, C | 393.865 | 32.050 | 9.031 | 434.947 | 436.875 | 5,878 / 11,811 |
-| 20 | M, C | 38.429 | 23.498 | 1.620 | 63.548 | 65.468 | 5,863 / 11,749 |
-| 21 | R, M, C | 395.497 | 23.175 | 9.346 | 428.018 | 429.949 | 5,871 / 11,784 |
-| 22 | D, M, C | 38.162 | 39.043 | 1.617 | 78.822 | 80.738 | 5,863 / 11,750 |
-| 23 | R, D, M, C | 396.601 | 38.769 | 9.346 | 444.717 | 446.638 | 5,871 / 11,785 |
-| 24 | A, C | 50.302 | 42.420 | 25.110 | 117.832 | 119.745 | 5,870 / 11,775 |
-| 25 | R, A, C | 406.832 | 42.168 | 32.909 | 481.909 | 483.846 | 5,878 / 11,810 |
-| 26 | D, A, C | 50.372 | 53.311 | 25.103 | 128.787 | 130.714 | 5,870 / 11,776 |
-| 27 | R, D, A, C | 408.131 | 53.053 | 32.873 | 494.058 | 495.988 | 5,878 / 11,811 |
-| 28 | M, A, C | 52.453 | 44.416 | 25.394 | 122.264 | 124.173 | 5,863 / 11,749 |
-| 29 | R, M, A, C | 409.640 | 44.243 | 33.092 | 486.974 | 488.888 | 5,871 / 11,784 |
-| 30 | D, M, A, C | 52.341 | 60.036 | 25.374 | 137.751 | 139.666 | 5,863 / 11,750 |
-| 31 | R, D, M, A, C | 409.432 | 59.704 | 33.070 | 502.207 | 504.125 | 5,871 / 11,785 |
+Three points in time are shown. *Baseline* is the 2026-10-21 matrix. *Oct 25*
+is the 2026-10-25 re-run at the parallelization commit (before the Kepler
+solver); every itinerary and node count matched the baseline. *Current* is
+2026-10-29 `main`, with search, optimization/refinement and filtering shown. The
+speedup is baseline total divided by current total. Itinerary and node counts
+are current; they are higher than the baseline's (for example 9,300 / 18,404
+against 9,233 / 18,261 for Fly-By mask 00) because the seed budget was raised
+from 512 to 2,048 and the search later changed, not because of the speedups.
 
-## Capture-final matrix
+### Fly-By final
 
-All 32 final configurations passed validation. The moon-assist-enabled masks
-were rerun after correcting the post-search validator to keep arrival moon
-assist enabled while checking capture delta-v. The table reports the passing
-measurements.
+| ID | Enabled | Baseline total | Oct 25 total | Search | Optimization/refinement | Filtering | Current total | Speedup vs baseline | Itineraries / nodes |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 00 | — | 58.27 | 31.42 | 7.28 | 0.37 | 0.03 | 7.69 | 7.6× | 9,300 / 18,404 |
+| 01 | R | 439.18 | 362.18 | 48.16 | 0.38 | 0.58 | 49.12 | 8.9× | 9,320 / 18,468 |
+| 02 | D | 65.90 | 32.95 | 7.43 | 0.58 | 0.03 | 8.03 | 8.2× | 9,300 / 18,404 |
+| 03 | R, D | 447.96 | 364.81 | 48.27 | 0.59 | 0.58 | 49.44 | 9.1× | 9,320 / 18,468 |
+| 04 | M | 62.54 | 34.95 | 9.00 | 0.43 | 0.05 | 9.47 | 6.6× | 9,256 / 18,283 |
+| 05 | R, M | 427.84 | 362.04 | 49.85 | 0.40 | 0.11 | 50.36 | 8.5× | 9,275 / 18,341 |
+| 06 | D, M | 76.11 | 34.87 | 8.98 | 0.68 | 0.05 | 9.71 | 7.8× | 9,256 / 18,283 |
+| 07 | R, D, M | 442.57 | 357.02 | 49.85 | 0.67 | 0.11 | 50.63 | 8.7× | 9,275 / 18,341 |
+| 08 | A | 130.81 | 46.62 | 16.96 | 0.38 | 0.07 | 17.40 | 7.5× | 9,300 / 18,404 |
+| 09 | R, A | 496.23 | 367.24 | 57.25 | 0.37 | 0.62 | 58.24 | 8.5× | 9,320 / 18,468 |
+| 10 | D, A | 140.25 | 47.50 | 16.99 | 0.58 | 0.07 | 17.63 | 8.0× | 9,300 / 18,404 |
+| 11 | R, D, A | 504.89 | 368.23 | 57.32 | 0.59 | 0.62 | 58.54 | 8.6× | 9,320 / 18,468 |
+| 12 | M, A | 138.11 | 49.41 | 18.67 | 0.43 | 0.08 | 19.18 | 7.2× | 9,256 / 18,283 |
+| 13 | R, M, A | 502.36 | 370.77 | 59.11 | 0.41 | 0.15 | 59.66 | 8.4× | 9,275 / 18,341 |
+| 14 | D, M, A | 152.31 | 50.61 | 18.60 | 0.69 | 0.08 | 19.37 | 7.9× | 9,256 / 18,283 |
+| 15 | R, D, M, A | 516.34 | 371.99 | 60.44 | 0.67 | 0.15 | 61.26 | 8.4× | 9,275 / 18,341 |
+| 16 | C | 59.41 | 31.96 | 9.69 | 0.63 | 0.04 | 10.36 | 5.7× | 5,898 / 11,851 |
+| 17 | R, C | 424.03 | 354.85 | 50.53 | 0.62 | 0.62 | 51.77 | 8.2× | 5,927 / 11,931 |
+| 18 | D, C | 70.28 | 32.75 | 9.77 | 0.94 | 0.04 | 10.75 | 6.5× | 5,898 / 11,851 |
+| 19 | R, D, C | 434.95 | 353.70 | 50.61 | 0.93 | 0.62 | 52.16 | 8.3× | 5,927 / 11,931 |
+| 20 | M, C | 63.55 | 34.19 | 11.39 | 0.65 | 0.04 | 12.09 | 5.3× | 5,890 / 11,820 |
+| 21 | R, M, C | 428.02 | 356.03 | 52.32 | 0.65 | 0.12 | 53.08 | 8.1× | 5,918 / 11,896 |
+| 22 | D, M, C | 78.82 | 35.49 | 11.33 | 1.02 | 0.04 | 12.40 | 6.4× | 5,890 / 11,820 |
+| 23 | R, D, M, C | 444.72 | 357.25 | 52.22 | 1.01 | 0.12 | 53.35 | 8.3× | 5,918 / 11,896 |
+| 24 | A, C | 117.83 | 47.56 | 19.37 | 0.64 | 0.07 | 20.07 | 5.9× | 5,898 / 11,851 |
+| 25 | R, A, C | 481.91 | 368.26 | 60.33 | 0.63 | 0.65 | 61.62 | 7.8× | 5,927 / 11,931 |
+| 26 | D, A, C | 128.79 | 48.54 | 19.40 | 0.94 | 0.07 | 20.41 | 6.3× | 5,898 / 11,851 |
+| 27 | R, D, A, C | 494.06 | 369.13 | 59.70 | 0.94 | 0.65 | 61.29 | 8.1× | 5,927 / 11,931 |
+| 28 | M, A, C | 122.26 | 49.89 | 21.02 | 0.65 | 0.08 | 21.75 | 5.6× | 5,890 / 11,820 |
+| 29 | R, M, A, C | 486.97 | 370.91 | 61.47 | 0.67 | 0.15 | 62.29 | 7.8× | 5,918 / 11,896 |
+| 30 | D, M, A, C | 137.75 | 51.21 | 21.00 | 1.03 | 0.08 | 22.10 | 6.2× | 5,890 / 11,820 |
+| 31 | R, D, M, A, C | 502.21 | 373.61 | 61.43 | 1.02 | 0.15 | 62.60 | 8.0× | 5,918 / 11,896 |
 
-| ID | Enabled | Search (s) | Optimization/refinement (s) | Filtering (s) | Calculation total (s) | Outer process (s) | Itineraries / nodes |
-|---:|---|---:|---:|---:|---:|---:|---:|
-| 00 | — | 39.604 | 14.849 | 1.289 | 55.743 | 55.842 | 1,627 / 3,519 |
-| 01 | R | 418.522 | 16.300 | 5.838 | 440.662 | 440.774 | 1,629 / 3,525 |
-| 02 | D | 40.171 | 24.465 | 1.299 | 65.936 | 66.035 | 1,627 / 3,523 |
-| 03 | R, D | 419.822 | 24.215 | 5.404 | 449.442 | 449.541 | 1,629 / 3,529 |
-| 04 | M | 41.341 | 17.595 | 1.418 | 60.355 | 60.454 | 1,621 / 3,495 |
-| 05 | R, M | 422.008 | 17.258 | 5.526 | 444.793 | 444.891 | 1,623 / 3,501 |
-| 06 | D, M | 41.048 | 31.697 | 1.418 | 74.164 | 74.262 | 1,621 / 3,497 |
-| 07 | R, D, M | 420.974 | 31.340 | 5.502 | 457.817 | 457.915 | 1,623 / 3,503 |
-| 08 | A | 53.236 | 85.008 | 8.753 | 146.997 | 162.305 | 1,658 / 3,583 |
-| 09 | R, A | 436.376 | 77.334 | 12.142 | 525.853 | 539.856 | 1,661 / 3,594 |
-| 10 | D, A | 53.279 | 110.256 | 7.987 | 171.523 | 185.507 | 1,658 / 3,584 |
-| 11 | R, D, A | 435.802 | 110.103 | 12.106 | 558.011 | 572.009 | 1,661 / 3,595 |
-| 12 | M, A | 55.583 | 79.291 | 8.080 | 142.956 | 156.877 | 1,652 / 3,559 |
-| 13 | R, M, A | 437.546 | 78.884 | 12.214 | 528.645 | 542.557 | 1,655 / 3,570 |
-| 14 | D, M, A | 55.176 | 115.779 | 8.074 | 179.030 | 192.986 | 1,652 / 3,560 |
-| 15 | R, D, M, A | 437.705 | 115.520 | 12.186 | 565.413 | 579.345 | 1,655 / 3,571 |
-| 16 | C | 40.313 | 18.368 | 2.276 | 60.958 | 61.452 | 1,508 / 3,261 |
-| 17 | R, C | 422.820 | 18.348 | 6.156 | 447.326 | 447.819 | 1,511 / 3,271 |
-| 18 | D, C | 40.344 | 29.434 | 2.268 | 72.047 | 72.537 | 1,508 / 3,268 |
-| 19 | R, D, C | 421.936 | 29.349 | 6.119 | 457.405 | 457.894 | 1,511 / 3,278 |
-| 20 | M, C | 42.256 | 21.048 | 2.389 | 65.695 | 66.182 | 1,502 / 3,236 |
-| 21 | R, M, C | 423.741 | 20.912 | 6.265 | 450.919 | 451.412 | 1,505 / 3,246 |
-| 22 | D, M, C | 42.007 | 36.745 | 2.380 | 81.133 | 81.620 | 1,502 / 3,241 |
-| 23 | R, D, M, C | 424.352 | 36.702 | 5.906 | 466.961 | 467.450 | 1,505 / 3,252 |
-| 24 | A, C | 53.454 | 77.860 | 8.613 | 139.928 | 153.158 | 1,525 / 3,295 |
-| 25 | R, A, C | 436.157 | 78.488 | 12.492 | 527.138 | 540.386 | 1,528 / 3,305 |
-| 26 | D, A, C | 53.721 | 112.154 | 8.638 | 174.515 | 187.731 | 1,525 / 3,297 |
-| 27 | R, D, A, C | 433.809 | 112.609 | 12.488 | 558.907 | 572.158 | 1,528 / 3,307 |
-| 28 | M, A, C | 56.072 | 79.685 | 8.694 | 144.453 | 157.617 | 1,519 / 3,271 |
-| 29 | R, M, A, C | 436.498 | 80.025 | 12.582 | 529.106 | 542.309 | 1,522 / 3,281 |
-| 30 | D, M, A, C | 55.640 | 117.873 | 8.725 | 182.239 | 195.415 | 1,519 / 3,273 |
-| 31 | R, D, M, A, C | 435.987 | 118.245 | 12.682 | 566.915 | 580.117 | 1,522 / 3,283 |
+### Capture final
 
-## Current-branch full-matrix comparison
+| ID | Enabled | Baseline total | Oct 25 total | Search | Optimization/refinement | Filtering | Current total | Speedup vs baseline | Itineraries / nodes |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 00 | — | 55.74 | 31.49 | 7.38 | 0.30 | 0.04 | 7.72 | 7.2× | 1,658 / 3,614 |
+| 01 | R | 440.66 | 351.33 | 48.22 | 0.30 | 0.13 | 48.65 | 9.1× | 1,662 / 3,624 |
+| 02 | D | 65.94 | 31.80 | 7.36 | 0.52 | 0.04 | 7.92 | 8.3× | 1,658 / 3,618 |
+| 03 | R, D | 449.44 | 352.39 | 48.20 | 0.51 | 0.14 | 48.85 | 9.2× | 1,662 / 3,627 |
+| 04 | M | 60.35 | 33.35 | 8.98 | 0.35 | 0.04 | 9.37 | 6.4× | 1,651 / 3,586 |
+| 05 | R, M | 444.79 | 354.54 | 50.16 | 0.34 | 0.12 | 50.62 | 8.8× | 1,655 / 3,596 |
+| 06 | D, M | 74.16 | 34.57 | 9.02 | 0.63 | 0.05 | 9.70 | 7.6× | 1,651 / 3,592 |
+| 07 | R, D, M | 457.82 | 356.38 | 50.06 | 0.62 | 0.12 | 50.80 | 9.0× | 1,655 / 3,602 |
+| 08 | A | 147.00 | 51.47 | 17.04 | 1.21 | 0.08 | 18.33 | 8.0× | 1,692 / 3,686 |
+| 09 | R, A | 525.85 | 372.32 | 57.52 | 1.21 | 0.14 | 58.87 | 8.9× | 1,695 / 3,692 |
+| 10 | D, A | 171.52 | 54.24 | 17.02 | 1.78 | 0.08 | 18.88 | 9.1× | 1,692 / 3,688 |
+| 11 | R, D, A | 558.01 | 375.34 | 57.62 | 1.79 | 0.14 | 59.56 | 9.4× | 1,695 / 3,695 |
+| 12 | M, A | 142.96 | 53.81 | 18.67 | 1.24 | 0.08 | 19.99 | 7.2× | 1,685 / 3,658 |
+| 13 | R, M, A | 528.64 | 375.37 | 59.36 | 1.23 | 0.15 | 60.74 | 8.7× | 1,688 / 3,664 |
+| 14 | D, M, A | 179.03 | 56.97 | 18.65 | 1.88 | 0.08 | 20.61 | 8.7× | 1,685 / 3,661 |
+| 15 | R, D, M, A | 565.41 | 378.38 | 59.35 | 1.88 | 0.14 | 61.38 | 9.2× | 1,688 / 3,667 |
+| 16 | C | 60.96 | 31.93 | 9.72 | 0.57 | 0.05 | 10.34 | 5.9× | 1,533 / 3,342 |
+| 17 | R, C | 447.33 | 352.06 | 50.51 | 0.61 | 0.14 | 51.25 | 8.7× | 1,540 / 3,359 |
+| 18 | D, C | 72.05 | 33.01 | 9.70 | 0.89 | 0.05 | 10.64 | 6.8× | 1,533 / 3,349 |
+| 19 | R, D, C | 457.40 | 353.70 | 50.44 | 0.93 | 0.13 | 51.50 | 8.9× | 1,540 / 3,365 |
+| 20 | M, C | 65.69 | 34.60 | 11.32 | 0.61 | 0.05 | 11.99 | 5.5× | 1,526 / 3,314 |
+| 21 | R, M, C | 450.92 | 355.85 | 52.34 | 0.64 | 0.14 | 53.12 | 8.5× | 1,534 / 3,335 |
+| 22 | D, M, C | 81.13 | 35.92 | 11.36 | 1.00 | 0.06 | 12.42 | 6.5× | 1,526 / 3,322 |
+| 23 | R, D, M, C | 466.96 | 358.05 | 52.26 | 1.03 | 0.14 | 53.43 | 8.7× | 1,534 / 3,344 |
+| 24 | A, C | 139.93 | 52.51 | 19.40 | 1.46 | 0.09 | 20.95 | 6.7× | 1,547 / 3,372 |
+| 25 | R, A, C | 527.14 | 373.29 | 59.65 | 1.46 | 0.15 | 61.27 | 8.6× | 1,554 / 3,385 |
+| 26 | D, A, C | 174.51 | 55.33 | 19.41 | 2.13 | 0.09 | 21.63 | 8.1× | 1,547 / 3,376 |
+| 27 | R, D, A, C | 558.91 | 376.17 | 59.72 | 2.16 | 0.16 | 62.03 | 9.0× | 1,554 / 3,390 |
+| 28 | M, A, C | 144.45 | 54.96 | 21.03 | 1.48 | 0.09 | 22.60 | 6.4× | 1,540 / 3,344 |
+| 29 | R, M, A, C | 529.11 | 377.45 | 61.51 | 1.46 | 0.16 | 63.12 | 8.4× | 1,547 / 3,357 |
+| 30 | D, M, A, C | 182.24 | 58.23 | 21.18 | 2.24 | 0.09 | 23.51 | 7.8× | 1,540 / 3,349 |
+| 31 | R, D, M, A, C | 566.91 | 379.76 | 61.48 | 2.22 | 0.16 | 63.86 | 8.9× | 1,547 / 3,362 |
 
-The two historical matrices above were compared with fresh-process runs of the
-current branch for all 32 masks in both final-transfer modes. Each current
-configuration was run once with search profiling enabled and the default
-15-worker capacity. All 64 runs passed validation, and every itinerary and
-node count matched its corresponding historical result. The capture mask 00
-wrapper did not record its exit-code field, but its output contains both
-`valid=1` and the full-profile validation-success marker.
+### Totals and option averages
 
-| ID | Search: old → current (s) | Change | Calculation total: old → current (s) | Change |
-|---:|---:|---:|---:|---:|
-| **Fly-By final** |||||
-| 00 | 38.975 → 29.556 | −24.2% | 58.267 → 31.420 | −46.1% |
-| 01 | 411.932 → 359.677 | −12.7% | 439.183 → 362.181 | −17.5% |
-| 02 | 36.790 → 30.151 | −18.0% | 65.897 → 32.954 | −50.0% |
-| 03 | 410.981 → 361.458 | −12.0% | 447.962 → 364.808 | −18.6% |
-| 04 | 38.168 → 32.427 | −15.0% | 62.541 → 34.954 | −44.1% |
-| 05 | 396.269 → 359.102 | −9.4% | 427.842 → 362.038 | −15.4% |
-| 06 | 37.635 → 31.263 | −16.9% | 76.115 → 34.872 | −54.2% |
-| 07 | 397.025 → 352.919 | −11.1% | 442.569 → 357.021 | −19.3% |
-| 08 | 49.546 → 44.639 | −9.9% | 130.814 → 46.620 | −64.4% |
-| 09 | 407.152 → 364.743 | −10.4% | 496.225 → 367.244 | −26.0% |
-| 10 | 49.576 → 44.704 | −9.8% | 140.254 → 47.501 | −66.1% |
-| 11 | 406.251 → 364.884 | −10.2% | 504.891 → 368.230 | −27.1% |
-| 12 | 51.776 → 46.795 | −9.6% | 138.114 → 49.413 | −64.2% |
-| 13 | 408.921 → 367.789 | −10.1% | 502.362 → 370.772 | −26.2% |
-| 14 | 51.654 → 46.816 | −9.4% | 152.315 → 50.614 | −66.8% |
-| 15 | 408.867 → 367.818 | −10.0% | 516.341 → 371.988 | −28.0% |
-| 16 | 36.717 → 29.927 | −18.5% | 59.415 → 31.961 | −46.2% |
-| 17 | 393.873 → 352.274 | −10.6% | 424.026 → 354.849 | −16.3% |
-| 18 | 36.588 → 29.802 | −18.5% | 70.276 → 32.750 | −53.4% |
-| 19 | 393.865 → 350.200 | −11.1% | 434.947 → 353.699 | −18.7% |
-| 20 | 38.429 → 32.005 | −16.7% | 63.548 → 34.191 | −46.2% |
-| 21 | 395.497 → 353.264 | −10.7% | 428.018 → 356.026 | −16.8% |
-| 22 | 38.162 → 32.012 | −16.1% | 78.822 → 35.492 | −55.0% |
-| 23 | 396.601 → 353.173 | −11.0% | 444.717 → 357.249 | −19.7% |
-| 24 | 50.302 → 45.387 | −9.8% | 117.832 → 47.564 | −59.6% |
-| 25 | 406.832 → 365.620 | −10.1% | 481.909 → 368.260 | −23.6% |
-| 26 | 50.372 → 45.466 | −9.7% | 128.787 → 48.543 | −62.3% |
-| 27 | 408.131 → 365.571 | −10.4% | 494.058 → 369.132 | −25.3% |
-| 28 | 52.453 → 47.538 | −9.4% | 122.264 → 49.889 | −59.2% |
-| 29 | 409.640 → 368.070 | −10.1% | 486.974 → 370.911 | −23.8% |
-| 30 | 52.341 → 47.559 | −9.1% | 137.751 → 51.208 | −62.8% |
-| 31 | 409.432 → 369.491 | −9.8% | 502.207 → 373.607 | −25.6% |
-| **Capture final** |||||
-| 00 | 39.604 → 29.711 | −25.0% | 55.743 → 31.488 | −43.5% |
-| 01 | 418.522 → 349.261 | −16.5% | 440.662 → 351.330 | −20.3% |
-| 02 | 40.171 → 29.218 | −27.3% | 65.936 → 31.802 | −51.8% |
-| 03 | 419.822 → 349.468 | −16.8% | 449.442 → 352.388 | −21.6% |
-| 04 | 41.341 → 31.310 | −24.3% | 60.355 → 33.346 | −44.8% |
-| 05 | 422.008 → 352.170 | −16.5% | 444.793 → 354.538 | −20.3% |
-| 06 | 41.048 → 31.329 | −23.7% | 74.164 → 34.566 | −53.4% |
-| 07 | 420.974 → 352.719 | −16.2% | 457.817 → 356.385 | −22.2% |
-| 08 | 53.236 → 44.730 | −16.0% | 146.997 → 51.471 | −65.0% |
-| 09 | 436.376 → 365.184 | −16.3% | 525.853 → 372.317 | −29.2% |
-| 10 | 53.279 → 44.751 | −16.0% | 171.523 → 54.236 | −68.4% |
-| 11 | 435.802 → 365.493 | −16.1% | 558.011 → 375.338 | −32.7% |
-| 12 | 55.583 → 46.860 | −15.7% | 142.956 → 53.809 | −62.4% |
-| 13 | 437.546 → 368.159 | −15.9% | 528.645 → 375.374 | −29.0% |
-| 14 | 55.176 → 46.956 | −14.9% | 179.030 → 56.965 | −68.2% |
-| 15 | 437.705 → 368.064 | −15.9% | 565.413 → 378.377 | −33.1% |
-| 16 | 40.313 → 29.932 | −25.8% | 60.958 → 31.928 | −47.6% |
-| 17 | 422.820 → 349.734 | −17.3% | 447.326 → 352.060 | −21.3% |
-| 18 | 40.344 → 30.047 | −25.5% | 72.047 → 33.014 | −54.2% |
-| 19 | 421.936 → 350.416 | −17.0% | 457.405 → 353.704 | −22.7% |
-| 20 | 42.256 → 32.311 | −23.5% | 65.695 → 34.604 | −47.3% |
-| 21 | 423.741 → 353.196 | −16.6% | 450.919 → 355.846 | −21.1% |
-| 22 | 42.007 → 32.247 | −23.2% | 81.133 → 35.923 | −55.7% |
-| 23 | 424.352 → 353.911 | −16.6% | 466.961 → 358.050 | −23.3% |
-| 24 | 53.454 → 45.655 | −14.6% | 139.928 → 52.513 | −62.5% |
-| 25 | 436.157 → 366.028 | −16.1% | 527.138 → 373.291 | −29.2% |
-| 26 | 53.721 → 45.594 | −15.1% | 174.515 → 55.331 | −68.3% |
-| 27 | 433.809 → 366.006 | −15.6% | 558.907 → 376.170 | −32.7% |
-| 28 | 56.072 → 47.873 | −14.6% | 144.453 → 54.958 | −62.0% |
-| 29 | 436.498 → 370.058 | −15.2% | 529.106 → 377.449 | −28.7% |
-| 30 | 55.640 → 47.941 | −13.8% | 182.239 → 58.232 | −68.0% |
-| 31 | 435.987 → 369.112 | −15.3% | 566.915 → 379.759 | −33.0% |
+| Final transfer | Baseline sum | Oct 25 sum | Current sum | Baseline mean | Current mean | Current mean search / optimization / filtering |
+|---|---:|---:|---:|---:|---:|---|
+| Fly-By | 9,077.243 s | 6,487.961 s | 1,133.810 s | 283.664 s | 35.432 s | 34.553 / 0.662 / 0.215 s |
+| Capture | 9,792.985 s | 6,546.562 s | 1,145.642 s | 306.031 s | 35.801 s | 34.551 / 1.146 / 0.104 s |
 
-Across Fly-By final, search time summed across the matrix fell from 7,170.753
-to 6,392.100 s (10.9%); mean search time fell from 224.086 to 199.753 s.
-Calculation total fell from 9,077.243 to 6,487.961 s (28.5%); its mean fell
-from 283.664 to 202.749 s. Across Capture final, search time fell from
-7,627.300 to 6,365.444 s (16.5%), with mean falling from 238.353 to 198.920
-s. Calculation total fell from 9,792.985 to 6,546.562 s (33.2%), with mean
-falling from 306.031 to 204.580 s.
-
-These are end-to-end comparisons between different implementation points.
-The current branch includes other changes since the historical matrices,
-including parallel refinement and route optimization; therefore the full
-matrix improvements must not be attributed solely to the atomic cancellation
-read. The configuration-00 before/after experiment below is the more focused
-measurement of that change. As with the original tables, each configuration
-has one accepted sample, not repeated medians.
-
-## Option averages
+Optimization/refinement was 15–118 s per configuration in the baseline and is at
+most 2.24 s now; search is about 97% of the current mean calculation time.
 
 Each off/on mean averages 16 configurations, with the other four options
-balanced across their on/off states.
+balanced across their on/off states (calculation seconds, off → on):
 
-| Option | Flyby off → on (change) | Capture off → on (change) |
-|---|---:|---:|
-| Resonant flybys | 100.19 → 467.14 s (+366.3%) | 113.605 → 498.457 s (+338.8%) |
-| DSM | 277.46 → 289.87 s (+4.5%) | 294.470 → 317.591 s (+7.9%) |
-| Moon-aware flybys | 280.92 → 286.41 s (+2.0%) | 303.274 → 308.787 s (+1.8%) |
-| Moon assist on arrival | 251.51 → 315.82 s (+25.6%) | 259.460 → 352.602 s (+35.9%) |
-| Custom starting orbit | 287.61 → 279.72 s (−2.7%) | 304.209 → 307.853 s (+1.2%) |
+| Option | Fly-By baseline | Fly-By current | Capture baseline | Capture current |
+|---|---:|---:|---:|---:|
+| Resonant flybys | 100.19 → 467.14 (+366.3%) | 14.90 → 55.96 (+275.6%) | 113.61 → 498.46 (+338.8%) | 15.41 → 56.19 (+264.6%) |
+| DSM | 277.46 → 289.87 (+4.5%) | 35.26 → 35.60 (+1.0%) | 294.47 → 317.59 (+7.9%) | 35.56 → 36.05 (+1.4%) |
+| Moon-aware flybys | 280.92 → 286.41 (+2.0%) | 34.66 → 36.21 (+4.5%) | 303.27 → 308.79 (+1.8%) | 34.90 → 36.70 (+5.2%) |
+| Moon assist on arrival | 251.51 → 315.82 (+25.6%) | 30.65 → 40.21 (+31.2%) | 259.46 → 352.60 (+35.9%) | 30.52 → 41.08 (+34.6%) |
+| Custom starting orbit | 287.61 → 279.72 (−2.7%) | 34.11 → 36.76 (+7.8%) | 304.21 → 307.85 (+1.2%) | 34.50 → 37.10 (+7.6%) |
 
-| Final transfer | Sum of calculation times | Sum of outer-process times | Mean calculation time |
-|---|---:|---:|---:|
-| Flyby | 9,077.243 s | 9,116.778 s | 283.664 s |
-| Capture | 9,792.985 s | 10,016.413 s | 306.031 s |
+## Baseline cost breakdown
 
-## Worker-time averages
+These are summed worker-seconds per configuration from the baseline matrix, not
+wall-clock seconds. They showed that the flyby search was 95% of the recursive
+search, which directed the work above.
 
-These are summed worker-seconds per configuration, not wall-clock seconds.
-
-| Component | Flyby mean | Capture mean |
+| Component | Fly-By mean | Capture mean |
 |---|---:|---:|
 | Initial grid | 2.432 | 2.472 |
 | Recursive search | 3,335.049 | 3,550.239 |
@@ -234,131 +251,41 @@ These are summed worker-seconds per configuration, not wall-clock seconds.
 | Flyby search | 3,173.395 | 3,371.623 |
 | Route expansion/other | 2.715 | 3.417 |
 
-| Flyby body | Flyby worker s/run | Capture worker s/run |
+| Flyby body | Fly-By worker s/run | Capture worker s/run |
 |---|---:|---:|
 | Earth | 1,058.609 | 1,126.649 |
 | Mars | 1,842.252 | 1,953.951 |
 | Jupiter | 171.966 | 183.586 |
 | Saturn | 100.568 | 107.438 |
 
-## Selected-candidate refinement parallelization
+## Experiments
 
-To measure the refinement worker pool, the same `RelWithDebInfo` build and
-Fly-By profile configuration 00 were run twice sequentially and twice with
-parallel refinement. Configuration 00 has no resonant flybys, DSM, moon-aware
-flybys, moon assist, or custom starting orbit. Each fresh-process run passed
-the full-profile validation and produced 9,233 itineraries and 18,261 nodes.
-The route counts and best refined delta-v were identical across the runs.
+Each experiment compares two builds on Fly-By profile configuration 00 (no
+options) at the time, two fresh-process runs per variant unless noted. The
+itinerary and node counts matched in every pair. Parallel repair uses a per-slot
+random stream, which changed the random sequence and moved the Capture
+improved-route count from 527 to 526.
 
-| Execution | Refinement run times (s) | Mean refinement (s) | Total calculation times (s) | Mean total (s) |
-|---|---:|---:|---:|---:|
-| Sequential | 10.78, 10.77 | 10.775 | 55.622, 55.948 | 55.785 |
-| Parallel | 0.99, 0.98 | 0.985 | 45.371, 45.408 | 45.390 |
+| Change | Measure | Before | After | Effect |
+|---|---|---:|---:|---|
+| Selected-candidate refinement in a worker pool | Refinement / total | 10.775 s / 55.785 s | 0.985 s / 45.390 s | 10.9× on refinement, −18.6% total |
+| Route scoring in a worker pool | Scoring + merge + repair / total | 6.96 s / 46.349 s | 2.77 s / 42.761 s | 2.5× on the stage, −7.7% total |
+| Rejected-route repair in a worker pool | Repair Fly-By, Capture / total | 2.82 s, 2.17 s / 44.835 s | 0.48 s, 0.43 s / 42.510 s | 5.9× and 5.1× on repair, −5.2% total |
+| Fly-By and Capture optimization run concurrently (both-modes config 0) | Total | 45.643 s | 45.157 s | −1.1%; Capture is a small share and the worker budget is split |
+| Cancellation counter read: mutex → atomic (before: one sample, after: mean of 3) | Search / total | 38.633 s / 40.560 s | 30.168 s / 32.108 s | −21.9% search, −20.8% total; the shared lock was a significant source of contention |
 
-For this scenario, parallel refinement was **10.9x faster** (about 90.9% less
-refinement time). Overall calculation time fell by about **18.6%** (about
-1.23x). These are two samples per mode on one machine, so treat them as an
-indicative scenario measurement rather than a general performance guarantee.
-Global candidate selection and merging remain serial.
+The scoring figure includes candidate merging and repair because the timer
+covered all three at that point; the current build reports them separately. A
+separate two-run measurement put global ranking/merge at about 0.9 ms (Fly-By) and
+0.2 ms (Capture) and challenge selection at about 3.2 ms and 0.6 ms, against
+route scoring of 0.84 s and 0.97 s, so parallelizing ranking or challenge
+selection is not worthwhile.
 
-## Route scoring parallelization
+### Worker scaling
 
-The same `RelWithDebInfo` build and Fly-By profile configuration 00 were run
-twice with serial scoring and twice with parallel scoring. Each run passed
-full-profile validation and produced the same 9,233 itineraries, 18,261 nodes,
-7,857 valid scored routes, and best initial/refined delta-v (4,723.640 ->
-4,675.650 m/s).
-
-| Execution | Scoring + candidate merge + repair run times (s) | Mean combined time (s) | Total calculation times (s) | Mean total (s) |
-|---|---:|---:|---:|---:|
-| Sequential | 6.95, 6.97 | 6.96 | 46.285, 46.412 | 46.349 |
-| Parallel | 2.77, 2.77 | 2.77 | 42.738, 42.783 | 42.761 |
-
-At the time of this comparison, the optimizer's exact-scoring timer included
-candidate merging and the following repair stage, so these values measure
-**scoring, candidate merge, and repair**, not scoring alone. The combined stage
-was about **2.5x faster** (about 60.2% less time), and overall calculation time
-fell by about **7.7%**. Separate scoring, ranking/merge, challenge-selection,
-and repair timings are reported by the current build. These are two samples per
-mode on one machine, so the results are indicative rather than a general
-performance guarantee. Candidate selection and merging remain serial and
-deterministic.
-
-## Concurrent Fly-By and Capture optimization
-
-The UI-free Earth-to-Saturn scenario was run twice through
-`search_for_itineraries_both_modes` using `KMATSearchIntegration.exe
---full-profile-both-config 0`, before and after enabling concurrent mode
-optimization. Both modes passed full-profile validation and produced the same
-route metrics: 7,857 valid Fly-By scores, a best Fly-By refined delta-v of
-4,675.650 m/s, 9,233 Fly-By itineraries, and 3,529 nodes / 1,632 itineraries
-for Capture.
-
-| Execution | Total calculation times (s) | Mean total (s) |
-|---|---:|---:|
-| Sequential modes | 45.591, 45.695 | 45.643 |
-| Concurrent modes | 45.005, 45.309 | 45.157 |
-
-Concurrency reduced total time by about **0.49 s (1.1%)** in this scenario.
-The gain is modest because Capture optimization is a smaller portion of this
-workload and the available worker budget is divided between the two modes.
-These are two samples per mode on one machine, not a general performance
-guarantee.
-
-## Rejected-route repair parallelization
-
-Repair timing was separated from exact scoring, then the same both-modes
-configuration 00 was run twice with serial repair attempts and twice with
-parallel repair attempts. Fly-By and Capture optimization were concurrent in
-both comparisons; only the per-mode repair attempts changed.
-
-| Measurement | Serial repair | Parallel repair |
-|---|---:|---:|
-| Fly-By repair time (s, mean) | 2.82, 2.82 (2.82) | 0.48, 0.48 (0.48) |
-| Capture repair time (s, mean) | 2.16, 2.18 (2.17) | 0.43, 0.42 (0.43) |
-| Total calculation time (s, mean) | 45.199, 44.471 (44.835) | 42.321, 42.698 (42.510) |
-
-Repair time fell by about **5.9x for Fly-By** and **5.1x for Capture**. Overall
-calculation time fell by about **5.2%**. Both parallel runs passed full-profile
-validation and matched on valid route counts, best Fly-By refined delta-v,
-itinerary counts, and node counts.
-
-Each repair slot now receives its own deterministic random stream, assigned in
-slot order before workers start. This makes repeated parallel runs independent
-of worker scheduling, but changes the random sequence from the previous shared
-serial stream; in this sample the Capture improved-route count changed from 527
-to 526. Treat the performance and route-selection comparison as scenario
-measurements, not a guarantee that every repaired candidate is identical.
-
-## Global ranking and challenge-selection timing
-
-The both-modes configuration 00 profile was run twice with the current timing
-instrumentation. Both runs passed full-profile validation. Top-candidate
-ranking/merge measures the sorted top-route insertion and replacement work;
-challenge selection measures reservoir sampling and is excluded from the
-ranking/merge figure. Route scoring covers the scoring workers. Repair timing
-still includes repair attempts, verification, and the insertion of recovered
-routes, so these stage timings are not all additive.
-
-| Mode | Route scoring (s, mean) | Top-candidate ranking/merge (s, mean) | Challenge selection (ms, mean) | Repair (s, mean) |
-|---|---:|---:|---:|---:|
-| Fly-By | 0.84, 0.84 (0.84) | 0.0009, 0.0009 (0.0009) | 3.256, 3.098 (3.177) | 0.48, 0.48 (0.48) |
-| Capture | 0.97, 0.97 (0.97) | 0.0002, 0.0002 (0.0002) | 0.577, 0.569 (0.573) | 0.43, 0.43 (0.43) |
-
-Ranking/merge took about **0.9 ms for Fly-By** and **0.2 ms for Capture**;
-challenge selection took about **3.2 ms** and **0.6 ms**, respectively.
-Both costs are negligible beside route scoring, repair, and refinement in this
-scenario, so further parallelizing ranking or challenge selection is not
-recommended.
-
-## Departure-search worker scaling
-
-The single-mode Fly-By profile configuration 00 was run once at each worker
-limit using `KMATSearchIntegration.exe --full-profile-worker-scale <workers> 0`.
-The Windows host reports 8 physical cores and 16 logical processors; KMAT
-reserves one logical processor, so its effective maximum is 15 workers. The
-search-phase profiler was enabled for all runs. Every run passed full-profile
-validation and produced the same 9,233 itineraries and 18,261 nodes.
+The same configuration was run once at each worker limit with
+`--full-profile-worker-scale <workers> 0` (9,233 itineraries and 18,261 nodes in
+every run). The 15-worker row is the mutex-read baseline of the table above.
 
 | Worker limit | Search (s) | Optimization/refinement (s) | Filtering (s) | Calculation total (s) |
 |---:|---:|---:|---:|---:|
@@ -369,54 +296,24 @@ validation and produced the same 9,233 itineraries and 18,261 nodes.
 | 12 | 39.248 | 1.987 | 0.224 | 41.459 |
 | 15 | 38.633 | 1.702 | 0.224 | 40.560 |
 
-Search was about **9.6x faster at 15 workers than at 1**. Gains tapered off
-near the available worker cap: 15 workers reduced search time by only about
-**1.6% compared with 12**. This suggests the default 15-worker cap is already
-near the useful limit for this workload; it does not support raising the cap
-above the machine's logical-processor budget. These are single samples per
-limit, so repeat runs would be needed to distinguish small differences from
-system noise.
-
-## Atomic cancellation-read experiment
-
-The 15-worker, single-mode Fly-By configuration 00 was profiled before and
-after changing cancellation-counter reads from the shared mutex to an atomic
-read. The pre-change baseline is one sample; the post-change result is the
-mean of three fresh-process runs. All runs passed full-profile validation with
-9,233 itineraries and 18,261 nodes.
-
-| Version | Search time (s) | Calculation total (s) |
-|---|---:|---:|
-| Mutex read, before change | 38.633 | 40.560 |
-| Atomic read, after change (mean of 3) | 30.168 | 32.108 |
-
-Search time fell by about **21.9%**, and total calculation time by about
-**20.8%** in this scenario. The atomic change preserves the existing
-cancellation counter API: writes remain synchronized and publish the same
-counter value to lock-free readers. This result supports the shared
-cancellation lock as a significant source of contention, though repeated
-pre-change samples would make the comparison stronger.
+Search was 9.6× faster at 15 workers than at 1, but 15 workers cut search time by
+only 1.6% against 12, so the 15-worker cap is already near the useful limit and
+raising it above the logical-processor budget is not supported by these results.
 
 ## Interpretation notes
 
-- The all-off capture baseline was slightly faster than the flyby baseline;
-  across the full matrix, capture averaged about 7.9% slower. Transfer type
-  changes route feasibility and optimization workload, so capture is not
-  uniformly slower.
-- The capture matrix uses `TF_CAPTURE`; the flyby matrix uses `TF_FLYBY`.
-  Capture includes arrival capture delta-v in the limits. The custom orbit
-  changes route feasibility/counts, so its time delta is not purely overhead.
-- Outer-process time includes post-search validation and should not be
-  confused with calculation wall time. For moon-assist capture runs, the
-  validation pass calculates assisted capture costs.
-- One accepted timing sample per configuration means small differences may be
-  affected by machine load and run order. The results are useful for comparing
-  this scenario, but are not repeated-run performance estimates.
-
-
-## CPU speedup
-
-The tables above predate the CPU-side speedups (Kepler solver, SOI iteration
-freeze, golden-section reuse, and related changes). Those changes, their
-before/after timings, and the rejected experiments are in
-[`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md).
+- Transfer type changes feasibility and optimization work, so Capture is not
+  uniformly slower: it averaged 7.9% slower than Fly-By across the baseline
+  matrix and averages 1.0% slower now.
+- Resonant flybys dominate the cost (about 3.8× in the current matrix),
+  followed by moon assist on arrival (about 1.3×). DSM adds 1–1.4%.
+- The custom starting orbit changes route feasibility and counts (Fly-By mask
+  31 finds 5,918 itineraries, mask 15 without the orbit 9,275), so its time
+  difference is not overhead alone.
+- Baseline moon-assist Capture runs spent about 13–15 s outside the calculation
+  timer in post-search validation; in the current runs the outer-process time is
+  within 0.01 s of the calculation total.
+- Whole-matrix comparisons mix several changes and should not be attributed to
+  one of them; the experiments above and
+  [`itinerary-cpu-speedup.md`](./itinerary-cpu-speedup.md) isolate individual
+  changes.
