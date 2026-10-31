@@ -37,4 +37,7 @@ itinerary files calculated with arrival moon assist enabled. These files retain
 both assisted and unassisted arrival delta-v values, so changing the option
 updates the plot and filters without recalculation. The selected route's
 per-step delta-v preview also uses maneuver values saved in the itinerary file.
+The route preview lists each leg and its duration in the top-right corner, as
+the Transfer Planner does, labels each planet with its name, and draws planet
+orbits faintly so the route stands out.
 **Reset Porkchop** restores the full result set and its default view.

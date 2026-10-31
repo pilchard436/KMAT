@@ -375,16 +375,21 @@ void update_pa_itinerary_preview() {
 	for(int i = 0; i < pa_system->num_bodies; i++) {
 		if(!body_show_status_pa[i]) continue;
 		draw_body(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa);
+		draw_body_label(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa);
 		struct Orbit orbit = pa_system->bodies[i]->orbit;
 		if(pa_system->prop_method == EPHEMS) {
 			struct OSV body_osv = osv_from_ephem(pa_system->bodies[i]->ephem, pa_system->bodies[i]->num_ephems, current_date_pa, pa_system->cb);
 			orbit = constr_orbit_from_osv(body_osv.r, body_osv.v, pa_system->cb);
 		}
+		// Body orbits are kept faint so the trajectory stands out, as in the Transfer Planner.
+		cairo_set_source_rgba(get_camera_screen_cairo(pa_itin_preview_camera), pa_system->bodies[i]->color[0],
+			pa_system->bodies[i]->color[1], pa_system->bodies[i]->color[2], 0.4);
 		draw_orbit(pa_itin_preview_camera, orbit);
 		draw_body_moons(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa, NULL);
 	}
 	// Transfers
 	if(curr_transfer_pa != NULL) draw_itinerary(pa_itin_preview_camera, pa_system, curr_transfer_pa, current_date_pa);
+	draw_itinerary_legend(pa_itin_preview_camera, pa_system, curr_transfer_pa, current_date_pa);
 
 	draw_camera_image(pa_itin_preview_camera);
 }
