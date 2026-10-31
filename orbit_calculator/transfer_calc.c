@@ -187,6 +187,7 @@ static struct ItinStep *copy_itinerary_tree_checked(const struct ItinStep *sourc
 	struct ItinStep *copy = calloc(1, sizeof(*copy));
 	if(copy == NULL) return NULL;
 	copy_step_body_vectors_and_date((struct ItinStep *)source, copy);
+	copy->search_flyby_excused = source->search_flyby_excused;
 	copy->num_next_nodes = source->num_next_nodes;
 	if(copy->num_next_nodes > 0) {
 		copy->next = calloc((size_t)copy->num_next_nodes, sizeof(*copy->next));

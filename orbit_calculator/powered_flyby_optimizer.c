@@ -350,6 +350,42 @@ static void *score_powered_routes(void *args) {
 	return NULL;
 }
 
+// Scores arrivals[first, first + count), in parallel when the floating-point environment can be passed on.
+static void score_arrival_range(struct ItinStep **arrivals, Scoring_Result *results, int first, int count,
+		struct ItinStep **departures, int num_departures, const Itin_Calc_Data *calc_data, int max_workers) {
+	if(count <= 0) return;
+	Scoring_Work scoring_work = {
+		.arrivals = arrivals + first,
+		.departures = departures,
+		.calc_data = calc_data,
+		.results = results + first,
+		.num_departures = num_departures,
+		.count = count
+	};
+	atomic_init(&scoring_work.next_arrival, 0);
+	atomic_init(&scoring_work.floating_environment_failed, 0);
+	if(count > 1 && max_workers > 0 &&
+		fegetenv(&scoring_work.calculation_fp_environment) == 0) {
+		struct Thread_Pool pool = use_thread_pool32_preserving_counters_with_limit(
+			score_powered_routes, &scoring_work, (size_t)max_workers);
+		join_thread_pool(pool);
+		if(atomic_load(&scoring_work.floating_environment_failed) &&
+			!itinerary_search_cancelled(NULL)) {
+			fprintf(stderr, "A scoring worker could not inherit the floating-point environment; finishing remaining routes on the calculation thread.\n");
+			for(int arrival_index = 0; arrival_index < count &&
+				!itinerary_search_cancelled(NULL); arrival_index++)
+				if(!scoring_work.results[arrival_index].processed)
+					score_arrival_task(&scoring_work, arrival_index);
+		}
+	} else {
+		if(count > 1 && max_workers > 0)
+			fprintf(stderr, "Unable to capture the floating-point environment; scoring routes sequentially.\n");
+		for(int arrival_index = 0; arrival_index < count &&
+			!itinerary_search_cancelled(NULL); arrival_index++)
+			score_arrival_task(&scoring_work, arrival_index);
+	}
+}
+
 typedef struct {
 	int processed;
 	int optimized;
@@ -477,36 +513,25 @@ int optimize_powered_flyby_routes_with_worker_limit(struct ItinStep **departures
 	set_calculation_progress_phase(TRANSFER_PROGRESS_SCORING,
 		calc_data->dv_filter.last_transfer_type, 0, arrival_count);
 	double route_scoring_start = wall_seconds();
-	Scoring_Work scoring_work = {
-		.arrivals = arrivals,
-		.departures = departures,
-		.calc_data = calc_data,
-		.results = scoring_results,
-		.num_departures = num_departures,
-		.count = arrival_count
-	};
-	atomic_init(&scoring_work.next_arrival, 0);
-	atomic_init(&scoring_work.floating_environment_failed, 0);
-	if(arrival_count > 1 && max_workers > 0 &&
-		fegetenv(&scoring_work.calculation_fp_environment) == 0) {
-		struct Thread_Pool pool = use_thread_pool32_preserving_counters_with_limit(
-			score_powered_routes, &scoring_work, (size_t)max_workers);
-		join_thread_pool(pool);
-		if(atomic_load(&scoring_work.floating_environment_failed) &&
-			!itinerary_search_cancelled(NULL)) {
-			fprintf(stderr, "A scoring worker could not inherit the floating-point environment; finishing remaining routes on the calculation thread.\n");
-			for(int arrival_index = 0; arrival_index < arrival_count &&
-				!itinerary_search_cancelled(NULL); arrival_index++)
-				if(!scoring_results[arrival_index].processed)
-					score_arrival_task(&scoring_work, arrival_index);
-		}
-	} else {
-		if(arrival_count > 1 && max_workers > 0)
-			fprintf(stderr, "Unable to capture the floating-point environment; scoring routes sequentially.\n");
-		for(int arrival_index = 0; arrival_index < arrival_count &&
-			!itinerary_search_cancelled(NULL); arrival_index++)
-			score_arrival_task(&scoring_work, arrival_index);
+	// Routes the search kept only by excusing their unrefined flyby burns go last. They are scored only when the
+	// other routes cannot fill the refinement slots, which keeps large searches from scoring many hopeless routes.
+	int strict_count = arrival_count;
+	struct ItinStep **ordered = malloc((size_t)arrival_count * sizeof(*ordered));
+	if(ordered != NULL) {
+		strict_count = 0;
+		for(int i = 0; i < arrival_count; i++) if(!arrivals[i]->search_flyby_excused) ordered[strict_count++] = arrivals[i];
+		int next = strict_count;
+		for(int i = 0; i < arrival_count; i++) if(arrivals[i]->search_flyby_excused) ordered[next++] = arrivals[i];
+		memcpy(arrivals, ordered, (size_t)arrival_count * sizeof(*arrivals));
+		free(ordered);
 	}
+	score_arrival_range(arrivals, scoring_results, 0, strict_count, departures, num_departures, calc_data, max_workers);
+	int strict_valid = 0;
+	for(int i = 0; i < strict_count; i++)
+		if(scoring_results[i].candidate != NULL && scoring_results[i].candidate->best_total_dv < DBL_MAX) strict_valid++;
+	if(strict_valid < route_limit && !itinerary_search_cancelled(NULL))
+		score_arrival_range(arrivals, scoring_results, strict_count, arrival_count - strict_count,
+			departures, num_departures, calc_data, max_workers);
 	double route_scoring_seconds = wall_seconds() - route_scoring_start;
 	unsigned long long scoring_objective_evaluations = 0;
 	for(int point_index = 0; point_index < arrival_count; point_index++) {

@@ -226,8 +226,9 @@ just outside can be refined back inside. The final filter applies every limit to
 the refined routes. For example, a Kerbin–Duna–Jool flyby needs about 1 m/s at
 Duna after refinement, but every route's Duna burn at the search dates was above
 the 161 m/s default satellite limit, so that limit used to remove every route
-before refinement. Keeping these
-routes makes searches roughly 15–20% slower.
+before refinement. Such routes are marked when the search
+keeps them, and the optimizer scores them only when the other routes cannot fill
+its refinement slots, so large searches stay about as fast as before.
 
 Moon-aware search checks for moon hits and close passes, rejecting or re-planning
 flybys that violate its clearance policy. The Transfer Planner uses the same
