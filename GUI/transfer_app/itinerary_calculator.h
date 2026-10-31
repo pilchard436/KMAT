@@ -21,6 +21,8 @@ void setup_ic_info_icon_hover(GtkWidget *widget);
 // Handler ----------------------
 
 G_MODULE_EXPORT void on_calc_ic();
+G_MODULE_EXPORT void on_ic_show_porkchop(GtkWidget *widget, gpointer data);
+G_MODULE_EXPORT void on_ic_save_itineraries(GtkWidget *widget, gpointer data);
 G_MODULE_EXPORT void on_ic_system_change();
 G_MODULE_EXPORT void on_ic_central_body_change();
 G_MODULE_EXPORT void on_get_ic_ref_values();

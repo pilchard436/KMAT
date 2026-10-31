@@ -62,6 +62,11 @@ void print_header_data_to_string(ItinStepBinHeaderData header, char *string, siz
 // load itineraries from binary file for multiple departures (from pre-order storing)
 struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath);
 
+// Gives search results the delta-v values and header that saving and reloading them as an .itins file would.
+// The returned results take over the departure arrays; the header gets its own copy of the body list.
+struct ItinsLoadFileResults prepare_itineraries_for_analysis(Itin_Calc_Results results, Itin_Calc_Data calc_data,
+	CelestSystem *system);
+
 // stores single itinerary (first branches in tree) (departure first)
 void store_single_itinerary_in_bfile(struct ItinStep *itin, CelestSystem *system, char *filepath);
 void store_single_itinerary_in_bfile_with_options(struct ItinStep *itin, CelestSystem *system,

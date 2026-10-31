@@ -307,15 +307,28 @@ When the worker returns, the GUI completion callback:
 
 1. Finishes the custom starting-orbit search state.
 2. Closes the progress window and re-enables the calculator.
-3. If routes exist, opens a save chooser for an `.itins` file. Saving is
-   optional; cancelling the chooser skips the save. Both route sets and the
-   search configuration are written in the dual-mode file format.
-4. Frees both in-memory itinerary trees and the temporary flyby-body list.
+3. If routes exist, keeps both route sets in memory and enables **Show in
+   Porkchop Analyzer** and **Save Itineraries** next to **Calculate**. No file
+   is needed to look at the results.
+   - **Show in Porkchop Analyzer** hands the results to the analyzer and
+     switches to it. The routes get the same delta-v values and search settings
+     that saving and reloading them would give
+     (`prepare_itineraries_for_analysis` in
+     [`file_io_itins.c`](../tools/file_io_itins.c)). The calculator keeps no
+     copy, so both buttons are disabled afterwards; the analyzer's **Save
+     Itineraries** can still save them.
+   - **Save Itineraries** writes both route sets and the search configuration
+     in the dual-mode `.itins` format. The results stay available afterwards.
+4. Frees results that were not shown when the next calculation starts. If the
+   Capture calculation failed, or neither mode has itineraries, the results are
+   freed straight away.
 5. If neither mode has itineraries, displays **“No itineraries found!”**, with
    a rejection summary when available.
 
-This completion and save flow is implemented in
-[`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c).
+The Sequence Calculator offers the same two buttons. This completion flow is
+implemented in
+[`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c)
+and [`itinerary_results.c`](../GUI/transfer_app/itinerary_results.c).
 
 ## 7. Search profiling
 

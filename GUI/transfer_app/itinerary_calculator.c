@@ -122,6 +122,7 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	box_ic_maxarrdate = GTK_WIDGET(gtk_builder_get_object(builder, "box_ic_maxarrdate"));
 	lb_ic_date_warning = GTK_WIDGET(gtk_builder_get_object(builder, "lb_ic_date_warning"));
 	bt_ic_calc = GTK_WIDGET(gtk_builder_get_object(builder, "bt_ic_calc"));
+	ic_init_result_buttons(builder);
 	gtk_widget_hide(lb_ic_date_warning);
 	tf_ic_maxdur = gtk_builder_get_object(builder, "tf_ic_maxdur");
 	rb_ic_maxarrdate = gtk_builder_get_object(builder, "rb_ic_maxarrdate");
@@ -378,5 +379,5 @@ G_MODULE_EXPORT void on_get_ic_ref_values() {
 }
 
 void reset_ic() {
-
+	ic_free_results();
 }

@@ -19,6 +19,8 @@ struct PlannedScStep {
 
 // Handler --------------------------------------------------
 G_MODULE_EXPORT void on_calc_sc();
+G_MODULE_EXPORT void on_sc_show_porkchop(GtkWidget *widget, gpointer data);
+G_MODULE_EXPORT void on_sc_save_itineraries(GtkWidget *widget, gpointer data);
 G_MODULE_EXPORT void on_sc_system_change();
 
 #endif //KSP_SEQUENCE_CALCULATOR_H

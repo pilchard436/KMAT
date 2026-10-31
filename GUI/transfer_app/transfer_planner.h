@@ -4,6 +4,7 @@
 
 #include <gtk/gtk.h>
 #include "orbitlib.h"
+#include "tools/file_io.h"
 
 void init_transfer_planner(GtkBuilder *builder);
 void tp_select_system(int index);
@@ -13,6 +14,9 @@ void update_date_label();
 void update_transfer_panel();
 
 void end_transfer_planner();
+// Shows a copy of the route as if it had been saved and loaded, and switches to the Transfer Planner.
+void tp_open_itinerary(struct ItinStep *itin, CelestSystem *system, ItinSearchOptions search_options,
+	double dep_periapsis, double arr_periapsis);
 
 
 

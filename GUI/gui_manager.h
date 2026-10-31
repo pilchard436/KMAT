@@ -15,6 +15,9 @@ void set_stable_tooltip_at(GtkWidget *widget, const char *text, double x, double
 void set_stable_tooltip_markup(GtkWidget *widget, const char *markup);
 void set_stable_tooltip_for_entry_icon(GtkEntry *entry, GtkEntryIconPosition icon_position, const char *text);
 
+// Switches every notebook around the widget to the page that holds it.
+void show_page_with_widget(GtkWidget *widget);
+
 void append_combobox_entry(GtkComboBox *combo_box, char *new_entry);
 void remove_combobox_last_entry(GtkComboBox *combo_box);
 

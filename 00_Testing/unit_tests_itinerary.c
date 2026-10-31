@@ -665,6 +665,47 @@ static void check_itinerary_files(void) {
 	}
 	remove(dual_path);
 
+	// Results shown without a file must look the same to the analyzer as saved and reloaded ones.
+	struct ItinStep **memory_departures = malloc(sizeof(*memory_departures));
+	struct ItinStep **memory_capture_departures = malloc(sizeof(*memory_capture_departures));
+	memory_departures[0] = create_itin_copy(route);
+	memory_capture_departures[0] = create_itin_copy(route);
+	Itin_Calc_Results memory_results = both_results;
+	memory_results.departures = memory_departures;
+	memory_results.capture_departures = memory_capture_departures;
+	Itin_Calc_Data memory_calc_data = calc_data;
+	memory_calc_data.dv_filter.last_transfer_type = TF_FLYBY;
+	struct ItinsLoadFileResults in_memory = prepare_itineraries_for_analysis(memory_results, memory_calc_data, system);
+	check_true("in-memory results get the header a saved file has",
+		in_memory.header.file_type == 10 && in_memory.header.system == system &&
+		in_memory.header.num_deps == 1 && in_memory.header.num_itins == 1 &&
+		in_memory.header.calc_data.dv_filter.last_transfer_type == TF_BOTH &&
+		in_memory.header.calc_data.search_options.last_transfer_type == TF_BOTH &&
+		in_memory.header.calc_data.search_options.moon_assist_arrival &&
+		in_memory.departures == memory_departures && in_memory.capture_departures == memory_capture_departures &&
+		in_memory.capture_num_deps == 1 && in_memory.capture_num_itins == 1);
+	check_true("in-memory results own a copy of the flyby body list",
+		in_memory.header.calc_data.seq_info.to_target.flyby_bodies != flyby_bodies &&
+		in_memory.header.calc_data.seq_info.to_target.num_flyby_bodies == 1 &&
+		in_memory.header.calc_data.seq_info.to_target.flyby_bodies[0] == flyby_bodies[0]);
+	struct ItinStep *memory_arrival = get_last(memory_departures[0]);
+	check_true("in-memory results have valid route delta-v values",
+		memory_arrival->arrival_dv_cache.valid && memory_arrival->arrival_dv_cache.route_values_valid &&
+		memory_arrival->arrival_dv_cache.moon_assist_enabled && memory_arrival->arrival_dv_cache.moon_assist_dvs_valid);
+	check_near("in-memory results match the saved departure delta-v",
+		memory_arrival->arrival_dv_cache.dv_dep, itins_saved_values.dv_dep, 1e-9);
+	check_near("in-memory results match the saved flyby delta-v",
+		memory_arrival->arrival_dv_cache.dv_flyby, itins_saved_values.dv_flyby, 1e-9);
+	check_near("in-memory results match the saved capture delta-v",
+		memory_arrival->arrival_dv_cache.dv_arr_cap, itins_saved_values.dv_arr_cap, 1e-9);
+	check_true("in-memory results cache each step delta-v",
+		memory_departures[0]->next[0]->dv_from_prev_valid && memory_arrival->dv_from_prev_valid);
+	free_itinerary(memory_departures[0]);
+	free_itinerary(memory_capture_departures[0]);
+	free(memory_departures);
+	free(memory_capture_departures);
+	free(in_memory.header.calc_data.seq_info.to_target.flyby_bodies);
+
 	Itin_Calc_Data no_assist_calc_data = calc_data;
 	no_assist_calc_data.search_options.moon_assist_arrival = 0;
 	char no_assist_path[] = "unit_test_routes_no_assist.itins";

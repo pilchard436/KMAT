@@ -1,6 +1,8 @@
 # Porkchop Analyzer: exploring itinerary results
 
-The Porkchop Analyzer displays itinerary results from a loaded `.itins` file.
+The Porkchop Analyzer displays itinerary results from a loaded `.itins` file,
+or from a search sent with **Show in Porkchop Analyzer** in the Itinerary or
+Sequence Calculator.
 The plot shows departure date against either transfer duration or arrival date;
 point color represents total delta-v.
 
@@ -28,7 +30,11 @@ one of the next. Switching the y-axis between duration and arrival date shows
 the matching filter row; filters in the hidden row are inactive. Switching
 axes preserves the current plot zoom and pan.
 Switching between Fly-By and Capture also preserves the current plot view.
-**Save Selected Itinerary** saves the currently selected route.
+**Save Itineraries** saves all shown results, Fly-By and Capture, as an
+`.itins` file. **Save Selected Itinerary** saves the currently selected route.
+**Open in Transfer Planner** opens the selected route in the Transfer Planner
+and switches to it, with the same search settings and delta-v values a saved
+and reloaded route would have.
 **Select Best in View** selects the lowest-delta-v node in the current plot
 window, considering only results included by the filters and visible itinerary
 groups. Applying a filter resets the plot view to the remaining results.

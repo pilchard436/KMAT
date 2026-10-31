@@ -29,6 +29,17 @@ static void restore_arrival_dv_cache_metadata(struct ItinStep *step, double dep_
 		restore_arrival_dv_cache_metadata(step->next[i], dep_periapsis, arr_periapsis, moon_assist_enabled);
 }
 
+static void restore_results_dv_cache_metadata(struct ItinStep **departures, int num_deps,
+		struct ItinStep **capture_departures, int capture_num_deps, const Itin_Calc_Data *calc_data) {
+	double dep_periapsis = calc_data->dv_filter.dep_periapsis;
+	double arr_periapsis = calc_data->dv_filter.arr_periapsis;
+	int moon_assist_enabled = calc_data->search_options.known && calc_data->search_options.moon_assist_arrival;
+	for(int i = 0; i < num_deps; i++)
+		restore_arrival_dv_cache_metadata(departures[i], dep_periapsis, arr_periapsis, moon_assist_enabled);
+	for(int i = 0; i < capture_num_deps; i++)
+		restore_arrival_dv_cache_metadata(capture_departures[i], dep_periapsis, arr_periapsis, moon_assist_enabled);
+}
+
 static void ensure_route_dv_values(struct ItinStep *step, double dep_periapsis, double arr_periapsis,
 		int require_dual_moon_assist_dvs) {
 	if(step == NULL) return;
@@ -103,19 +114,8 @@ static void prepare_route_dv_values(struct ItinStep **departures, int num_depart
 	join_thread_pool(pool);
 }
 
-static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
-		Itin_Calc_Data calc_data, CelestSystem *system, char *filepath) {
-	int file_type = get_current_bin_file_type();
-	BinTypes bin_types = get_itins_file_bin_types_from_file_type(file_type);
-	if(bin_types.file_type < 0 || file_type != 10) {
-		fprintf(stderr, "Unsupported itinerary file type: %d\n", file_type);
-		return;
-	}
-	if((results.num_deps > 0 && results.departures == NULL) ||
-		(results.capture_num_deps > 0 && results.capture_departures == NULL)) {
-		fprintf(stderr, "Cannot write itineraries: a result array is missing\n");
-		return;
-	}
+// Computes every route's delta-v values under the search's own moon and starting-orbit settings.
+static void prepare_results_dv_values(Itin_Calc_Results results, Itin_Calc_Data calc_data, CelestSystem *system) {
 	int previous_moon_assist = moon_assist_is_active();
 	int previous_moon_aware = moon_aware_flybys_is_active();
 	StartingOrbit previous_starting_orbit;
@@ -143,6 +143,22 @@ static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
 		else
 			starting_orbit_set_active(NULL, NULL);
 	}
+}
+
+static void store_itineraries_in_bfile_internal(Itin_Calc_Results results,
+		Itin_Calc_Data calc_data, CelestSystem *system, char *filepath) {
+	int file_type = get_current_bin_file_type();
+	BinTypes bin_types = get_itins_file_bin_types_from_file_type(file_type);
+	if(bin_types.file_type < 0 || file_type != 10) {
+		fprintf(stderr, "Unsupported itinerary file type: %d\n", file_type);
+		return;
+	}
+	if((results.num_deps > 0 && results.departures == NULL) ||
+		(results.capture_num_deps > 0 && results.capture_departures == NULL)) {
+		fprintf(stderr, "Cannot write itineraries: a result array is missing\n");
+		return;
+	}
+	prepare_results_dv_values(results, calc_data, system);
 	
 	// Check if the string ends with ".itins"
 	if (strlen(filepath) >= 6 && strcmp(filepath + strlen(filepath) - 6, ".itins") != 0) {
@@ -384,16 +400,8 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 		}
 		load_step_from_bfile(capture_departures[i], file, NULL, header_data.system, bin_types.itin_step_type);
 	}
-	double dep_periapsis = header_data.calc_data.dv_filter.dep_periapsis;
-	double arr_periapsis = header_data.calc_data.dv_filter.arr_periapsis;
-	int moon_assist_enabled = header_data.calc_data.search_options.known &&
-			header_data.calc_data.search_options.moon_assist_arrival;
-	for(int i = 0; i < header_data.num_deps; i++)
-		restore_arrival_dv_cache_metadata(departures[i], dep_periapsis, arr_periapsis,
-			moon_assist_enabled);
-	for(int i = 0; i < capture_num_deps; i++)
-		restore_arrival_dv_cache_metadata(capture_departures[i], dep_periapsis, arr_periapsis,
-			moon_assist_enabled);
+	restore_results_dv_cache_metadata(departures, header_data.num_deps, capture_departures, capture_num_deps,
+		&header_data.calc_data);
 	// ---------------------------------------------------
 
 	fclose(file);
@@ -404,5 +412,44 @@ struct ItinsLoadFileResults load_itineraries_from_bfile(char *filepath) {
 		.capture_num_deps = capture_num_deps,
 		.capture_num_nodes = capture_num_nodes,
 		.capture_num_itins = capture_num_itins
+	};
+}
+
+struct ItinsLoadFileResults prepare_itineraries_for_analysis(Itin_Calc_Results results, Itin_Calc_Data calc_data,
+		CelestSystem *system) {
+	calc_data.dv_filter.last_transfer_type = TF_BOTH;
+	calc_data.search_options.last_transfer_type = TF_BOTH;
+	prepare_results_dv_values(results, calc_data, system);
+	restore_results_dv_cache_metadata(results.departures, results.num_deps, results.capture_departures,
+		results.capture_num_deps, &calc_data);
+	// Whoever releases the results also frees the header's body list, so it gets its own copy.
+	if(calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) {
+		struct ItinSequenceInfoToTarget *to_target = &calc_data.seq_info.to_target;
+		Body **flyby_bodies = malloc((size_t)(to_target->num_flyby_bodies > 0 ? to_target->num_flyby_bodies : 1) *
+			sizeof(Body *));
+		for(int i = 0; flyby_bodies != NULL && i < to_target->num_flyby_bodies; i++) flyby_bodies[i] = to_target->flyby_bodies[i];
+		to_target->flyby_bodies = flyby_bodies;
+		to_target->system = system;
+	} else {
+		struct ItinSequenceInfoSpecItin *spec_seq = &calc_data.seq_info.spec_seq;
+		Body **bodies = malloc((size_t)(spec_seq->num_steps > 0 ? spec_seq->num_steps : 1) * sizeof(Body *));
+		for(int i = 0; bodies != NULL && i < spec_seq->num_steps; i++) bodies[i] = spec_seq->bodies[i];
+		spec_seq->bodies = bodies;
+		spec_seq->system = system;
+	}
+	return (struct ItinsLoadFileResults){
+		.header = {
+			.file_type = get_current_bin_file_type(),
+			.num_nodes = results.num_nodes,
+			.num_deps = results.num_deps,
+			.num_itins = results.num_itins,
+			.system = system,
+			.calc_data = calc_data
+		},
+		.departures = results.departures,
+		.capture_departures = results.capture_departures,
+		.capture_num_deps = results.capture_num_deps,
+		.capture_num_nodes = results.capture_num_nodes,
+		.capture_num_itins = results.capture_num_itins
 	};
 }

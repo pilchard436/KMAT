@@ -1,6 +1,35 @@
 #include "integration_common.h"
 #include "orbit_calculator/flyby_policy.h"
 
+// Every route of both sets has the same stored delta-v values, compared in storage order.
+static int compare_route_dv_values(struct ItinStep **a, struct ItinStep **b, int num_deps, int *compared) {
+	*compared = 0;
+	for(int i = 0; i < num_deps; i++) {
+		int count = get_number_of_itineraries(a[i]);
+		if(count != get_number_of_itineraries(b[i])) return 0;
+		if(count == 0) continue;
+		struct ItinStep **leaves_a = malloc((size_t)count * sizeof(*leaves_a));
+		struct ItinStep **leaves_b = malloc((size_t)count * sizeof(*leaves_b));
+		int stored_a = 0, stored_b = 0, same = leaves_a != NULL && leaves_b != NULL;
+		if(same) {
+			store_itineraries_in_array(a[i], leaves_a, &stored_a);
+			store_itineraries_in_array(b[i], leaves_b, &stored_b);
+			same = stored_a == stored_b;
+		}
+		for(int j = 0; same && j < stored_a; j++) {
+			struct ItinArrivalDvCache *ca = &leaves_a[j]->arrival_dv_cache, *cb = &leaves_b[j]->arrival_dv_cache;
+			same = ca->valid && cb->valid && fabs(leaves_a[j]->date - leaves_b[j]->date) < 1e-9 &&
+				fabs(ca->dv_dep - cb->dv_dep) < 1e-6 && fabs(ca->dv_dsm - cb->dv_dsm) < 1e-6 &&
+				fabs(ca->dv_flyby - cb->dv_flyby) < 1e-6 && fabs(ca->dv_arr_cap - cb->dv_arr_cap) < 1e-6;
+			(*compared)++;
+		}
+		free(leaves_a);
+		free(leaves_b);
+		if(!same) return 0;
+	}
+	return 1;
+}
+
 int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_body,
 		Body *arrival_body, double departure_jd, double hohmann_duration) {
 	Body *flyby_bodies[] = {flyby_body, arrival_body};
@@ -80,8 +109,19 @@ int run_dsm_comparison(CelestSystem *system, Body *departure_body, Body *flyby_b
 		dual_results.capture_num_deps = with_dsm.num_deps;
 		dual_results.capture_num_nodes = with_dsm.num_nodes;
 		dual_results.capture_num_itins = with_dsm.num_itins;
+		// Results shown without a file must match what saving and reloading them gives.
+		struct ItinsLoadFileResults in_memory = prepare_itineraries_for_analysis(dual_results, calc_data, system);
 		store_itineraries_in_bfile_both_modes(dual_results, calc_data, system, file_path);
 		struct ItinsLoadFileResults loaded = load_itineraries_from_bfile(file_path);
+		int compared_routes = 0;
+		if(loaded.departures == NULL || in_memory.header.num_deps != loaded.header.num_deps ||
+			in_memory.header.calc_data.search_options.allow_dsm != loaded.header.calc_data.search_options.allow_dsm ||
+			!compare_route_dv_values(in_memory.departures, loaded.departures, loaded.header.num_deps, &compared_routes) ||
+			compared_routes == 0) {
+			fprintf(stderr, "In-memory results differ from the saved file after %d routes\n", compared_routes);
+			valid = 0;
+		} else printf("In-memory results match the saved file on %d routes\n", compared_routes);
+		free(in_memory.header.calc_data.seq_info.to_target.flyby_bodies);
 		int loaded_routes = 0, loaded_maneuvers = 0;
 		double loaded_best = DBL_MAX;
 		if(loaded.departures != NULL)
