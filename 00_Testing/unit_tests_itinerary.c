@@ -894,9 +894,25 @@ static void check_search_rejections(void) {
 	describe_search_rejections(&counts, tiny, sizeof(tiny));
 	check_true("a short buffer stays terminated", tiny[0] == '\0');
 
+	check_true("without complete routes the message says none reached the target",
+		strstr(text, "No route reached the target") != NULL);
+
+	// Early legs dropped by the departure limit outnumber the complete routes the satellite limit removed.
+	reset_search_rejections();
+	for(int i = 0; i < 5; i++) count_search_rejection(REJECT_DEPARTURE_DV);
+	for(int i = 0; i < 2; i++) count_complete_route_rejection(REJECT_SATELLITE_DV);
+	counts = get_search_rejections();
+	check_true("complete-route rejections also count in the totals", counts.by_cause[REJECT_SATELLITE_DV] == 2 &&
+		counts.complete_by_cause[REJECT_SATELLITE_DV] == 2 && counts.complete_by_cause[REJECT_DEPARTURE_DV] == 0);
+	describe_search_rejections(&counts, text, sizeof(text));
+	check_true("the limit that removed complete routes is named over early legs",
+		strstr(text, "satellite delta-v") != NULL && strstr(text, "2 of 2") != NULL &&
+		strstr(text, "reached the target") != NULL);
+
 	reset_search_rejections();
 	counts = get_search_rejections();
-	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
+	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 &&
+		counts.by_cause[REJECT_DEPARTURE_DV] == 0 && counts.complete_by_cause[REJECT_SATELLITE_DV] == 0);
 }
 
 static void check_thread_pool_preserves_counters(void) {

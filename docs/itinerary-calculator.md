@@ -337,7 +337,10 @@ When the worker returns, the GUI completion callback:
    Capture calculation failed, or neither mode has itineraries, the results are
    freed straight away.
 5. If neither mode has itineraries, displays **“No itineraries found!”**, with
-   a rejection summary when available.
+   a rejection summary when available. The summary names the limit that removed
+   most of the routes that reached the target. Only when no route reached it
+   does it fall back to the earlier legs, which every search drops in large
+   numbers.
 
 This completion flow is implemented in
 [`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c)

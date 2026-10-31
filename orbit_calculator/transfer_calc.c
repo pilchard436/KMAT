@@ -86,22 +86,22 @@ static int route_passes_filters(struct ItinStep *arrival, const Itin_Calc_Data *
 	if(!isfinite(point.dv_dep) || !isfinite(point.dv_dsm) || !isfinite(point.dv_flyby)) return 0;
 	if(arrival->date > calc_data->jd_max_arr || departure->date < calc_data->jd_min_dep ||
 		departure->date > calc_data->jd_max_dep) {
-		count_search_rejection(REJECT_TIME_LIMIT);
+		count_complete_route_rejection(REJECT_TIME_LIMIT);
 		return 0;
 	}
 	double satellite_dv = point.dv_dsm;
 	if(calc_data->dv_filter.last_transfer_type == TF_CAPTURE) satellite_dv += point.dv_arr_cap;
 	if(calc_data->dv_filter.last_transfer_type == TF_CIRC) satellite_dv += point.dv_arr_circ;
 	if(point.dv_dep > calc_data->dv_filter.max_depdv) {
-		count_search_rejection(REJECT_DEPARTURE_DV);
+		count_complete_route_rejection(REJECT_DEPARTURE_DV);
 		return 0;
 	}
 	if(satellite_dv + point.dv_flyby > calc_data->dv_filter.max_satdv) {
-		count_search_rejection(REJECT_SATELLITE_DV);
+		count_complete_route_rejection(REJECT_SATELLITE_DV);
 		return 0;
 	}
 	if(point.dv_dep + satellite_dv + point.dv_flyby > calc_data->dv_filter.max_totdv) {
-		count_search_rejection(REJECT_TOTAL_DV);
+		count_complete_route_rejection(REJECT_TOTAL_DV);
 		return 0;
 	}
 	if(route_blocked_by_moons(arrival)) {

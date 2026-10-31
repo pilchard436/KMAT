@@ -203,7 +203,7 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
 						if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
 							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
-			count_search_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
+			count_complete_route_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
 						return 0;
@@ -416,7 +416,7 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 		if(dv_filter->last_transfer_type == 2) dv_sat += dv_arr_circ;
 			if(dv_sat + dv_flyby > dv_filter->max_satdv ||
 				dv_dep + dv_sat + dv_flyby > dv_filter->max_totdv) {
-			count_search_rejection(dv_sat + dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
+			count_complete_route_rejection(dv_sat + dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
 				curr_step->num_next_nodes = 0;
