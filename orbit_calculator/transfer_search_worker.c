@@ -169,10 +169,14 @@ void *calc_itins_from_departure(void *args) {
 					dv_arr = mag_vec3(osv_body1.v);
 				}
 				
-				if(dv_dep > dv_filter.max_depdv) { count_search_rejection(REJECT_DEPARTURE_DV); continue; }
-				if(dv_dep > dv_filter.max_totdv) { count_search_rejection(REJECT_TOTAL_DV); continue; }
-				if(num_steps == 2 && dv_arr > dv_filter.max_satdv) { count_search_rejection(REJECT_SATELLITE_DV); continue; }
-				if(num_steps == 2 && dv_dep + dv_arr > dv_filter.max_totdv) { count_search_rejection(REJECT_TOTAL_DV); continue; }
+				// A first leg that already ends at the target is a complete route.
+				void (*count_rejection)(enum SearchRejection) = num_steps == 2 ||
+					(itin_seq_type == ITIN_SEQ_INFO_TO_TARGET && next_step_body == arr_body) ?
+					count_complete_route_rejection : count_search_rejection;
+				if(dv_dep > dv_filter.max_depdv) { count_rejection(REJECT_DEPARTURE_DV); continue; }
+				if(dv_dep > dv_filter.max_totdv) { count_rejection(REJECT_TOTAL_DV); continue; }
+				if(num_steps == 2 && dv_arr > dv_filter.max_satdv) { count_rejection(REJECT_SATELLITE_DV); continue; }
+				if(num_steps == 2 && dv_dep + dv_arr > dv_filter.max_totdv) { count_rejection(REJECT_TOTAL_DV); continue; }
 
 				curr_step = get_first(curr_step);
 				curr_step->next[next_step_id] = (struct ItinStep *) calloc(1, sizeof(struct ItinStep));

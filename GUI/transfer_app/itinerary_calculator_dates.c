@@ -309,8 +309,10 @@ gboolean update_ic_reference_defaults(void) {
 }
 
 void on_ic_reference_input_changed(GtkWidget *widget, gpointer user_data) {
-	if(widget == GTK_WIDGET(cb_ic_depbody) || widget == GTK_WIDGET(cb_ic_arrbody))
+	if(widget == GTK_WIDGET(cb_ic_depbody) || widget == GTK_WIDGET(cb_ic_arrbody)) {
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+		ic_update_fixed_sequence_grid();
+	}
 	update_ic_reference_defaults();
 }
 

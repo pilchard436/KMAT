@@ -7,7 +7,6 @@
 #include "settings.h"
 #include "transfer_app/transfer_planner.h"
 #include "transfer_app/porkchop_analyzer.h"
-#include "transfer_app/sequence_calculator.h"
 #include "transfer_app/itinerary_calculator.h"
 #include "transfer_app/starting_orbit_editor.h"
 #include "launch_app/launch_analyzer.h"
@@ -61,7 +60,6 @@ void start_gui(const char* gui_filepath) {
 	// reset transfer gui
 	end_starting_orbit_editor();
 	reset_ic();
-	reset_sc();
 	end_porkchop_analyzer();
 	end_transfer_planner();
 	// reset launch gui
@@ -113,7 +111,6 @@ void activate_app(GtkApplication *app, gpointer gui_filepath) {
 	// init transfer planner page
 	init_itinerary_calculator(builder);
 	init_starting_orbit_editor(builder);
-	init_sequence_calculator(builder);
 	init_porkchop_analyzer(builder);
 	init_transfer_planner(builder);
 	// init launch calc page
@@ -438,7 +435,6 @@ void change_button_date_type(GObject *button, enum DateType old_date_type, enum 
 // settings stuff -------------------------------------------------------------------------
 void change_gui_date_type(enum DateType old_date_type, enum DateType new_date_type) {
 	ic_change_date_type(old_date_type, new_date_type);
-	sc_change_date_type(old_date_type, new_date_type);
 	pa_change_date_type(old_date_type, new_date_type);
 	tp_change_date_type(old_date_type, new_date_type);
 }

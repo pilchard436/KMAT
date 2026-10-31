@@ -31,6 +31,8 @@ struct ItinStep {
 	double date;
 	double dv_from_prev;
 	int dv_from_prev_valid;
+	// Set on an arrival the search kept only because its unrefined flyby burns did not count against the limits.
+	int search_flyby_excused;
 	struct ItinArrivalDvCache arrival_dv_cache;
 	struct ItinFlybyBurnCache flyby_burn_cache;
 	int num_next_nodes;

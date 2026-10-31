@@ -393,9 +393,6 @@ iterate:;
 		alt2radius(departure_body, calc_data->dv_filter.dep_periapsis), &departure_dv)) {
 		goto cleanup;
 	}
-	if(departure_dv > calc_data->dv_filter.max_depdv) {
-		goto cleanup;
-	}
 
 	double powered_flyby_dv = 0;
 	for(size_t i = 1; i + 1 < candidate->num_steps; i++) {
@@ -415,14 +412,13 @@ iterate:;
 		arrival_dv = arrival_dv_with_assist(arrival_body, subtract_vec3(legs[last_leg].v1, states[candidate->num_steps - 1].v),
 			alt2radius(arrival_body, calc_data->dv_filter.arr_periapsis), calc_data->dv_filter.last_transfer_type == TF_CIRC,
 			arrival_dv, times[candidate->num_steps - 1], NULL);
-	if(arrival_dv + dsm_total_dv + powered_flyby_dv > calc_data->dv_filter.max_satdv) {
-		goto cleanup;
-	}
-	total_dv = departure_dv + powered_flyby_dv + dsm_total_dv + arrival_dv;
-	if(total_dv > calc_data->dv_filter.max_totdv) {
-		total_dv = DBL_MAX;
-		goto cleanup;
-	}
+	// The limits add a steep cost instead of rejecting the route, so routes found just outside them still rank and
+	// can be refined back inside; the final route filter enforces the limits themselves.
+	double route_dv = departure_dv + powered_flyby_dv + dsm_total_dv + arrival_dv;
+	double limit_excess = fmax(0, departure_dv - calc_data->dv_filter.max_depdv) +
+		fmax(0, arrival_dv + dsm_total_dv + powered_flyby_dv - calc_data->dv_filter.max_satdv) +
+		fmax(0, route_dv - calc_data->dv_filter.max_totdv);
+	total_dv = route_dv + POWERED_LIMIT_PENALTY * limit_excess;
 	for(size_t i = 1; i + 1 < candidate->num_steps; i++) {
 		legs[i - 1].v1 = add_vec3(states[i].v, incoming_excess[i]);
 		legs[i].v0 = add_vec3(states[i].v, outgoing_excess[i]);
@@ -555,7 +551,6 @@ int powered_route_has_unmodeled_soi_crossing(const Itin_Calc_Data *source, struc
 		int *crosses) {
 	if(crosses != NULL) *crosses = 0;
 	if(source == NULL || arrival == NULL || arrival->body == NULL || arrival->num_next_nodes != 0 ||
-		source->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET ||
 		source->seq_info.to_target.system == NULL) return 0;
 	struct ItinStep *first = get_first(arrival);
 	if(first == NULL || first->body == NULL) return 0;

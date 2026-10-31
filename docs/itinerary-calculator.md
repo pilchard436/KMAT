@@ -34,7 +34,17 @@ are implemented in
 calculator's search configuration:
 
 - **System and bodies:** the selected system/central body, departure body,
-  arrival body, and allowed intermediate flyby bodies.
+  arrival body, and the flyby bodies. With **Any order** (the default) the
+  ticked bodies are the ones the search may fly by, in any order. With
+  **Fixed order** the list shows the whole route: the departure and target
+  bodies chosen above as its first and last rows, and between them the flybys
+  in the order they are made, added and removed with **+** and **−**. Every
+  route follows exactly that order. The same body twice in a row is a resonant return, so Kerbin as the
+  departure, a Kerbin flyby and Jool as the target finds Kerbin–Kerbin–Jool
+  routes. The order is cleared when the system or central body changes.
+  **Allow resonant flybys** and the flyby limit only apply to **Any order**, so
+  they are hidden in **Fixed order**, where resonant returns come from the
+  listed order instead; every other option applies to both.
 - **Departure window:** the earliest and latest departure dates are converted
   to Julian dates. The search advances by one day in the selected calendar:
   one Earth day for ISO dates, and one Kerbin day (six hours, or 0.25 Earth
@@ -167,6 +177,9 @@ reports search progress while the worker performs the calculation. The progress
 bar tracks the current phase's completed work (departure dates, scored routes,
 refined routes, or filtered routes). The percentage restarts when the phase
 changes; the status text names the active phase and its completed/total count.
+It also shows the number of candidate routes the search has found. These are
+counted before optimization and the final limit checks, so the result is usually
+much smaller; the console log reports how many passed.
 Concurrent Fly-By and Capture optimization is identified by both mode names
 rather than a completed/total count. Final result preparation is shown as an
 indeterminate animation because its remaining duration cannot be measured
@@ -193,12 +206,29 @@ than shown individually as each candidate is generated.
 
 ## 5. Routes are optimized and filtered
 
-For the regular to-target itinerary search, surviving routes are passed
+Fixed-order searches go through the same optimization, deep-space maneuver
+and filtering passes. Their final filter also drops any route that does not
+visit exactly the listed bodies in order.
+
+Surviving routes are passed
 through powered-flyby optimization unless the search has been cancelled or
 **Allow powered flybys** is off, in which case the routes keep the dates and
 velocities found by the search and go straight to filtering. This
 stage checks and refines promising routes, including their flyby burns and
 timings. It can also correct relevant sphere-of-influence issues.
+
+Flyby burns at the dates the search picks are often far above what refinement
+reaches, so with powered flybys the search does not count them against the
+satellite and total limits. The optimizer ranks routes by cost plus a steep
+penalty (`POWERED_LIMIT_PENALTY` per m/s) for any limit they exceed, instead of
+discarding them. Routes within the limits therefore still rank first, and routes
+just outside can be refined back inside. The final filter applies every limit to
+the refined routes. For example, a Kerbin–Duna–Jool flyby needs about 1 m/s at
+Duna after refinement, but every route's Duna burn at the search dates was above
+the 161 m/s default satellite limit, so that limit used to remove every route
+before refinement. Such routes are marked when the search
+keeps them, and the optimizer scores them only when the other routes cannot fill
+its refinement slots, so large searches stay about as fast as before.
 
 Moon-aware search checks for moon hits and close passes, rejecting or re-planning
 flybys that violate its clearance policy. The Transfer Planner uses the same
@@ -323,10 +353,12 @@ When the worker returns, the GUI completion callback:
    Capture calculation failed, or neither mode has itineraries, the results are
    freed straight away.
 5. If neither mode has itineraries, displays **“No itineraries found!”**, with
-   a rejection summary when available.
+   a rejection summary when available. The summary names the limit that removed
+   most of the routes that reached the target. Only when no route reached it
+   does it fall back to the earlier legs, which every search drops in large
+   numbers.
 
-The Sequence Calculator offers the same two buttons. This completion flow is
-implemented in
+This completion flow is implemented in
 [`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c)
 and [`itinerary_results.c`](../GUI/transfer_app/itinerary_results.c).
 

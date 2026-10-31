@@ -220,13 +220,14 @@ int check_dsm_model(CelestSystem *system, Body *departure_body, Body *flyby_body
 		valid = 0;
 	}
 
-	// A DSM counts toward the satellite delta-v limit, so a tight limit must reject it.
+	// A DSM counts toward the satellite delta-v limit, so a tight limit must charge its excess at the penalty rate.
 	double times[] = {departure_jd, departure_jd + pairs[0][0], departure_jd + pairs[0][1]};
 	calc_data.dv_filter.max_satdv = first_maneuver / 4;
 	double limited = evaluate_powered_flyby_route_objective_with_dsm(&calc_data, bodies, times, 3, first_found);
 	calc_data.dv_filter.max_satdv = 1e9;
 	double unlimited = evaluate_powered_flyby_route_objective_with_dsm(&calc_data, bodies, times, 3, first_found);
-	if(limited < DBL_MAX || !(unlimited < DBL_MAX)) {
+	// The DSM is re-planned under the limit, so only a clear penalty is required, not a particular excess.
+	if(!(unlimited < DBL_MAX) || !(limited < DBL_MAX) || limited - unlimited < POWERED_LIMIT_PENALTY) {
 		fprintf(stderr, "DSM model: satellite delta-v limit did not govern the maneuver (limited %g, unlimited %g)\n",
 			limited, unlimited);
 		valid = 0;

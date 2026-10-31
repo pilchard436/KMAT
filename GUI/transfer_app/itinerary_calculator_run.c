@@ -116,31 +116,41 @@ static void prepare_ic_calc_data_from_widgets() {
 		get_settings_datetime_type() == DATE_KERBAL ? 0.25 : 1;
 	ic_calc_data.max_num_waiting_orbits = 0;
 
-	// Make sure arrival body is a fly-by body
+	Body *dep_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))];
 	Body *arr_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody))];
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_grid_get_child_at(GTK_GRID(grid_ic_fbbodies), 0, get_body_system_id(arr_body, ic_system))), 1);
+	int allow_resonant = 0;
+	if(ic_fixed_order_active()) {
+		struct ItinSequenceInfoSpecItin seq_info = {.type = ITIN_SEQ_INFO_SPEC_SEQ, .system = ic_system};
+		seq_info.bodies = ic_get_fixed_sequence(&seq_info.num_steps);
+		ic_calc_data.seq_info.spec_seq = seq_info;
+	} else {
+		// Make sure arrival body is a fly-by body
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(gtk_grid_get_child_at(GTK_GRID(grid_ic_fbbodies), 0, get_body_system_id(arr_body, ic_system))), 1);
 
-	struct ItinSequenceInfoToTarget seq_info = {
-			.system = ic_system,
-			.dep_body = ic_system->bodies[gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody))],
-			.arr_body = arr_body,
-			.num_flyby_bodies = get_num_selected_bodies_from_grid(grid_ic_fbbodies),
-			.allow_resonant = cb_ic_allow_resonant != NULL &&
-				gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_resonant)),
-	};
-	seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
-	ic_calc_data.seq_info.to_target = seq_info;
+		struct ItinSequenceInfoToTarget seq_info = {
+				.type = ITIN_SEQ_INFO_TO_TARGET,
+				.system = ic_system,
+				.dep_body = dep_body,
+				.arr_body = arr_body,
+				.num_flyby_bodies = get_num_selected_bodies_from_grid(grid_ic_fbbodies),
+				.allow_resonant = cb_ic_allow_resonant != NULL &&
+					gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(cb_ic_allow_resonant)),
+		};
+		seq_info.flyby_bodies = get_bodies_from_grid(grid_ic_fbbodies, seq_info.num_flyby_bodies);
+		ic_calc_data.seq_info.to_target = seq_info;
+		allow_resonant = seq_info.allow_resonant;
+	}
 	StartingOrbit custom_orbit = {0};
 	Body *custom_orbit_body = NULL;
 	int has_custom_orbit = starting_orbit_get_active(&custom_orbit, &custom_orbit_body) &&
-		custom_orbit_body == seq_info.dep_body;
+		custom_orbit_body == dep_body;
 	ic_calc_data.search_options = (ItinSearchOptions) {
 		.known = 1,
 		.disable_powered_flybys = ic_calc_data.disable_powered_flybys,
 		.allow_dsm = ic_calc_data.allow_dsm,
 		.moon_aware_flybys = ic_calc_data.moon_aware_flybys,
 		.moon_assist_arrival = ic_calc_data.moon_assist_arrival,
-		.allow_resonant = seq_info.allow_resonant,
+		.allow_resonant = allow_resonant,
 		.last_transfer_type = TF_BOTH,
 		.use_custom_starting_orbit = has_custom_orbit,
 		.starting_orbit_body_id = has_custom_orbit ? get_body_system_id(custom_orbit_body, ic_system) : -1,

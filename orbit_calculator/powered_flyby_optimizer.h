@@ -7,6 +7,9 @@
 #define POWERED_ROUTE_REFINEMENT_LIMIT 500
 #define POWERED_REPAIR_SLOTS 64
 #define POWERED_CHALLENGE_SLOTS 32
+/* Cost the route objective adds per m/s over a delta-v limit, instead of rejecting the route, so routes just
+ * outside the limits can be refined back inside. Large enough that routes within the limits rank first. */
+#define POWERED_LIMIT_PENALTY 1000.0
 
 /* Opt-in deep-space maneuvers run only on this many of the best-ranked routes. */
 #define POWERED_DSM_ROUTE_LIMIT 50

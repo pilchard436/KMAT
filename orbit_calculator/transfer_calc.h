@@ -49,6 +49,8 @@ typedef struct Itin_Calc_Results {
 	struct ItinStep **capture_departures;
 	int capture_num_deps, capture_num_nodes, capture_num_itins;
 	int capture_calculation_failed;
+	// Routes the search found before optimization and the final limit check, as the progress window counts them.
+	int num_candidate_routes;
 	int powered_routes_valid, powered_routes_corrected;
 	int powered_itineraries_pruned;
 	unsigned long long powered_initial_rejections;

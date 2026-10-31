@@ -113,7 +113,7 @@ int run_tests() {
 	}; num_tests++;
 
 
-	// SEQUENCE CALCULATOR TEST DATA #################################################################################
+	// FIXED SEQUENCE TEST DATA ######################################################################################
 
 	// Kerbin -> Eve; 2-001 | 3-001 | 300; dv_dep = 1200; dv_arr = 1500 (circ)
 	test_data[num_tests] = (union TestData) (struct Itin_Spec_Seq_Calc_Test) {
@@ -140,7 +140,7 @@ int run_tests() {
 			"Stock System",
 			4,
 			(char *[]){"Kerbin", "Eve", "Duna", "Kerbin"},
-			31758, 13452, // expected num_nodes and num_itins
+			62977, 23791, // expected num_nodes and num_itins
 			40, 1246, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
@@ -169,8 +169,39 @@ int run_tests() {
 			"Solar System (Ephemeris)",
 			5,
 			(char *[]){"Earth", "Jupiter", "Saturn", "Uranus", "Neptune"},
-			21101, 8522, // expected num_nodes and num_itins
+			97622, 31407, // expected num_nodes and num_itins
 			12, 6704, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+	}; num_tests++;
+
+	// Kerbin -> Kerbin -> Jool (a resonant return to the departure body); 2-001 | 3-001 | 4000; dv_dep = 2500
+	test_data[num_tests] = (union TestData) (struct Itin_Spec_Seq_Calc_Test) {
+			TEST_ITIN_SPEC_SEQ,
+			(struct Datetime) {.y = 2, .d = 1, .date_type = DATE_KERBAL},
+			(struct Datetime) {.y = 3, .d = 1, .date_type = DATE_KERBAL},
+			(struct Datetime) {.y = 100, .d = 1, .date_type = DATE_KERBAL},
+			4000,
+			2500, 1e9, 1e9, TF_FLYBY,
+			"Stock System",
+			3,
+			(char *[]){"Kerbin", "Kerbin", "Jool"},
+			6273, 3435, // expected num_nodes and num_itins
+			60, 1994, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
+	}; num_tests++;
+
+	// Kerbin -> Duna -> Jool flyby with the Itinerary Calculator's default limits for Kerbin -> Jool; 1-001 | 2-001.
+	// Every route's Duna burn is over the satellite limit at its search dates and only refinement brings it down.
+	test_data[num_tests] = (union TestData) (struct Itin_Spec_Seq_Calc_Test) {
+			TEST_ITIN_SPEC_SEQ,
+			(struct Datetime) {.y = 1, .d = 1, .date_type = DATE_KERBAL},
+			(struct Datetime) {.y = 2, .d = 1, .date_type = DATE_KERBAL},
+			(struct Datetime) {.y = 7, .d = 1, .date_type = DATE_KERBAL},
+			2246,
+			2122, 161, 2283, TF_FLYBY,
+			"Stock System",
+			3,
+			(char *[]){"Kerbin", "Duna", "Jool"},
+			3, 1, // expected num_nodes and num_itins
+			60, 2098, 1 // time budget (s), reference best total dv (m/s), minimum distinct body sequences
 	}; num_tests++;
 
 

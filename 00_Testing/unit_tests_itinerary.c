@@ -283,10 +283,19 @@ static void check_end_node_pruning(void) {
 		arrivals[0]->arrival_dv_cache.dv_flyby, changed.dv_flyby, 1e-9);
 	check_true("the changed flyby burn differs from the cached one", fabs(changed.dv_flyby - expected[0].dv_flyby) > 1);
 
+	// The optimizer refines flyby burns, so with powered flybys they only count in the final filter.
 	struct Dv_Filter tight = generous;
 	tight.max_satdv = 1;
-	check_true("a tight satellite limit prunes the powered end nodes",
+	check_true("routes within generous limits are not marked as excused",
+		!arrivals[0]->search_flyby_excused && !arrivals[1]->search_flyby_excused);
+	check_true("with powered flybys a tight satellite limit keeps end nodes whose excess is flyby burns",
+		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &tight) == 2 && second_flyby->num_next_nodes == 2);
+	check_true("end nodes kept only by excusing their flyby burns are marked",
+		arrivals[0]->search_flyby_excused && arrivals[1]->search_flyby_excused);
+	int previous_powered = set_powered_flybys_enabled(0);
+	check_true("without powered flybys a tight satellite limit prunes the end nodes",
 		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &tight) == 0 && second_flyby->num_next_nodes == 0);
+	set_powered_flybys_enabled(previous_powered);
 	free_itinerary(departure);
 }
 
@@ -894,9 +903,25 @@ static void check_search_rejections(void) {
 	describe_search_rejections(&counts, tiny, sizeof(tiny));
 	check_true("a short buffer stays terminated", tiny[0] == '\0');
 
+	check_true("without complete routes the message says none reached the target",
+		strstr(text, "No route reached the target") != NULL);
+
+	// Early legs dropped by the departure limit outnumber the complete routes the satellite limit removed.
+	reset_search_rejections();
+	for(int i = 0; i < 5; i++) count_search_rejection(REJECT_DEPARTURE_DV);
+	for(int i = 0; i < 2; i++) count_complete_route_rejection(REJECT_SATELLITE_DV);
+	counts = get_search_rejections();
+	check_true("complete-route rejections also count in the totals", counts.by_cause[REJECT_SATELLITE_DV] == 2 &&
+		counts.complete_by_cause[REJECT_SATELLITE_DV] == 2 && counts.complete_by_cause[REJECT_DEPARTURE_DV] == 0);
+	describe_search_rejections(&counts, text, sizeof(text));
+	check_true("the limit that removed complete routes is named over early legs",
+		strstr(text, "satellite delta-v") != NULL && strstr(text, "2 of 2") != NULL &&
+		strstr(text, "reached the target") != NULL);
+
 	reset_search_rejections();
 	counts = get_search_rejections();
-	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 && counts.by_cause[REJECT_DEPARTURE_DV] == 0);
+	check_true("a new search starts from zero", counts.by_cause[REJECT_TOTAL_DV] == 0 &&
+		counts.by_cause[REJECT_DEPARTURE_DV] == 0 && counts.complete_by_cause[REJECT_SATELLITE_DV] == 0);
 }
 
 static void check_thread_pool_preserves_counters(void) {
