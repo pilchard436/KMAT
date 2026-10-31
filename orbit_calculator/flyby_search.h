@@ -37,6 +37,8 @@ int find_powered_seed_budget_preset(int seeds);
 
 // find viable flybys to next body with a given arrival trajectory; the same body gives resonant (multi-revolution) returns
 void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);
+// Same, but max_dt is only a look-ahead horizon, not a deadline, so samples at it are kept like any other.
+void find_viable_flybys_within_horizon(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt);
 
 // Time until the body of osv0_next is next in conjunction with / opposite to r0, seen from the central body.
 void calc_time_to_next_conjunction_and_opposition(Vector3 r0, OSV osv0_next, Body *cb, double *next_conjunction_dt, double *next_opposition_dt);

@@ -262,12 +262,19 @@ int calc_next_itin_to_target_step(struct ItinStep *curr_step, struct ItinSequenc
 		else
 			jd_max = jd_max_arr;
 		double max_duration = jd_max-curr_step->date;
+		int limit_is_deadline = 1;
 		// Legs that do not end the route only look ahead as far as the pair's encounter geometry needs.
-		if(flyby_body != seq_info->arr_body)
-			max_duration = fmin(max_duration, maximum_intermediate_leg_days(mag_vec3(curr_step->r), curr_step->body, flyby_body, seq_info->system));
+		if(flyby_body != seq_info->arr_body) {
+			double horizon = maximum_intermediate_leg_days(mag_vec3(curr_step->r), curr_step->body, flyby_body, seq_info->system);
+			if(horizon < max_duration) {
+				max_duration = horizon;
+				limit_is_deadline = 0;
+			}
+		}
 		double min_duration = minimum_leg_days(seq_info->system);
 		if(max_duration > min_duration)
-			find_viable_flybys(curr_step, seq_info->system, flyby_body, min_duration*86400, max_duration*86400);
+			(limit_is_deadline ? find_viable_flybys : find_viable_flybys_within_horizon)(curr_step, seq_info->system, flyby_body,
+				min_duration*86400, max_duration*86400);
 	}
 
 
