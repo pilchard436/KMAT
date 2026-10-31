@@ -113,6 +113,8 @@ static void on_ic_powered_flybys_toggled(GtkToggleButton *button, gpointer user_
 static Body **ic_fixed_flybys;
 static int ic_num_fixed_flybys;
 static GtkWidget *rb_ic_flyby_fixed_order, *st_ic_flyby_mode, *grid_ic_fbsequence;
+// Options that only apply when the search chooses the flybys itself.
+static GtkWidget *ic_any_order_options[4];
 static GObject *vp_ic_fbsequence;
 
 static void ic_update_fixed_sequence_grid(void);
@@ -196,18 +198,23 @@ static void ic_update_fixed_sequence_grid(void) {
 	gtk_widget_show_all(GTK_WIDGET(vp_ic_fbsequence));
 }
 
-// Resonant flybys and the flyby limit only apply when the search chooses the flybys itself.
+// Resonant flybys and the flyby limit are hidden rather than disabled: a fixed order can still hold resonant returns.
 static void on_ic_flyby_mode_toggled(GtkToggleButton *button, gpointer data) {
 	gboolean fixed = ic_fixed_order_active();
 	gtk_stack_set_visible_child_name(GTK_STACK(st_ic_flyby_mode), fixed ? "fixed" : "any");
-	if(cb_ic_allow_resonant != NULL) gtk_widget_set_sensitive(cb_ic_allow_resonant, !fixed);
-	if(cb_ic_max_flybys != NULL) gtk_widget_set_sensitive(cb_ic_max_flybys, !fixed);
+	for(guint i = 0; i < G_N_ELEMENTS(ic_any_order_options); i++)
+		if(ic_any_order_options[i] != NULL) gtk_widget_set_visible(ic_any_order_options[i], !fixed);
 }
 
 static void ic_init_fixed_order(GtkBuilder *builder) {
 	rb_ic_flyby_fixed_order = GTK_WIDGET(gtk_builder_get_object(builder, "rb_ic_flyby_fixed_order"));
 	st_ic_flyby_mode = GTK_WIDGET(gtk_builder_get_object(builder, "st_ic_flyby_mode"));
 	vp_ic_fbsequence = gtk_builder_get_object(builder, "vp_ic_fbsequence");
+	ic_any_order_options[0] = cb_ic_allow_resonant;
+	ic_any_order_options[1] = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_resonant"));
+	// The flyby limit's row holds its label and drop-down.
+	ic_any_order_options[2] = cb_ic_max_flybys != NULL ? gtk_widget_get_parent(cb_ic_max_flybys) : NULL;
+	ic_any_order_options[3] = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_max_flybys"));
 	g_signal_connect(rb_ic_flyby_fixed_order, "toggled", G_CALLBACK(on_ic_flyby_mode_toggled), NULL);
 	ic_update_fixed_sequence_grid();
 	on_ic_flyby_mode_toggled(NULL, NULL);

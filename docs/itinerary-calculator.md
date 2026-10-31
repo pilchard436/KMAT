@@ -42,7 +42,8 @@ calculator's search configuration:
   departure, a Kerbin flyby and Jool as the target finds Kerbin–Kerbin–Jool
   routes. The order is cleared when the system or central body changes.
   **Allow resonant flybys** and the flyby limit only apply to **Any order**, so
-  they are disabled in **Fixed order**; every other option applies to both.
+  they are hidden in **Fixed order**, where resonant returns come from the
+  listed order instead; every other option applies to both.
 - **Departure window:** the earliest and latest departure dates are converted
   to Julian dates. The search advances by one day in the selected calendar:
   one Earth day for ISO dates, and one Kerbin day (six hours, or 0.25 Earth
