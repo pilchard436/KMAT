@@ -46,6 +46,38 @@ int check_speed_changing_seed_generation(CelestSystem *system, Body *departure,
 	return 1;
 }
 
+// A seed pinned to the search limit only marks where the search stops, so none may be added there.
+int check_no_seed_at_search_limit(CelestSystem *system, Body *departure, Body *flyby, Body *target,
+		double departure_jd) {
+	OSV dep = osv_from_elements(departure->orbit, departure_jd);
+	struct ItinStep root = {.body = departure, .date = departure_jd};
+	int nodes = 0, at_limit = 0;
+	for(int days = 120; days <= 600; days += 120) {
+		OSV encounter = osv_from_elements(flyby->orbit, departure_jd + days);
+		Lambert3 inbound = calc_lambert3(dep.r, encounter.r, days * 86400.0, system->cb);
+		if(inbound.success == LAMBERT_FAIL_NAN || inbound.success == LAMBERT_FAIL_ECC ||
+			inbound.success == LAMBERT_MAX_ITERATIONS) continue;
+		for(int limit_days = 300; limit_days <= 700; limit_days += 100) {
+			struct ItinStep step = {.body = flyby, .date = departure_jd + days,
+				.r = encounter.r, .v_arr = inbound.v1, .v_body = encounter.v, .prev = &root};
+			begin_powered_seed_search(NULL);
+			find_viable_flybys(&step, system, target, 100 * 86400.0, limit_days * 86400.0);
+			for(int i = 0; i < step.num_next_nodes; i++) {
+				nodes++;
+				if(fabs(step.next[i]->date - (step.date + limit_days)) < 1e-6) at_limit++;
+				free_itinerary(step.next[i]);
+			}
+			free(step.next);
+		}
+	}
+	if(nodes == 0 || at_limit > 0) {
+		fprintf(stderr, "Flyby search added %d of %d nodes exactly at its duration limit\n", at_limit, nodes);
+		return 0;
+	}
+	printf("Flyby search adds no seeds pinned to its duration limit\n");
+	return 1;
+}
+
 int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body,
         double min_departure_jd, double max_arrival_jd, int *num_nodes, int *num_itins) {
 	Body *flyby_bodies[] = {departure_body, arrival_body};
@@ -286,6 +318,22 @@ static void measure_stored_objective_mismatch(const Itin_Calc_Results *results,
 			double stored_objective = point.dv_dep + point.dv_dsm + point.dv_flyby;
 			double recomputed = score_powered_arrival_route(leaves[j], calc_data, flyby_body);
 			(*checked_routes)++;
+			// The flyby iteration can settle on a mirrored, costlier orientation from a cold start (the production re-solve
+			// also tries the stored velocities), so a route may match either one.
+			if(isfinite(stored_objective) && isfinite(recomputed) && recomputed < DBL_MAX &&
+				fabs(stored_objective - recomputed) > POWERED_TEST_DV_TOLERANCE) {
+				struct ItinStep *copy = create_itin_copy_from_arrival(leaves[j]);
+				struct ItinStep *first_copy = get_first(copy);
+				if(resolve_itinerary_with_powered_flybys(calc_data->seq_info.to_target.system, first_copy,
+					calc_data->dv_filter.dep_periapsis, calc_data->dv_filter.arr_periapsis, calc_data->dv_filter.last_transfer_type)) {
+					struct PorkchopPoint resolved = create_porkchop_point(copy, calc_data->dv_filter.dep_periapsis,
+						calc_data->dv_filter.arr_periapsis);
+					double resolved_objective = resolved.dv_dep + resolved.dv_dsm + resolved.dv_flyby;
+					if(isfinite(resolved_objective) && fabs(stored_objective - resolved_objective) < fabs(stored_objective - recomputed))
+						recomputed = resolved_objective;
+				}
+				free_itinerary(first_copy);
+			}
 			if(!isfinite(stored_objective) || !isfinite(recomputed) || recomputed >= DBL_MAX) {
 				(*unscorable_routes)++;
 				continue;

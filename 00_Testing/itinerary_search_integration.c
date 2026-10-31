@@ -118,6 +118,8 @@ int main(int argc, char **argv) {
 		flyby_body, arrival_body, departure_jd, hohmann_duration);
 	int seeds_valid = check_speed_changing_seed_generation(system, departure_body,
 		flyby_body, arrival_body, departure_jd);
+	int limit_valid = check_no_seed_at_search_limit(system, departure_body, flyby_body,
+		arrival_body, departure_jd);
 	int unpowered_valid = check_unpowered_flyby_search(system, departure_body, flyby_body,
 		arrival_body, departure_jd, hohmann_duration);
 	int starting_valid = check_starting_orbit_search(system, departure_body, flyby_body,
@@ -136,7 +138,7 @@ int main(int argc, char **argv) {
 		max_arrival_jd);
 
 	free_celestial_system(system);
-	if(!search_valid || !powered_valid || !seeds_valid || !unpowered_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
+	if(!search_valid || !powered_valid || !seeds_valid || !limit_valid || !unpowered_valid || !starting_valid || !dsm_model_valid || !dsm_valid ||
 		!sweep_valid || !resonant_valid || !route_limits_valid || !near_equal_valid || !empty_reason_valid) {
 		fprintf(stderr, "Integration checks failed (bounded search: %d nodes/%d itineraries)\n",
 			search_nodes, search_itins);

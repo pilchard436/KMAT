@@ -25,6 +25,7 @@ extern int benchmark_unpowered;
 
 int route_is_resonant(struct ItinStep *leaf);
 int check_speed_changing_seed_generation(CelestSystem *system, Body *departure, Body *flyby, Body *target, double departure_jd);
+int check_no_seed_at_search_limit(CelestSystem *system, Body *departure, Body *flyby, Body *target, double departure_jd);
 int check_unpowered_flyby_search(CelestSystem *system, Body *departure, Body *flyby, Body *target, double departure_jd, double hohmann_duration);
 int run_bounded_search(CelestSystem *system, Body *departure_body, Body *arrival_body, double min_departure_jd, double max_arrival_jd, int *num_nodes, int *num_itins);
 int run_powered_flyby_objective_regression(CelestSystem *system, Body *departure_body, Body *flyby_body, Body *arrival_body, double departure_jd, double hohmann_duration);

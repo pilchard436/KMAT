@@ -187,7 +187,8 @@ static double feasible_seed_cost(const PoweredFlybySeed *seed, void *context) {
 	return flyby.burn_delta_v;
 }
 
-void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
+static void search_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt,
+	int limit_is_deadline) {
 	if(itinerary_search_cancelled(NULL)) return;
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	ItinFlybyProfileStats *profile_stats = get_flyby_profile_stats(next_body);
@@ -255,6 +256,8 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 				if(!evaluate_powered_flyby_seed(tf, system, next_body, sample_dt,
 				sample_index >= interval_subdivisions / 2, seed)) continue;
 				interval_sample_valid[sample_index] = 1;
+				// A deadline only marks where the search stops; a seed pinned to it would just line up along that edge.
+				if(limit_is_deadline && sample_dt >= max_dt) continue;
 				int bucket = (int)(((sample_dt - min_dt) / seed_time_range) *
 					POWERED_SEED_BUCKETS);
 				if(bucket < 0) bucket = 0;
@@ -407,4 +410,12 @@ void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_bo
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	if(profile_stats != NULL) profile_stats->search_seconds += progress_clock() - profile_start;
 #endif
+}
+
+void find_viable_flybys(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
+	search_viable_flybys(tf, system, next_body, min_dt, max_dt, 1);
+}
+
+void find_viable_flybys_within_horizon(struct ItinStep *tf, CelestSystem *system, Body *next_body, double min_dt, double max_dt) {
+	search_viable_flybys(tf, system, next_body, min_dt, max_dt, 0);
 }
