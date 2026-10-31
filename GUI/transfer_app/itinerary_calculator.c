@@ -108,6 +108,111 @@ static void on_ic_powered_flybys_toggled(GtkToggleButton *button, gpointer user_
 	gtk_widget_set_sensitive(cb_ic_allow_dsm, powered);
 }
 
+// FIXED FLYBY ORDER ---------------------------------------------------------------------------------------------------
+// The flybys between departure and target, in the order they are made.
+static Body **ic_fixed_flybys;
+static int ic_num_fixed_flybys;
+static GtkWidget *rb_ic_flyby_fixed_order, *st_ic_flyby_mode, *grid_ic_fbsequence;
+static GObject *vp_ic_fbsequence;
+
+static void ic_update_fixed_sequence_grid(void);
+
+int ic_fixed_order_active(void) {
+	return rb_ic_flyby_fixed_order != NULL && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(rb_ic_flyby_fixed_order));
+}
+
+Body **ic_get_fixed_sequence(int *num_steps) {
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	int arrival_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_arrbody));
+	if(ic_system == NULL || departure_index < 0 || arrival_index < 0) return NULL;
+	*num_steps = ic_num_fixed_flybys + 2;
+	Body **bodies = malloc(*num_steps * sizeof(Body *));
+	if(bodies == NULL) return NULL;
+	bodies[0] = ic_system->bodies[departure_index];
+	for(int i = 0; i < ic_num_fixed_flybys; i++) bodies[i + 1] = ic_fixed_flybys[i];
+	bodies[*num_steps - 1] = ic_system->bodies[arrival_index];
+	return bodies;
+}
+
+// The flyby bodies belong to the shown system, so they are dropped when it changes.
+static void ic_clear_fixed_flybys(void) {
+	free(ic_fixed_flybys);
+	ic_fixed_flybys = NULL;
+	ic_num_fixed_flybys = 0;
+	ic_update_fixed_sequence_grid();
+}
+
+static void on_ic_fixed_flyby_changed(GtkComboBox *combo_box, gpointer data) {
+	int index = GPOINTER_TO_INT(data), body_index = gtk_combo_box_get_active(combo_box);
+	if(index < ic_num_fixed_flybys && body_index >= 0 && body_index < ic_system->num_bodies)
+		ic_fixed_flybys[index] = ic_system->bodies[body_index];
+}
+
+static void on_ic_remove_fixed_flyby(GtkWidget *widget, gpointer data) {
+	int index = GPOINTER_TO_INT(data);
+	if(index >= ic_num_fixed_flybys) return;
+	for(int i = index; i < ic_num_fixed_flybys - 1; i++) ic_fixed_flybys[i] = ic_fixed_flybys[i + 1];
+	ic_num_fixed_flybys--;
+	ic_update_fixed_sequence_grid();
+}
+
+static void on_ic_add_fixed_flyby(GtkWidget *widget, gpointer data) {
+	int departure_index = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_ic_depbody));
+	if(ic_system == NULL || departure_index < 0) return;
+	Body **flybys = realloc(ic_fixed_flybys, (ic_num_fixed_flybys + 1) * sizeof(Body *));
+	if(flybys == NULL) return;
+	ic_fixed_flybys = flybys;
+	// A new flyby starts at the body before it, which is what a resonant return needs.
+	ic_fixed_flybys[ic_num_fixed_flybys] = ic_num_fixed_flybys > 0 ?
+		ic_fixed_flybys[ic_num_fixed_flybys - 1] : ic_system->bodies[departure_index];
+	ic_num_fixed_flybys++;
+	ic_update_fixed_sequence_grid();
+}
+
+static void ic_update_fixed_sequence_grid(void) {
+	if(vp_ic_fbsequence == NULL) return;
+	if(grid_ic_fbsequence != NULL && GTK_WIDGET(vp_ic_fbsequence) == gtk_widget_get_parent(grid_ic_fbsequence))
+		gtk_container_remove(GTK_CONTAINER(vp_ic_fbsequence), grid_ic_fbsequence);
+	grid_ic_fbsequence = gtk_grid_new();
+	for(int i = 0; ic_system != NULL && i < ic_num_fixed_flybys; i++) {
+		GtkWidget *widget = gtk_combo_box_new();
+		create_combobox_dropdown_text_renderer(G_OBJECT(widget), GTK_ALIGN_CENTER);
+		update_body_dropdown(GTK_COMBO_BOX(widget), ic_system);
+		gtk_combo_box_set_active(GTK_COMBO_BOX(widget), get_body_system_id(ic_fixed_flybys[i], ic_system));
+		g_signal_connect(widget, "changed", G_CALLBACK(on_ic_fixed_flyby_changed), GINT_TO_POINTER(i));
+		gtk_widget_set_hexpand(widget, TRUE);
+		gtk_grid_attach(GTK_GRID(grid_ic_fbsequence), widget, 0, i, 1, 1);
+		widget = gtk_button_new_with_label("-");
+		set_stable_tooltip(widget, "Remove this flyby");
+		g_signal_connect(widget, "clicked", G_CALLBACK(on_ic_remove_fixed_flyby), GINT_TO_POINTER(i));
+		gtk_grid_attach(GTK_GRID(grid_ic_fbsequence), widget, 1, i, 1, 1);
+	}
+	GtkWidget *add_button = gtk_button_new_with_label("+");
+	set_stable_tooltip(add_button, "Add a flyby; the same body twice in a row is a resonant return");
+	g_signal_connect(add_button, "clicked", G_CALLBACK(on_ic_add_fixed_flyby), NULL);
+	gtk_widget_set_hexpand(add_button, TRUE);
+	gtk_grid_attach(GTK_GRID(grid_ic_fbsequence), add_button, 0, ic_num_fixed_flybys, 2, 1);
+	gtk_container_add(GTK_CONTAINER(vp_ic_fbsequence), grid_ic_fbsequence);
+	gtk_widget_show_all(GTK_WIDGET(vp_ic_fbsequence));
+}
+
+// Resonant flybys and the flyby limit only apply when the search chooses the flybys itself.
+static void on_ic_flyby_mode_toggled(GtkToggleButton *button, gpointer data) {
+	gboolean fixed = ic_fixed_order_active();
+	gtk_stack_set_visible_child_name(GTK_STACK(st_ic_flyby_mode), fixed ? "fixed" : "any");
+	if(cb_ic_allow_resonant != NULL) gtk_widget_set_sensitive(cb_ic_allow_resonant, !fixed);
+	if(cb_ic_max_flybys != NULL) gtk_widget_set_sensitive(cb_ic_max_flybys, !fixed);
+}
+
+static void ic_init_fixed_order(GtkBuilder *builder) {
+	rb_ic_flyby_fixed_order = GTK_WIDGET(gtk_builder_get_object(builder, "rb_ic_flyby_fixed_order"));
+	st_ic_flyby_mode = GTK_WIDGET(gtk_builder_get_object(builder, "st_ic_flyby_mode"));
+	vp_ic_fbsequence = gtk_builder_get_object(builder, "vp_ic_fbsequence");
+	g_signal_connect(rb_ic_flyby_fixed_order, "toggled", G_CALLBACK(on_ic_flyby_mode_toggled), NULL);
+	ic_update_fixed_sequence_grid();
+	on_ic_flyby_mode_toggled(NULL, NULL);
+}
+
 void init_itinerary_calculator(GtkBuilder *builder) {
 	tf_ic_window = gtk_builder_get_object(builder, "window");
 	lb_ic_ksp_note = GTK_WIDGET(gtk_builder_get_object(builder, "lb_ic_ksp_note"));
@@ -197,6 +302,7 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
 	}
+	ic_init_fixed_order(builder);
 	g_signal_connect(cb_ic_depbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	g_signal_connect(cb_ic_arrbody, "changed", G_CALLBACK(on_ic_reference_input_changed), NULL);
 	update_ic_reference_defaults();
@@ -336,6 +442,7 @@ G_MODULE_EXPORT void on_ic_system_change() {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_depbody), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+		ic_clear_fixed_flybys();
 		update_ic_reference_defaults();
 	}
 }
@@ -352,6 +459,7 @@ G_MODULE_EXPORT void on_ic_central_body_change() {
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_depbody), ic_system);
 		update_body_dropdown(GTK_COMBO_BOX(cb_ic_arrbody), ic_system);
 		grid_ic_fbbodies = ic_update_seq_body_grid(vp_ic_fbbodies, grid_ic_fbbodies);
+		ic_clear_fixed_flybys();
 		update_ic_reference_defaults();
 	}
 }

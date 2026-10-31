@@ -1,8 +1,8 @@
 # Porkchop Analyzer: exploring itinerary results
 
 The Porkchop Analyzer displays itinerary results from a loaded `.itins` file,
-or from a search sent with **Show in Porkchop Analyzer** in the Itinerary or
-Sequence Calculator.
+or from a search sent with **Show in Porkchop Analyzer** in the Itinerary
+Calculator.
 The plot shows departure date against either transfer duration or arrival date;
 point color represents total delta-v.
 

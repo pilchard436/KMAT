@@ -183,8 +183,6 @@ add_executable(KMAT
     gui/transfer_app/porkchop_analyzer_model.h
     gui/transfer_app/porkchop_analyzer_tools.c
     gui/transfer_app/porkchop_analyzer_tools.h
-    gui/transfer_app/sequence_calculator.c
-    gui/transfer_app/sequence_calculator.h
     launch_calculator/launch_sim.c
     launch_calculator/launch_sim.h
     launch_calculator/launch_state.c

@@ -34,7 +34,15 @@ are implemented in
 calculator's search configuration:
 
 - **System and bodies:** the selected system/central body, departure body,
-  arrival body, and allowed intermediate flyby bodies.
+  arrival body, and the flyby bodies. With **Any order** (the default) the
+  ticked bodies are the ones the search may fly by, in any order. With
+  **Fixed order** you list the flybys in the order they are made, with **+**
+  and **−**, and every route follows exactly departure, those flybys, then the
+  target. The same body twice in a row is a resonant return, so Kerbin as the
+  departure, a Kerbin flyby and Jool as the target finds Kerbin–Kerbin–Jool
+  routes. The order is cleared when the system or central body changes.
+  **Allow resonant flybys** and the flyby limit only apply to **Any order**, so
+  they are disabled in **Fixed order**; every other option applies to both.
 - **Departure window:** the earliest and latest departure dates are converted
   to Julian dates. The search advances by one day in the selected calendar:
   one Earth day for ISO dates, and one Kerbin day (six hours, or 0.25 Earth
@@ -193,7 +201,11 @@ than shown individually as each candidate is generated.
 
 ## 5. Routes are optimized and filtered
 
-For the regular to-target itinerary search, surviving routes are passed
+Fixed-order searches go through the same optimization, deep-space maneuver
+and filtering passes. Their final filter also drops any route that does not
+visit exactly the listed bodies in order.
+
+Surviving routes are passed
 through powered-flyby optimization unless the search has been cancelled or
 **Allow powered flybys** is off, in which case the routes keep the dates and
 velocities found by the search and go straight to filtering. This
@@ -325,8 +337,7 @@ When the worker returns, the GUI completion callback:
 5. If neither mode has itineraries, displays **“No itineraries found!”**, with
    a rejection summary when available.
 
-The Sequence Calculator offers the same two buttons. This completion flow is
-implemented in
+This completion flow is implemented in
 [`itinerary_calculator_run.c`](../GUI/transfer_app/itinerary_calculator_run.c)
 and [`itinerary_results.c`](../GUI/transfer_app/itinerary_results.c).
 

@@ -5,7 +5,6 @@
 #include "ksp/ksp_session.h"
 #include "tools/starting_orbit.h"
 #include "transfer_app/itinerary_calculator.h"
-#include "transfer_app/sequence_calculator.h"
 #include "transfer_app/starting_orbit_editor.h"
 #include "transfer_app/transfer_planner.h"
 #include "tools/celestial_systems.h"
@@ -170,7 +169,6 @@ static gboolean finish_ksp_settings_connect(gpointer data) {
 		gtk_combo_box_set_active(GTK_COMBO_BOX(cb_settings_default_system), task->matched_index);
 		on_change_default_system();
 		set_ic_default_system(system->name);
-		sc_select_system(task->matched_index);
 		tp_select_system(task->matched_index);
 		KspVesselStart vessel_start;
 		ic_set_ksp_note(NULL);
