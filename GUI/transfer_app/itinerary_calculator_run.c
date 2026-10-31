@@ -44,15 +44,7 @@ static gboolean end_ic_calc_thread(gpointer user_data) {
 	pending_itineraries_update_buttons(&ic_pending, bt_ic_show_porkchop, bt_ic_save_itins);
 	if(ic_results.capture_calculation_failed)
 		show_msg_window("Capture results could not be generated, so the results were discarded.");
-	else if(ic_results.num_itins > 0 || ic_results.capture_num_itins > 0) {
-		// The progress window counted every candidate; this is what is left after the final limit checks.
-		char message[256];
-		g_snprintf(message, sizeof(message),
-			"Found %d Fly-By and %d Capture routes within your limits.\n"
-			"They are what is left of %d candidate routes after optimization and the final checks of your limits.",
-			ic_results.num_itins, ic_results.capture_num_itins, ic_results.num_candidate_routes);
-		show_msg_window(message);
-	} else {
+	else if(ic_results.num_itins == 0 && ic_results.capture_num_itins == 0) {
 		char reason[200], message[256];
 		describe_search_rejections(&ic_results.rejections, reason, sizeof(reason));
 		g_snprintf(message, sizeof(message), "No itineraries found!%s%s", reason[0] ? "\n" : "", reason);
