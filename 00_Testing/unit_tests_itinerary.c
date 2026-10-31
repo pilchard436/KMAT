@@ -283,10 +283,15 @@ static void check_end_node_pruning(void) {
 		arrivals[0]->arrival_dv_cache.dv_flyby, changed.dv_flyby, 1e-9);
 	check_true("the changed flyby burn differs from the cached one", fabs(changed.dv_flyby - expected[0].dv_flyby) > 1);
 
+	// The optimizer refines flyby burns, so with powered flybys they only count in the final filter.
 	struct Dv_Filter tight = generous;
 	tight.max_satdv = 1;
-	check_true("a tight satellite limit prunes the powered end nodes",
+	check_true("with powered flybys a tight satellite limit keeps end nodes whose excess is flyby burns",
+		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &tight) == 2 && second_flyby->num_next_nodes == 2);
+	int previous_powered = set_powered_flybys_enabled(0);
+	check_true("without powered flybys a tight satellite limit prunes the end nodes",
 		remove_end_nodes_that_do_not_satisfy_dv_requirements(second_flyby, 2, &tight) == 0 && second_flyby->num_next_nodes == 0);
+	set_powered_flybys_enabled(previous_powered);
 	free_itinerary(departure);
 }
 

@@ -214,6 +214,18 @@ velocities found by the search and go straight to filtering. This
 stage checks and refines promising routes, including their flyby burns and
 timings. It can also correct relevant sphere-of-influence issues.
 
+Flyby burns at the dates the search picks are often far above what refinement
+reaches, so with powered flybys the search does not count them against the
+satellite and total limits. The optimizer ranks routes by cost plus a steep
+penalty (`POWERED_LIMIT_PENALTY` per m/s) for any limit they exceed, instead of
+discarding them. Routes within the limits therefore still rank first, and routes
+just outside can be refined back inside. The final filter applies every limit to
+the refined routes. For example, a Kerbin–Duna–Jool flyby needs about 1 m/s at
+Duna after refinement, but every route's Duna burn at the search dates was above
+the 161 m/s default satellite limit, so that limit used to remove every route
+before refinement. Keeping these
+routes makes searches roughly 15–20% slower.
+
 Moon-aware search checks for moon hits and close passes, rejecting or re-planning
 flybys that violate its clearance policy. The Transfer Planner uses the same
 minimum periapsis clearance as search. Powered-flyby optimization may increase

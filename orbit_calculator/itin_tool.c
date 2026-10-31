@@ -1,5 +1,6 @@
 #include "itin_tool.h"
 #include "flyby_policy.h"
+#include "flyby_search.h"
 #include "powered_seed_selection.h"
 #include "search_cancel.h"
 #include "search_rejections.h"
@@ -186,6 +187,12 @@ struct PorkchopPoint create_porkchop_point(struct ItinStep *itin, double dep_per
 	return pp;
 }
 
+// Flyby burns found by the search are refined by the powered-flyby optimizer, often to near zero, so with powered
+// flybys they only count toward the limits in the final route filter.
+static double search_limit_flyby_dv(double dv_flyby) {
+	return powered_flybys_are_enabled() ? 0 : dv_flyby;
+}
+
 int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, Body **bodies, double jd_max_arr, struct Dv_Filter *dv_filter, int num_steps, int step) {
 	if(itinerary_search_cancelled(NULL)) return curr_step->num_next_nodes > 0;
 	double max_duration = jd_max_arr-curr_step->date;
@@ -201,9 +208,10 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 				double dv_sat = porkchop_point.dv_dsm;
 				if(dv_filter->last_transfer_type == 1) dv_sat += porkchop_point.dv_arr_cap;
 				if(dv_filter->last_transfer_type == 2) dv_sat += porkchop_point.dv_arr_circ;
-						if(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ||
-							porkchop_point.dv_dep + dv_sat + porkchop_point.dv_flyby > dv_filter->max_totdv) {
-			count_complete_route_rejection(dv_sat + porkchop_point.dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
+				double dv_flyby = search_limit_flyby_dv(porkchop_point.dv_flyby);
+						if(dv_sat + dv_flyby > dv_filter->max_satdv ||
+							porkchop_point.dv_dep + dv_sat + dv_flyby > dv_filter->max_totdv) {
+			count_complete_route_rejection(dv_sat + dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 					if(curr_step->num_next_nodes <= 1) {
 						remove_step_from_itinerary(next);
 						return 0;
@@ -414,9 +422,10 @@ int remove_end_nodes_that_do_not_satisfy_dv_requirements(struct ItinStep *curr_s
 		double dv_sat = dv_dsm;
 		if(dv_filter->last_transfer_type == 1) dv_sat += dv_arr_cap;
 		if(dv_filter->last_transfer_type == 2) dv_sat += dv_arr_circ;
-			if(dv_sat + dv_flyby > dv_filter->max_satdv ||
-				dv_dep + dv_sat + dv_flyby > dv_filter->max_totdv) {
-			count_complete_route_rejection(dv_sat + dv_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
+		double limited_flyby = search_limit_flyby_dv(dv_flyby);
+			if(dv_sat + limited_flyby > dv_filter->max_satdv ||
+				dv_dep + dv_sat + limited_flyby > dv_filter->max_totdv) {
+			count_complete_route_rejection(dv_sat + limited_flyby > dv_filter->max_satdv ? REJECT_SATELLITE_DV : REJECT_TOTAL_DV);
 			if(curr_step->num_next_nodes <= 1) {
 				remove_step_from_itinerary(next);
 				curr_step->num_next_nodes = 0;

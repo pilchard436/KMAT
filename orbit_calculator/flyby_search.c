@@ -48,6 +48,10 @@ void begin_powered_seed_search(PoweredSeedSearchStats *stats) {
 	seed_search_stats = stats;
 }
 
+int powered_flybys_are_enabled(void) {
+	return powered_flybys_enabled;
+}
+
 int set_powered_flybys_enabled(int enabled) {
 	int previous = powered_flybys_enabled;
 	powered_flybys_enabled = !!enabled;
