@@ -38,6 +38,8 @@ extern GtkWidget *lb_ic_date_warning;
 extern GtkWidget *bt_ic_calc;
 extern GObject *vp_ic_fbbodies;
 extern GtkWidget *grid_ic_fbbodies;
+extern GtkWidget *ic_earliest_dep_minus_month_button;
+extern GtkWidget *ic_earliest_dep_plus_month_button;
 extern GtkWidget *ic_latest_dep_minus_month_button;
 extern GtkWidget *ic_latest_dep_plus_month_button;
 extern GtkWidget *ic_latest_arr_minus_month_button;

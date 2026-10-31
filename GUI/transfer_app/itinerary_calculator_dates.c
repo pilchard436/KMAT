@@ -132,7 +132,10 @@ void connect_date_adjust_buttons(GtkBuilder *builder, const char *prefix, GtkEnt
 		gtk_widget_set_size_request(button, 18, 16);
 		set_css_class_for_widget(button, "date-adjust-button");
 		g_signal_connect(button, "clicked", G_CALLBACK(on_ic_latest_date_adjust), target);
-		if(g_strcmp0(prefix, "ic_maxdep") == 0 && g_strcmp0(intervals[i], "month") == 0) {
+		if(g_strcmp0(prefix, "ic_mindep") == 0 && g_strcmp0(intervals[i], "month") == 0) {
+			if(direction < 0) ic_earliest_dep_minus_month_button = button;
+			else ic_earliest_dep_plus_month_button = button;
+		} else if(g_strcmp0(prefix, "ic_maxdep") == 0 && g_strcmp0(intervals[i], "month") == 0) {
 			if(direction < 0) ic_latest_dep_minus_month_button = button;
 			else ic_latest_dep_plus_month_button = button;
 		} else if(g_strcmp0(intervals[i], "month") == 0) {
@@ -145,8 +148,8 @@ void connect_date_adjust_buttons(GtkBuilder *builder, const char *prefix, GtkEnt
 void update_month_adjust_button_labels(enum DateType date_type) {
 	const char *minus_label = date_type == DATE_ISO ? "-m" : "-30d";
 	const char *plus_label = date_type == DATE_ISO ? "+m" : "+30d";
-	GtkWidget *minus_buttons[] = {ic_latest_dep_minus_month_button, ic_latest_arr_minus_month_button};
-	GtkWidget *plus_buttons[] = {ic_latest_dep_plus_month_button, ic_latest_arr_plus_month_button};
+	GtkWidget *minus_buttons[] = {ic_earliest_dep_minus_month_button, ic_latest_dep_minus_month_button, ic_latest_arr_minus_month_button};
+	GtkWidget *plus_buttons[] = {ic_earliest_dep_plus_month_button, ic_latest_dep_plus_month_button, ic_latest_arr_plus_month_button};
 	for(guint i = 0; i < G_N_ELEMENTS(minus_buttons); i++) {
 		if(minus_buttons[i] != NULL) {
 			gtk_button_set_label(GTK_BUTTON(minus_buttons[i]), minus_label);
