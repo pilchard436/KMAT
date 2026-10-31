@@ -380,11 +380,15 @@ void update_pa_itinerary_preview() {
 			struct OSV body_osv = osv_from_ephem(pa_system->bodies[i]->ephem, pa_system->bodies[i]->num_ephems, current_date_pa, pa_system->cb);
 			orbit = constr_orbit_from_osv(body_osv.r, body_osv.v, pa_system->cb);
 		}
+		// Body orbits are kept faint so the trajectory stands out, as in the Transfer Planner.
+		cairo_set_source_rgba(get_camera_screen_cairo(pa_itin_preview_camera), pa_system->bodies[i]->color[0],
+			pa_system->bodies[i]->color[1], pa_system->bodies[i]->color[2], 0.4);
 		draw_orbit(pa_itin_preview_camera, orbit);
 		draw_body_moons(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa, NULL);
 	}
 	// Transfers
 	if(curr_transfer_pa != NULL) draw_itinerary(pa_itin_preview_camera, pa_system, curr_transfer_pa, current_date_pa);
+	draw_itinerary_legend(pa_itin_preview_camera, pa_system, curr_transfer_pa, current_date_pa);
 
 	draw_camera_image(pa_itin_preview_camera);
 }
