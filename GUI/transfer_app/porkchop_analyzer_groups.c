@@ -70,23 +70,13 @@ static gboolean build_group_overview_batch(gpointer user_data) {
 		if(!pa_groups[group_idx].has_itin_inside_filter) continue;
 		int row = group_idx * 2 + 3;
 		GString *route_label = g_string_new(NULL);
-		GString *route_tooltip = g_string_new(NULL);
 		GPtrArray *route_steps = g_ptr_array_new();
 		for(struct ItinStep *step = pa_groups[group_idx].sample_arrival_node; step != NULL; step = step->prev)
 			g_ptr_array_add(route_steps, step);
 		for(gint step_idx = (gint)route_steps->len - 1; step_idx >= 0; step_idx--) {
 			struct ItinStep *step = g_ptr_array_index(route_steps, step_idx);
-			if(step_idx != (gint)route_steps->len - 1) {
-				g_string_append(route_label, " - ");
-				g_string_append(route_tooltip, " - ");
-			}
-			if(step->body != NULL) {
-				g_string_append_printf(route_label, "%d", get_body_system_id(step->body, pa_system) + 1);
-				g_string_append(route_tooltip, step->body->name);
-			} else {
-				g_string_append(route_label, "DSM");
-				g_string_append(route_tooltip, "DSM");
-			}
+			if(step_idx != (gint)route_steps->len - 1) g_string_append(route_label, " - ");
+			g_string_append(route_label, step->body != NULL ? step->body->name : "DSM");
 		}
 
 		GtkWidget *check_button = gtk_check_button_new();
@@ -94,28 +84,20 @@ static gboolean build_group_overview_batch(gpointer user_data) {
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(check_button), pa_groups[group_idx].show_group);
 		g_signal_connect(check_button, "clicked", G_CALLBACK(on_change_itin_group_visibility), &pa_groups[group_idx]);
 		pa_groups[group_idx].cb_pa_show_group = check_button;
-		set_stable_tooltip(check_button, route_tooltip->str);
 		gtk_grid_attach(GTK_GRID(grid_pa_groups), check_button, 1, row, 1, 1);
 		gtk_widget_show(check_button);
 
 		GtkWidget *route_label_widget = gtk_label_new(route_label->str);
 		gtk_widget_set_halign(route_label_widget, GTK_ALIGN_START);
 		set_css_class_for_widget(route_label_widget, "pag-group-itin");
-		// Labels have no window of their own, so an event box is needed to get hover events.
-		GtkWidget *route_label_box = gtk_event_box_new();
-		gtk_event_box_set_visible_window(GTK_EVENT_BOX(route_label_box), FALSE);
-		gtk_widget_set_halign(route_label_box, GTK_ALIGN_START);
-		gtk_container_add(GTK_CONTAINER(route_label_box), route_label_widget);
-		set_stable_tooltip(route_label_box, route_tooltip->str);
-		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_box, 3, row, 1, 1);
-		gtk_widget_show_all(route_label_box);
+		gtk_grid_attach(GTK_GRID(grid_pa_groups), route_label_widget, 3, row, 1, 1);
+		gtk_widget_show(route_label_widget);
 
 		GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
 		gtk_grid_attach(GTK_GRID(grid_pa_groups), separator, 2, row, 1, 1);
 		gtk_widget_show(separator);
 		g_ptr_array_free(route_steps, TRUE);
 		g_string_free(route_label, TRUE);
-		g_string_free(route_tooltip, TRUE);
 		groups_built++;
 	}
 
