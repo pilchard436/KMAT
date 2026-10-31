@@ -144,38 +144,38 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	GtkWidget *eb_ic_info_powered_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_powered_flybys"));
 	if(eb_ic_info_powered_flybys != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_powered_flybys);
-		set_stable_tooltip(eb_ic_info_powered_flybys, "Allows flybys that need a burn and optimizes the best routes. Turning it off searches only unpowered gravity assists, which makes the search about 2.3 times faster but skips route optimization and deep-space maneuvers.");
+		set_stable_tooltip(eb_ic_info_powered_flybys, "Allows flybys that use a burn and optimizes the best routes. Turning it off searches only free gravity assists, which is faster but skips route optimization and deep-space maneuvers.");
 	}
 	if(cb_ic_allow_powered_flybys != NULL)
 		g_signal_connect(cb_ic_allow_powered_flybys, "toggled", G_CALLBACK(on_ic_powered_flybys_toggled), NULL);
 	GtkWidget *eb_ic_info_dsm = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_dsm"));
 	if(eb_ic_info_dsm != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_dsm);
-		set_stable_tooltip(eb_ic_info_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so raise that limit above 0 for maneuvers to appear. Makes the search about 10% slower.");
+		set_stable_tooltip(eb_ic_info_dsm, "Tries one deep-space maneuver per leg on the best routes. Its delta-v counts toward the satellite delta-v limit, so set that limit above 0 to see them. Makes the search slightly slower.");
 	}
 	cb_ic_allow_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_allow_resonant"));
 	cb_ic_max_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_max_flybys"));
 	GtkWidget *eb_ic_info_max_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_max_flybys"));
 	if(eb_ic_info_max_flybys != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_max_flybys);
-		set_stable_tooltip(eb_ic_info_max_flybys, "Maximum number of intermediate flybys in this search. Lower values can shorten long searches but may exclude routes that need more flybys.");
+		set_stable_tooltip(eb_ic_info_max_flybys, "The most flybys a route may have. Lower values search faster but can miss routes that need more flybys.");
 	}
 	GtkWidget *eb_ic_info_resonant = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_resonant"));
 	if(eb_ic_info_resonant != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_resonant);
-		set_stable_tooltip_markup(eb_ic_info_resonant, "Also searches flybys that return to the same body after one or more revolutions (for example Earth-Earth). Makes the search <span foreground=\"red\"><b>4.5 times</b></span> slower.");
+		set_stable_tooltip_markup(eb_ic_info_resonant, "Also searches flybys that return to the same body after one or more orbits (for example Earth-Earth). Makes the search <span foreground=\"red\"><b>much slower</b></span>.");
 	}
 	cb_ic_moon_aware_flybys = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_aware_flybys"));
 	GtkWidget *eb_ic_info_moon_aware = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_moon_aware"));
 	if(eb_ic_info_moon_aware != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_moon_aware);
-		set_stable_tooltip(eb_ic_info_moon_aware, "Rejects or re-plans flybys that hit or pass too close to a moon. Makes the search about 2% slower.");
+		set_stable_tooltip(eb_ic_info_moon_aware, "Skips or re-plans flybys that hit or pass too close to a moon. Makes the search slightly slower.");
 	}
 	cb_ic_moon_assist_arrival = GTK_WIDGET(gtk_builder_get_object(builder, "cb_ic_moon_assist_arrival"));
 	GtkWidget *eb_ic_info_moon_assist = GTK_WIDGET(gtk_builder_get_object(builder, "eb_ic_info_moon_assist"));
 	if(eb_ic_info_moon_assist != NULL) {
 		setup_ic_info_icon_hover(eb_ic_info_moon_assist);
-		set_stable_tooltip(eb_ic_info_moon_assist, "Uses a moon flyby to reduce the capture burn when one is available. Makes the search about 30% slower.");
+		set_stable_tooltip(eb_ic_info_moon_assist, "Uses a moon flyby to reduce the capture burn when one is available. Makes the search noticeably slower.");
 	}
 	tf_ic_depdv = gtk_builder_get_object(builder, "tf_ic_depdv");
 	tf_ic_satdv = gtk_builder_get_object(builder, "tf_ic_satdv");

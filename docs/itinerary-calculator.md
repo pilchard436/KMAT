@@ -102,7 +102,7 @@ optional control is unavailable, it is treated as disabled.
 
 ### Search depth
 
-The **Settings** tab has an **Itinerary search depth (seeds per departure)**
+The **Settings** tab has an **Itinerary search depth**
 dropdown (512, 1024, 2048 by default, 4096, 8192) with an info icon whose
 tooltip explains the setting. It sets how many powered
 flyby seeds each departure may add before the search stops adding them. When

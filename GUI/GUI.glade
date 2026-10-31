@@ -6045,7 +6045,7 @@ The departure burn is minimized over the orbit.</property>
               <object class="GtkLabel">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
-                <property name="label" translatable="yes">Itinerary search depth (seeds per departure):</property>
+                <property name="label" translatable="yes">Itinerary search depth:</property>
               </object>
               <packing>
                 <property name="left-attach">0</property>
