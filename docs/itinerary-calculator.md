@@ -36,9 +36,10 @@ calculator's search configuration:
 - **System and bodies:** the selected system/central body, departure body,
   arrival body, and the flyby bodies. With **Any order** (the default) the
   ticked bodies are the ones the search may fly by, in any order. With
-  **Fixed order** you list the flybys in the order they are made, with **+**
-  and **−**, and every route follows exactly departure, those flybys, then the
-  target. The same body twice in a row is a resonant return, so Kerbin as the
+  **Fixed order** the list shows the whole route: the departure and target
+  bodies chosen above as its first and last rows, and between them the flybys
+  in the order they are made, added and removed with **+** and **−**. Every
+  route follows exactly that order. The same body twice in a row is a resonant return, so Kerbin as the
   departure, a Kerbin flyby and Jool as the target finds Kerbin–Kerbin–Jool
   routes. The order is cleared when the system or central body changes.
   **Allow resonant flybys** and the flyby limit only apply to **Any order**, so

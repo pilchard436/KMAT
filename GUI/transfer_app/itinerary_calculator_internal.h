@@ -80,6 +80,8 @@ void ic_free_results(void);
 
 // itinerary_calculator.c: fixed flyby order
 int ic_fixed_order_active(void);
+// Rebuilds the route list, for example after the departure or target body changed.
+void ic_update_fixed_sequence_grid(void);
 // Departure, the flybys in order and the target; NULL without a departure or target body.
 Body **ic_get_fixed_sequence(int *num_steps);
 
