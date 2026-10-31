@@ -113,7 +113,7 @@ int run_tests() {
 	}; num_tests++;
 
 
-	// SEQUENCE CALCULATOR TEST DATA #################################################################################
+	// FIXED SEQUENCE TEST DATA ######################################################################################
 
 	// Kerbin -> Eve; 2-001 | 3-001 | 300; dv_dep = 1200; dv_arr = 1500 (circ)
 	test_data[num_tests] = (union TestData) (struct Itin_Spec_Seq_Calc_Test) {
