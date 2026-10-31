@@ -90,7 +90,7 @@ void init_global_settings(GtkBuilder *builder) {
 	cb_settings_seed_budget = gtk_builder_get_object(builder, "cb_settings_seed_budget");
 	GtkWidget *seed_budget_info = GTK_WIDGET(gtk_builder_get_object(builder, "eb_settings_seed_budget_info"));
 	setup_ic_info_icon_hover(seed_budget_info);
-	set_stable_tooltip(seed_budget_info, "How many alternative powered-flyby routes the search may keep for each departure date. When many options are enabled, a low value can run out before reaching some route families, so they are missing from the results. Higher values find more routes but make the search slower (2048 takes about 1.5 times as long as 512 on the benchmark). Applies to searches started afterwards.");
+	set_stable_tooltip(seed_budget_info, "How thoroughly the itinerary search looks for routes. Higher values find more routes but take longer.");
 	load_persisted_settings();
 	set_powered_seed_budget(global_settings.powered_seed_budget);
 	g_signal_handlers_block_by_func(cb_settings_seed_budget, G_CALLBACK(on_change_seed_budget), NULL);

@@ -248,7 +248,7 @@ void init_porkchop_analyzer(GtkBuilder *builder) {
 	pa_moon_assist_tooltip_anchor =
 			GTK_WIDGET(gtk_builder_get_object(builder, "eb_pa_moon_assist_tooltip"));
 	set_stable_tooltip(pa_moon_assist_tooltip_anchor,
-			"Toggle whether Capture delta-v includes the arrival moon assist saving. This is available only for itineraries calculated with moon assist enabled.");
+			"Include the arrival moon assist saving in the capture delta-v. Only available for itineraries calculated with moon assist.");
 	pa_set_last_transfer_type(TF_FLYBY, 0);
 	da_pa_porkchop = gtk_builder_get_object(builder, "da_pa_porkchop");
 	da_pa_preview = gtk_builder_get_object(builder, "da_pa_preview");
