@@ -177,6 +177,9 @@ reports search progress while the worker performs the calculation. The progress
 bar tracks the current phase's completed work (departure dates, scored routes,
 refined routes, or filtered routes). The percentage restarts when the phase
 changes; the status text names the active phase and its completed/total count.
+It also shows the number of candidate routes the search has found. These are
+counted before optimization and the final limit checks, so the result is usually
+much smaller.
 Concurrent Fly-By and Capture optimization is identified by both mode names
 rather than a completed/total count. Final result preparation is shown as an
 indeterminate animation because its remaining duration cannot be measured
@@ -348,7 +351,9 @@ When the worker returns, the GUI completion callback:
 4. Frees results that were not shown when the next calculation starts. If the
    Capture calculation failed, or neither mode has itineraries, the results are
    freed straight away.
-5. If neither mode has itineraries, displays **“No itineraries found!”**, with
+5. If routes were found, a message gives the number of Fly-By and Capture routes
+   within the limits and the number of candidate routes they were chosen from.
+   If neither mode has itineraries, displays **“No itineraries found!”**, with
    a rejection summary when available. The summary names the limit that removed
    most of the routes that reached the target. Only when no route reached it
    does it fall back to the earlier legs, which every search drops in large

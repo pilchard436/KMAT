@@ -66,24 +66,24 @@ static gboolean update_sc_ic_progress_window(gpointer data) {
 	char s[256];
 	if(get_thread_counter(3) != 0) {
 		g_snprintf(s, sizeof(s),
-			"Cancellation requested; finishing active work: %.1f s\n%d workers active; %d itineraries found",
+			"Cancellation requested; finishing active work: %.1f s\n%d workers active; %d candidate routes",
 			elapsed_seconds, calc_status.num_deps_active, calc_status.num_itins);
 	} else if(calc_status.phase == TRANSFER_PROGRESS_SEARCH) {
 		g_snprintf(s, sizeof(s),
-			"Searching transfers: %d / %d departure dates complete\nElapsed: %.1f s; %d workers active; %d itineraries found",
+			"Searching transfers: %d / %d departure dates complete\nElapsed: %.1f s; %d workers active; %d candidate routes",
 			calc_status.phase_done, calc_status.phase_total, elapsed_seconds,
 			calc_status.num_deps_active, calc_status.num_itins);
 	} else if(calc_status.phase == TRANSFER_PROGRESS_FINALIZING) {
 		g_snprintf(s, sizeof(s),
-			"Finalizing results; route checks and data preparation are still running\nElapsed: %.1f s; %d workers active; %d itineraries found",
+			"Finalizing results; route checks and data preparation are still running\nElapsed: %.1f s; %d workers active; %d candidate routes",
 			elapsed_seconds, calc_status.num_deps_active, calc_status.num_itins);
 	} else if(calc_status.phase == TRANSFER_PROGRESS_OPTIMIZING_BOTH) {
 		g_snprintf(s, sizeof(s),
-			"Optimizing for Fly-By and Capture\nElapsed: %.1f s; departure dates: %d / %d; %d itineraries found",
+			"Optimizing for Fly-By and Capture\nElapsed: %.1f s; departure dates: %d / %d; %d candidate routes",
 			elapsed_seconds, calc_status.num_deps, calc_status.total_departures,
 			calc_status.num_itins);
 	} else {
-		g_snprintf(s, sizeof(s), "%s %s routes: %d / %d complete\nElapsed: %.1f s; departure dates: %d / %d; %d itineraries found",
+		g_snprintf(s, sizeof(s), "%s %s routes: %d / %d complete\nElapsed: %.1f s; departure dates: %d / %d; %d candidate routes",
 			transfer_progress_phase_verb(calc_status.phase),
 			transfer_progress_mode_name(calc_status.phase_transfer_type),
 			calc_status.phase_done, calc_status.phase_total, elapsed_seconds,

@@ -304,6 +304,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 #endif
 	thread_pool = use_thread_pool32(calc_itins_from_departure, &thread_args);
 	join_thread_pool(thread_pool);
+	results.num_candidate_routes = get_thread_counter(2);
 #ifdef KMAT_ENABLE_SEARCH_PROFILE
 	search_seconds = progress_clock() - phase_start;
 #endif
@@ -607,6 +608,8 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 	for(int i = 0; i < num_deps; i++) num_nodes += get_total_number_of_stored_steps(departures[i]);
 
 	printf("\n%d itineraries found!\nNumber of Nodes: %d\n", num_itins, num_nodes);
+	printf("%d of %d candidate routes passed optimization and the final limit checks\n",
+		num_itins, results.num_candidate_routes);
 
 	results.departures = departures;
 	results.num_deps = num_deps;
