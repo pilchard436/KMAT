@@ -17,7 +17,7 @@ Compared with the upstream KMAT search on the same work (an Earth to Saturn sear
 
 On top of that, this version adds work upstream does not do: powered flybys with route refinement, resonant orbits, deep-space maneuvers, moon-aware flyby checks with route repair, and moon arrival assists. With powered flybys on, the same Earth to Saturn search takes about 8 s, still roughly 5.7× faster than upstream, and searching every option at once takes about a minute, compared with about eight minutes when it was first measured. Measurements and method are in [Itinerary search profiling results](docs/itinerary-profiling-results.md).
 
-When routes are found, KMAT can save Fly-By and Capture results in an `.itins` file. You can load the results in the Porkchop Analyzer to review and filter them, then open a route in the Transfer Planner for visualization.
+When routes are found, you can show the Fly-By and Capture results in the Porkchop Analyzer straight away to review and filter them, or save them in an `.itins` file to load later. From the Porkchop Analyzer, a route opens in the Transfer Planner for visualization.
 
 The interplanetary transfer planner was validated against the mission trajectories of Voyager I/II, Cassini-Huygens and Europa Clipper, and against respective transfers using NASA's [General Mission Analysis Tool (GMAT)](https://sourceforge.net/projects/gmat/).
 

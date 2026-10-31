@@ -8,6 +8,7 @@
 #include "tools/starting_orbit.h"
 #include "ksp/ksp_session.h"
 #include <orbitlib_fileio.h>
+#include <glib/gstdio.h>
 
 #include <math.h>
 #include <string.h>
@@ -153,10 +154,7 @@ static int find_identical_available_system(CelestSystem *loaded) {
 	return -1;
 }
 
-G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
-
+static void tp_show_loaded_itinerary(struct ItinLoadFileResults load_results) {
 	if(curr_transfer_tp != NULL) {
 		fix_tfbody = TRUE;
 		update_body_dropdown(GTK_COMBO_BOX(cb_tp_tfbody), NULL);
@@ -172,8 +170,6 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 	if(tp_loaded_system_entry) remove_combobox_last_entry(GTK_COMBO_BOX(cb_tp_system));
 	tp_loaded_system_entry = 0;
 
-	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
-	if(load_results.itin == NULL) return;
 	enum LastTransferType loaded_type = load_results.search_options.last_transfer_type == TF_CIRC ?
 		TF_CAPTURE : (enum LastTransferType)load_results.search_options.last_transfer_type;
 	tp_set_last_transfer_type(load_results.search_options.known &&
@@ -295,4 +291,31 @@ G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
 		   "TA: 0.0°\n",
 		   step2pr->body->name, dt_in_days, step2pr->date, hyp_params.rp/1000, hyp_params.c3_energy/1e6,
 		   rad2deg(hyp_params.incoming.bplane_angle), rad2deg(hyp_params.incoming.decl));
+}
+
+G_MODULE_EXPORT void on_load_itinerary(GtkWidget* widget, gpointer data) {
+	char filepath[255];
+	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
+	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
+	if(load_results.itin == NULL) return;
+	tp_show_loaded_itinerary(load_results);
+}
+
+void tp_open_itinerary(struct ItinStep *itin, CelestSystem *system, ItinSearchOptions search_options,
+		double dep_periapsis, double arr_periapsis) {
+	// A round trip through a temporary file gives the planner its own copy of the route and of the system,
+	// with the same stored values that saving and loading it would give.
+	gchar *temp_path = NULL;
+	gint fd = g_file_open_tmp("kmat-route-XXXXXX.itin", &temp_path, NULL);
+	if(fd < 0) return;
+	g_close(fd, NULL);
+	char filepath[1024];
+	g_strlcpy(filepath, temp_path, sizeof(filepath));
+	g_free(temp_path);
+	store_single_itinerary_in_bfile_with_options(itin, system, filepath, search_options, dep_periapsis, arr_periapsis);
+	struct ItinLoadFileResults load_results = load_single_itinerary_from_bfile(filepath);
+	g_remove(filepath);
+	if(load_results.itin == NULL) return;
+	tp_show_loaded_itinerary(load_results);
+	show_page_with_widget(GTK_WIDGET(da_tp));
 }

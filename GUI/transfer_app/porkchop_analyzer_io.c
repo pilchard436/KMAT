@@ -2,6 +2,7 @@
 #include "tools/file_io.h"
 #include "orbit_calculator/flyby_policy.h"
 #include "tools/starting_orbit.h"
+#include "transfer_planner.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,26 +17,15 @@ static void apply_pa_search_options(ItinSearchOptions options, CelestSystem *sys
 		starting_orbit_set_active(NULL, NULL);
 }
 
-G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath, ".itins", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
+static int pa_capture_num_nodes, pa_capture_num_itins;
 
-	gint64 load_started = g_get_monotonic_time();
+void pa_show_itineraries(struct ItinsLoadFileResults load_results) {
+	gint64 analysis_started = g_get_monotonic_time();
 	reset_pa_porkchop_view();
 	free_all_porkchop_analyzer_itins();
 	pa_set_moon_assist_dv_toggle_available(0);
 	pa_set_last_transfer_type(TF_FLYBY, 0);
-	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
-	gint64 file_read_finished = g_get_monotonic_time();
-	char param_string[1000];
-	print_header_data_to_string(load_results.header, param_string, sizeof(param_string), get_settings_datetime_type());
-	printf("%s\n", param_string);
-	if(load_results.departures == NULL) return;
-	
-	if(pa_analysis_params.num_deps > 0 && pa_analysis_params.file_type > 2) {
-		if(pa_analysis_params.calc_data.seq_info.to_target.type == ITIN_SEQ_INFO_TO_TARGET) free(pa_analysis_params.calc_data.seq_info.to_target.flyby_bodies);
-		if(pa_analysis_params.calc_data.seq_info.spec_seq.type == ITIN_SEQ_INFO_SPEC_SEQ) free(pa_analysis_params.calc_data.seq_info.spec_seq.bodies);
-	}
+
 	pa_analysis_params = load_results.header;
 	apply_pa_search_options(pa_analysis_params.calc_data.search_options, load_results.header.system);
 	pa_has_both_modes = 1;
@@ -43,6 +33,8 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	pa_dual_flyby_num_deps = load_results.header.num_deps;
 	pa_dual_capture_departures = load_results.capture_departures;
 	pa_dual_capture_num_deps = load_results.capture_num_deps;
+	pa_capture_num_nodes = load_results.capture_num_nodes;
+	pa_capture_num_itins = load_results.capture_num_itins;
 	pa_departures = pa_dual_flyby_departures;
 	pa_num_deps = pa_dual_flyby_num_deps;
 	pa_set_last_transfer_type(TF_FLYBY, 0);
@@ -76,23 +68,73 @@ G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
 	update_pa_porkchop_diagram();
 	update_pa_itinerary_preview();
 	gint64 display_setup_finished = g_get_monotonic_time();
-	printf("Itinerary load timing: file decode %.3f s, analyzer %.3f s, initial display setup %.3f s\n",
-			(file_read_finished - load_started) / 1e6,
-			(analysis_finished - file_read_finished) / 1e6,
+	printf("Itinerary display timing: analyzer %.3f s, initial display setup %.3f s\n",
+			(analysis_finished - analysis_started) / 1e6,
 			(display_setup_finished - analysis_finished) / 1e6);
 }
 
-G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data) {
+G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data) {
+	char filepath[255];
+	if(!get_path_from_file_chooser(filepath, ".itins", GTK_FILE_CHOOSER_ACTION_OPEN, "")) return;
+
+	// The current results are released first so that two large sets are never held at once.
+	reset_pa_porkchop_view();
+	free_all_porkchop_analyzer_itins();
+	gint64 load_started = g_get_monotonic_time();
+	struct ItinsLoadFileResults load_results = load_itineraries_from_bfile(filepath);
+	char param_string[1000];
+	print_header_data_to_string(load_results.header, param_string, sizeof(param_string), get_settings_datetime_type());
+	printf("%s\n", param_string);
+	printf("Itinerary file decode: %.3f s\n", (g_get_monotonic_time() - load_started) / 1e6);
+	if(load_results.departures == NULL) return;
+	pa_show_itineraries(load_results);
+}
+
+G_MODULE_EXPORT void on_pa_save_itineraries(GtkWidget* widget, gpointer data) {
+	if(!pa_has_both_modes || pa_system == NULL) return;
+	char filepath[255];
+	if(!get_path_from_file_chooser(filepath, ".itins", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
+	Itin_Calc_Results results = {
+		.departures = pa_dual_flyby_departures,
+		.num_deps = pa_dual_flyby_num_deps,
+		.num_nodes = pa_analysis_params.num_nodes,
+		.num_itins = pa_analysis_params.num_itins,
+		.capture_departures = pa_dual_capture_departures,
+		.capture_num_deps = pa_dual_capture_num_deps,
+		.capture_num_nodes = pa_capture_num_nodes,
+		.capture_num_itins = pa_capture_num_itins
+	};
+	store_itineraries_in_bfile_both_modes(results, pa_analysis_params.calc_data, pa_system, filepath);
+}
+
+// The selected route with the search options and periapses it was calculated with; returns NULL without one.
+static struct ItinStep *get_selected_route_pa(ItinSearchOptions *options, double *dep_periapsis, double *arr_periapsis) {
 	struct ItinStep *first = get_first(curr_transfer_pa);
-	if(first == NULL) return;
+	if(first == NULL) return NULL;
 	struct ItinStep *arrival = get_last(first);
-	if(first->body == NULL || arrival == NULL || arrival->body == NULL) return;
+	if(first->body == NULL || arrival == NULL || arrival->body == NULL) return NULL;
+	*options = pa_analysis_params.calc_data.search_options;
+	if(options->known) options->last_transfer_type = pa_last_transfer_type;
+	*dep_periapsis = first->body->atmo_alt + pa_dep_periapsis;
+	*arr_periapsis = arrival->body->atmo_alt + pa_arr_periapsis;
+	return first;
+}
+
+G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data) {
+	ItinSearchOptions options;
+	double dep_periapsis, arr_periapsis;
+	struct ItinStep *first = get_selected_route_pa(&options, &dep_periapsis, &arr_periapsis);
+	if(first == NULL) return;
 
 	char filepath[255];
 	if(!get_path_from_file_chooser(filepath, ".itin", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	ItinSearchOptions options = pa_analysis_params.calc_data.search_options;
-	if(options.known) options.last_transfer_type = pa_last_transfer_type;
-	store_single_itinerary_in_bfile_with_options(first, pa_system, filepath, options,
-		first->body->atmo_alt + pa_dep_periapsis,
-		arrival->body->atmo_alt + pa_arr_periapsis);
+	store_single_itinerary_in_bfile_with_options(first, pa_system, filepath, options, dep_periapsis, arr_periapsis);
+}
+
+G_MODULE_EXPORT void on_pa_open_in_transfer_planner(GtkWidget* widget, gpointer data) {
+	ItinSearchOptions options;
+	double dep_periapsis, arr_periapsis;
+	struct ItinStep *first = get_selected_route_pa(&options, &dep_periapsis, &arr_periapsis);
+	if(first == NULL) return;
+	tp_open_itinerary(first, pa_system, options, dep_periapsis, arr_periapsis);
 }

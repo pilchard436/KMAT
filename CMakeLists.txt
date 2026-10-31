@@ -215,6 +215,8 @@ add_executable(KMAT
     gui/transfer_app/itinerary_calculator_dates.c
     gui/transfer_app/date_picker.c
     gui/transfer_app/itinerary_calculator_run.c
+    gui/transfer_app/itinerary_results.c
+    gui/transfer_app/itinerary_results.h
     gui/transfer_app/itinerary_calculator.h
     gui/transfer_app/date_picker.h
     gui/transfer_app/starting_orbit_editor.c

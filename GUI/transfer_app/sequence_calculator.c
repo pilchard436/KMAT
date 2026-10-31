@@ -4,6 +4,7 @@
 #include "gui/settings.h"
 #include "gui/info_win_manager.h"
 #include "tools/file_io.h"
+#include "itinerary_results.h"
 #include <string.h>
 
 GObject *tf_sc_window;
@@ -28,8 +29,12 @@ double sc_arr_periapsis = 50e3;
 
 void update_sc_preview();
 
+static GtkWidget *bt_sc_show_porkchop, *bt_sc_save_itins;
+
 void init_sequence_calculator(GtkBuilder *builder) {
 	tf_sc_window = gtk_builder_get_object(builder, "window");
+	bt_sc_show_porkchop = GTK_WIDGET(gtk_builder_get_object(builder, "bt_sc_show_porkchop"));
+	bt_sc_save_itins = GTK_WIDGET(gtk_builder_get_object(builder, "bt_sc_save_itins"));
 	cb_sc_system = gtk_builder_get_object(builder, "cb_sc_system");
 	tf_sc_mindepdate = gtk_builder_get_object(builder, "tf_sc_mindepdate");
 	tf_sc_maxdepdate = gtk_builder_get_object(builder, "tf_sc_maxdepdate");
@@ -160,28 +165,32 @@ void update_sc_preview() {
 Itin_Calc_Data sc_calc_data;
 struct Itin_Calc_Results sc_results;
 
-void save_itineraries_sc() {
-	if((sc_results.departures == NULL || sc_results.num_deps == 0) &&
-		(sc_results.capture_departures == NULL || sc_results.capture_num_deps == 0)) return;
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath,  ".itins", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_itineraries_in_bfile_both_modes(sc_results, sc_calc_data, sc_system, filepath);
+static PendingItineraries sc_pending;
+
+static void sc_free_results(void) {
+	pending_itineraries_free(&sc_pending);
+	pending_itineraries_update_buttons(&sc_pending, bt_sc_show_porkchop, bt_sc_save_itins);
+}
+
+G_MODULE_EXPORT void on_sc_show_porkchop(GtkWidget *widget, gpointer data) {
+	pending_itineraries_show_in_porkchop_analyzer(&sc_pending);
+	pending_itineraries_update_buttons(&sc_pending, bt_sc_show_porkchop, bt_sc_save_itins);
+}
+
+G_MODULE_EXPORT void on_sc_save_itineraries(GtkWidget *widget, gpointer data) {
+	pending_itineraries_save(&sc_pending);
 }
 
 gboolean end_sc_calc_thread() {
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_sc_window), 1);
 
+	// The results stay here until they are shown in the Porkchop Analyzer or saved.
+	pending_itineraries_keep(&sc_pending, sc_results, sc_calc_data, sc_system);
+	pending_itineraries_update_buttons(&sc_pending, bt_sc_show_porkchop, bt_sc_save_itins);
 	if(sc_results.capture_calculation_failed)
-		show_msg_window("Capture results could not be generated. The Fly-By results are available, but were not saved as a dual-mode file.");
-	else
-		save_itineraries_sc();
-	for(int i = 0; i < sc_results.num_deps; i++) free_itinerary(sc_results.departures[i]);
-	free(sc_results.departures);
-	for(int i = 0; i < sc_results.capture_num_deps; i++) free_itinerary(sc_results.capture_departures[i]);
-	free(sc_results.capture_departures);
-	free(sc_calc_data.seq_info.spec_seq.bodies);
-	if(sc_results.num_itins == 0 && sc_results.capture_num_itins == 0)
+		show_msg_window("Capture results could not be generated, so the results were discarded.");
+	else if(sc_results.num_itins == 0 && sc_results.capture_num_itins == 0)
 		show_msg_window("No itineraries found!");
 	return G_SOURCE_REMOVE;
 }
@@ -256,6 +265,7 @@ G_MODULE_EXPORT void on_calc_sc() {
 		step = step->next;
 	}
 
+	sc_free_results();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_sc_window), 0);
 	g_thread_new("calc_thread", (GThreadFunc) sc_calc_thread, NULL);
 	init_sc_ic_progress_window();
@@ -298,6 +308,8 @@ G_MODULE_EXPORT void on_get_sc_ref_values() {
 }
 
 void reset_sc() {
+	// The window is gone at shutdown, so the buttons are left alone.
+	pending_itineraries_free(&sc_pending);
 	if(sc_step == NULL) return;
 	sc_step = get_first_sc(sc_step);
 	while(sc_step->next != NULL) {

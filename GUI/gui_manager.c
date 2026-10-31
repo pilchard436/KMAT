@@ -347,6 +347,14 @@ static void set_stable_tooltip_content(GtkWidget *widget, const char *text, gboo
 		gtk_label_set_text(GTK_LABEL(tip->label), text);
 }
 
+void show_page_with_widget(GtkWidget *widget) {
+	for(GtkWidget *child = widget, *parent; child != NULL; child = parent) {
+		parent = gtk_widget_get_parent(child);
+		if(parent != NULL && GTK_IS_NOTEBOOK(parent))
+			gtk_notebook_set_current_page(GTK_NOTEBOOK(parent), gtk_notebook_page_num(GTK_NOTEBOOK(parent), child));
+	}
+}
+
 void set_stable_tooltip(GtkWidget *widget, const char *text) {
 	set_stable_tooltip_content(widget, text, FALSE);
 }

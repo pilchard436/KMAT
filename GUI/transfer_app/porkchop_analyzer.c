@@ -755,6 +755,10 @@ G_MODULE_EXPORT void on_switch_steps_groups(GtkWidget* widget, gpointer data) {
 		gtk_stack_set_visible_child_name(GTK_STACK(st_pa_step_group_selector), "page0");
 }
 
+void pa_show_page(void) {
+	show_page_with_widget(GTK_WIDGET(da_pa_porkchop));
+}
+
 void end_porkchop_analyzer() {
 	free_all_porkchop_analyzer_itins();
 	destroy_camera(pa_itin_preview_camera);

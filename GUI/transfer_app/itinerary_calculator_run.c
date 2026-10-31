@@ -5,17 +5,32 @@
 #include "tools/itinerary_dv_limit.h"
 #include "gui/css_loader.h"
 #include "orbit_calculator/flyby_policy.h"
+#include "itinerary_results.h"
 #include <math.h>
 
 struct Itin_Calc_Data ic_calc_data;
 struct Itin_Calc_Results ic_results;
 
-void save_itineraries_ic() {
-	if((ic_results.departures == NULL || ic_results.num_deps == 0) &&
-		(ic_results.capture_departures == NULL || ic_results.capture_num_deps == 0)) return;
-	char filepath[255];
-	if(!get_path_from_file_chooser(filepath,  ".itins", GTK_FILE_CHOOSER_ACTION_SAVE, "")) return;
-	store_itineraries_in_bfile_both_modes(ic_results, ic_calc_data, ic_system, filepath);
+static PendingItineraries ic_pending;
+static GtkWidget *bt_ic_show_porkchop, *bt_ic_save_itins;
+
+void ic_init_result_buttons(GtkBuilder *builder) {
+	bt_ic_show_porkchop = GTK_WIDGET(gtk_builder_get_object(builder, "bt_ic_show_porkchop"));
+	bt_ic_save_itins = GTK_WIDGET(gtk_builder_get_object(builder, "bt_ic_save_itins"));
+}
+
+// Also used at shutdown, when the buttons no longer exist.
+void ic_free_results(void) {
+	pending_itineraries_free(&ic_pending);
+}
+
+G_MODULE_EXPORT void on_ic_show_porkchop(GtkWidget *widget, gpointer data) {
+	pending_itineraries_show_in_porkchop_analyzer(&ic_pending);
+	pending_itineraries_update_buttons(&ic_pending, bt_ic_show_porkchop, bt_ic_save_itins);
+}
+
+G_MODULE_EXPORT void on_ic_save_itineraries(GtkWidget *widget, gpointer data) {
+	pending_itineraries_save(&ic_pending);
 }
 
 static gboolean end_ic_calc_thread(gpointer user_data) {
@@ -24,16 +39,12 @@ static gboolean end_ic_calc_thread(gpointer user_data) {
 	end_sc_ic_progress_window();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 1);
 
+	// The results stay here until they are shown in the Porkchop Analyzer or saved.
+	pending_itineraries_keep(&ic_pending, ic_results, ic_calc_data, ic_system);
+	pending_itineraries_update_buttons(&ic_pending, bt_ic_show_porkchop, bt_ic_save_itins);
 	if(ic_results.capture_calculation_failed)
-		show_msg_window("Capture results could not be generated. The Fly-By results are available, but were not saved as a dual-mode file.");
-	else
-		save_itineraries_ic();
-	for(int i = 0; i < ic_results.num_deps; i++) free_itinerary(ic_results.departures[i]);
-	free(ic_results.departures);
-	for(int i = 0; i < ic_results.capture_num_deps; i++) free_itinerary(ic_results.capture_departures[i]);
-	free(ic_results.capture_departures);
-	free(ic_calc_data.seq_info.to_target.flyby_bodies);
-	if(ic_results.num_itins == 0 && ic_results.capture_num_itins == 0) {
+		show_msg_window("Capture results could not be generated, so the results were discarded.");
+	else if(ic_results.num_itins == 0 && ic_results.capture_num_itins == 0) {
 		char reason[200], message[256];
 		describe_search_rejections(&ic_results.rejections, reason, sizeof(reason));
 		g_snprintf(message, sizeof(message), "No itineraries found!%s%s", reason[0] ? "\n" : "", reason);
@@ -159,6 +170,8 @@ G_MODULE_EXPORT void on_calc_ic() {
 		show_msg_window(starting_error);
 		return;
 	}
+	ic_free_results();
+	pending_itineraries_update_buttons(&ic_pending, bt_ic_show_porkchop, bt_ic_save_itins);
 	prepare_ic_calc_data_from_widgets();
 	gtk_widget_set_sensitive(GTK_WIDGET(tf_ic_window), 0);
 	prepare_thread_pool_counters();

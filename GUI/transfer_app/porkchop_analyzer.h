@@ -3,10 +3,15 @@
 
 #include <gtk/gtk.h>
 #include "orbitlib.h"
+#include "tools/file_io.h"
 
 void init_porkchop_analyzer(GtkBuilder *builder);
 void pa_change_date_type(enum DateType old_date_type, enum DateType new_date_type);
 void end_porkchop_analyzer();
+// Shows the results, taking them over, as if they had been loaded from a file.
+void pa_show_itineraries(struct ItinsLoadFileResults load_results);
+// Switches the main window to the Porkchop Analyzer.
+void pa_show_page(void);
 
 
 // Handler -----------------------
@@ -15,7 +20,9 @@ G_MODULE_EXPORT void on_pa_switch_y_axis_type(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_porkchop_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
 G_MODULE_EXPORT void on_preview_draw(GtkWidget *widget, cairo_t *cr, gpointer data);
 G_MODULE_EXPORT void on_load_itineraries(GtkWidget* widget, gpointer data);
+G_MODULE_EXPORT void on_pa_save_itineraries(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_save_selected_itinerary(GtkWidget* widget, gpointer data);
+G_MODULE_EXPORT void on_pa_open_in_transfer_planner(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_pa_select_best_visible_node(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_last_transfer_type_changed_pa(GtkWidget* widget, gpointer data);
 G_MODULE_EXPORT void on_pa_moon_assist_toggled(GtkWidget* widget, gpointer data);

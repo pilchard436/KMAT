@@ -74,4 +74,8 @@ gboolean validate_ic_date_range_widgets(void);
 void on_ic_date_range_changed(GtkEditable *editable, gpointer user_data);
 void on_ic_reference_input_changed(GtkWidget *widget, gpointer user_data);
 
+// itinerary_calculator_run.c
+void ic_init_result_buttons(GtkBuilder *builder);
+void ic_free_results(void);
+
 #endif
