@@ -375,6 +375,7 @@ void update_pa_itinerary_preview() {
 	for(int i = 0; i < pa_system->num_bodies; i++) {
 		if(!body_show_status_pa[i]) continue;
 		draw_body(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa);
+		draw_body_label(pa_itin_preview_camera, pa_system, pa_system->bodies[i], current_date_pa);
 		struct Orbit orbit = pa_system->bodies[i]->orbit;
 		if(pa_system->prop_method == EPHEMS) {
 			struct OSV body_osv = osv_from_ephem(pa_system->bodies[i]->ephem, pa_system->bodies[i]->num_ephems, current_date_pa, pa_system->cb);
