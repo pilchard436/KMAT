@@ -16,8 +16,6 @@ typedef struct {
 	struct ItinStep **departures;
 	int num_departures;
 	const Itin_Calc_Data *calc_data;
-	// Lowers the candidate count the progress window shows as routes are removed.
-	int count_removed_routes;
 	atomic_int next_departure;
 } Itinerary_Filter_Work;
 
@@ -123,14 +121,11 @@ static void detach_itinerary_child(struct ItinStep *parent, int child_index) {
 		parent->next[i] = parent->next[i + 1];
 }
 
-static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Data *calc_data, int count_removed_routes) {
+static int prune_invalid_route_leaves(struct ItinStep *step, const Itin_Calc_Data *calc_data) {
 	for(int child_index = 0; child_index < step->num_next_nodes;) {
 		struct ItinStep *child = step->next[child_index];
-		int valid;
-		if(child->num_next_nodes == 0) {
-			valid = route_passes_filters(child, calc_data);
-			if(!valid && count_removed_routes) incr_thread_counter_by_amount(2, -1);
-		} else valid = prune_invalid_route_leaves(child, calc_data, count_removed_routes);
+		int valid = child->num_next_nodes == 0 ?
+			route_passes_filters(child, calc_data) : prune_invalid_route_leaves(child, calc_data);
 		if(valid) child_index++;
 		else detach_itinerary_child(step, child_index);
 	}
@@ -144,7 +139,7 @@ static void *filter_itinerary_departures(void *args) {
 	int departure_index = atomic_fetch_add(&work->next_departure, 1);
 	while(departure_index < work->num_departures) {
 		struct ItinStep *departure = work->departures[departure_index];
-		if(!prune_invalid_route_leaves(departure, work->calc_data, work->count_removed_routes)) {
+		if(!prune_invalid_route_leaves(departure, work->calc_data)) {
 			free_itinerary(departure);
 			work->departures[departure_index] = NULL;
 		}
@@ -155,12 +150,11 @@ static void *filter_itinerary_departures(void *args) {
 }
 
 static int filter_itinerary_departure_array(struct ItinStep **departures, int num_departures,
-		const Itin_Calc_Data *calc_data, int count_removed_routes) {
+		const Itin_Calc_Data *calc_data) {
 	Itinerary_Filter_Work work = {
 		.departures = departures,
 		.num_departures = num_departures,
-		.calc_data = calc_data,
-		.count_removed_routes = count_removed_routes
+		.calc_data = calc_data
 	};
 	atomic_init(&work.next_departure, 0);
 	if(num_departures > 1) {
@@ -546,9 +540,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 		TRANSFER_PROGRESS_FILTERING, TF_FLYBY, 0, itineraries_before_prune + num_deps);
 	valid_departures = 0;
 	atomic_store(&routes_blocked_by_moons, 0);
-	// The shown candidate count starts from the routes left after optimization and falls as the filter removes them.
-	incr_thread_counter_by_amount(2, itineraries_before_prune - get_thread_counter(2));
-	num_deps = filter_itinerary_departure_array(departures, num_deps, &calc_data, 1);
+	num_deps = filter_itinerary_departure_array(departures, num_deps, &calc_data);
 	int itineraries_after_prune = 0;
 	for(int i = 0; i < num_deps; i++)
 		itineraries_after_prune += get_number_of_itineraries(departures[i]);
@@ -588,7 +580,7 @@ static struct Itin_Calc_Results search_for_itineraries_internal(Itin_Calc_Data c
 			TRANSFER_PROGRESS_FILTERING, TF_CAPTURE, 0,
 			capture_itineraries_before_prune + shared_num_deps);
 		shared_num_deps = filter_itinerary_departure_array(
-			capture_departures, shared_num_deps, &capture_calc_data, 0);
+			capture_departures, shared_num_deps, &capture_calc_data);
 		if(shared_num_deps == 0) {
 			free(capture_departures);
 			capture_departures = NULL;

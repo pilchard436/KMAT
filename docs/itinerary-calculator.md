@@ -177,10 +177,9 @@ reports search progress while the worker performs the calculation. The progress
 bar tracks the current phase's completed work (departure dates, scored routes,
 refined routes, or filtered routes). The percentage restarts when the phase
 changes; the status text names the active phase and its completed/total count.
-It also shows the number of candidate routes. The search phase counts every
-route it finds; once optimization is done, the count falls as the final checks
-remove routes that exceed a limit, and it ends at the number of Fly-By routes
-found.
+It also shows the number of candidate routes the search has found. These are
+counted before optimization and the final limit checks, so the result is usually
+much smaller; the console log reports how many passed.
 Concurrent Fly-By and Capture optimization is identified by both mode names
 rather than a completed/total count. Final result preparation is shown as an
 indeterminate animation because its remaining duration cannot be measured
