@@ -33,6 +33,8 @@ GtkWidget *lb_ic_date_warning;
 GtkWidget *bt_ic_calc;
 GObject *vp_ic_fbbodies;
 GtkWidget *grid_ic_fbbodies;
+GtkWidget *ic_earliest_dep_minus_month_button;
+GtkWidget *ic_earliest_dep_plus_month_button;
 GtkWidget *ic_latest_dep_minus_month_button;
 GtkWidget *ic_latest_dep_plus_month_button;
 GtkWidget *ic_latest_arr_minus_month_button;
@@ -133,6 +135,7 @@ void init_itinerary_calculator(GtkBuilder *builder) {
 	g_signal_connect(tf_ic_mindepdate, "changed", G_CALLBACK(on_ic_earliest_dep_changed), NULL);
 	g_signal_connect(tf_ic_maxarrdate, "changed", G_CALLBACK(on_ic_latest_arrival_changed), NULL);
 	g_signal_connect(tf_ic_maxdur, "changed", G_CALLBACK(on_ic_max_duration_changed), NULL);
+	connect_date_adjust_buttons(builder, "ic_mindep", GTK_ENTRY(tf_ic_mindepdate));
 	connect_date_adjust_buttons(builder, "ic_maxdep", GTK_ENTRY(tf_ic_maxdepdate));
 	connect_date_adjust_buttons(builder, "ic_maxarr", GTK_ENTRY(tf_ic_maxarrdate));
 	update_month_adjust_button_labels(get_settings_datetime_type());
