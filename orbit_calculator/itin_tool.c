@@ -191,15 +191,11 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 	double max_duration = jd_max_arr-curr_step->date;
 	double min_duration = minimum_leg_days(system);
 	if(max_duration > min_duration && get_thread_counter(3) == 0) {
-		if(bodies[step] != bodies[step - 1]) find_viable_flybys(curr_step, system, bodies[step], min_duration * 86400, max_duration * 86400);
-		else {
-			printf("DSB not yet reimplemented!\n");
-			//		find_viable_dsb_flybys(curr_step, &bodies[step+1]->ephem, bodies[step+1],
-			//							   min_duration[step-1]*86400, max_duration[step-1]*86400, min_duration[step]*86400, max_duration[step]*86400);
-		}
+		// The same body twice in a row is a resonant return, which the flyby search handles too.
+		find_viable_flybys(curr_step, system, bodies[step], min_duration * 86400, max_duration * 86400);
 
 		for(int i = 0; i < curr_step->num_next_nodes && !itinerary_search_cancelled(NULL); i++) {
-			struct ItinStep *next = bodies[step] != bodies[step - 1] ? curr_step->next[i] : curr_step->next[i]->next[0]->next[0];
+			struct ItinStep *next = curr_step->next[i];
 			if(step == num_steps - 1) {
 				struct PorkchopPoint porkchop_point = create_porkchop_point(next, dv_filter->dep_periapsis, dv_filter->arr_periapsis);
 				double dv_sat = porkchop_point.dv_dsm;
@@ -232,8 +228,7 @@ int calc_next_spec_itin_step(struct ItinStep *curr_step, CelestSystem *system, B
 
 	if(step < num_steps-1) {
 		for(int i = 0; i < init_num_nodes && !itinerary_search_cancelled(NULL); i++) {
-			if(bodies[step] != bodies[step-1]) result = calc_next_spec_itin_step(curr_step->next[i - step_del], system, bodies, jd_max_arr, dv_filter, num_steps, step + 1);
-			else result = calc_next_spec_itin_step(curr_step->next[i - step_del]->next[0]->next[0], system, bodies, jd_max_arr, dv_filter, num_steps, step + 2);
+			result = calc_next_spec_itin_step(curr_step->next[i - step_del], system, bodies, jd_max_arr, dv_filter, num_steps, step + 1);
 			num_valid += result;
 			if(!result) step_del++;
 		}

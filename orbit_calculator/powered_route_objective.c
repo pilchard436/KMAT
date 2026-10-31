@@ -555,7 +555,6 @@ int powered_route_has_unmodeled_soi_crossing(const Itin_Calc_Data *source, struc
 		int *crosses) {
 	if(crosses != NULL) *crosses = 0;
 	if(source == NULL || arrival == NULL || arrival->body == NULL || arrival->num_next_nodes != 0 ||
-		source->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET ||
 		source->seq_info.to_target.system == NULL) return 0;
 	struct ItinStep *first = get_first(arrival);
 	if(first == NULL || first->body == NULL) return 0;

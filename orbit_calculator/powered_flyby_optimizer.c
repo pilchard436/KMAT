@@ -430,8 +430,7 @@ int optimize_powered_flyby_routes_with_worker_limit(struct ItinStep **departures
 		.best_initial_total_dv = DBL_MAX,
 		.best_refined_total_dv = DBL_MAX
 	};
-	if(departures == NULL || num_departures <= 0 || calc_data == NULL || max_routes <= 0 ||
-		calc_data->seq_info.to_target.type != ITIN_SEQ_INFO_TO_TARGET) return 0;
+	if(departures == NULL || num_departures <= 0 || calc_data == NULL || max_routes <= 0) return 0;
 	if(itinerary_search_cancelled(NULL)) return 0;
 	int num_itineraries = 0;
 	set_calculation_progress_phase(TRANSFER_PROGRESS_PREPARING,
